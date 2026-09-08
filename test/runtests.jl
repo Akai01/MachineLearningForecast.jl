@@ -18,4 +18,5 @@ using .TestModels
     include("test_forecaster.jl")
     include("test_backtest.jl")
     include("test_tune.jl")
+    include("test_validation.jl")
 end
