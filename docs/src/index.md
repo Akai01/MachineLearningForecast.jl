@@ -39,6 +39,8 @@ MachineLearningForecast
 ```@docs
 Forecaster
 FittedForecaster
+SeriesState
+nseries
 fit
 forecast
 Recursive

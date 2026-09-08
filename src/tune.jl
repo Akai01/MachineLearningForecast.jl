@@ -178,7 +178,8 @@ function reconstruct(fc::Forecaster; kwargs...)
                       get(kwargs, :strategy, fc.strategy),
                       get(kwargs, :freq, fc.freq),
                       get(kwargs, :target, fc.target),
-                      get(kwargs, :time, fc.time))
+                      get(kwargs, :time, fc.time),
+                      get(kwargs, :id, fc.id))
 end
 
 # ---------------------------------------------------------------------------
@@ -363,7 +364,9 @@ end
 
 # Warn before large batch searches: candidates × folds × machines-per-fit.
 function _warn_fit_count(fc, cands, tbl, horizon, initial, step)
-    nfolds = length(initial:step:(nrows(tbl) - horizon))
+    # Panel folds are cut on distinct timestamps, not on rows.
+    span = ispanel(fc) ? length(unique(tbl[fc.time])) : nrows(tbl)
+    nfolds = length(initial:step:(span - horizon))
     total = 0
     for c in cands
         total += nfolds * nmachines(get(c, :strategy, fc.strategy))

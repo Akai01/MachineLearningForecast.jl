@@ -9,6 +9,8 @@ interface: any MLJ `Deterministic` regressor is a valid base model.
   [`RollingMax`](@ref), [`Diff`](@ref), [`Calendar`](@ref), [`Fourier`](@ref),
   [`Exogenous`](@ref), [`CustomFeature`](@ref).
 - Pluggable strategies: [`Recursive`](@ref), [`Direct`](@ref).
+- Panel (multi-series) forecasting: set `id` on [`Forecaster`](@ref) to fit
+  one global model across many series ([`nseries`](@ref), [`SeriesState`](@ref)).
 - [`fit`](@ref) / [`forecast`](@ref) as a functional pair; [`backtest`](@ref)
   for expanding-window cross-validation; [`tune`](@ref) for pipeline tuning
   with an extensible ask/tell [`TuningStrategy`](@ref) interface.
@@ -29,7 +31,8 @@ export Forecaster, FittedForecaster, fit, forecast, backtest, BacktestResult,
        Diff, Calendar, Fourier, Exogenous, CustomFeature,
        Recursive, Direct,
        mae, rmse, mape, smape, mase,
-       tune, TuneResult, TuningStrategy, GridSearch, RandomSearch, ask, tell!
+       tune, TuneResult, TuningStrategy, GridSearch, RandomSearch, ask, tell!,
+       SeriesState, nseries
 
 include("utils.jl")
 include("features.jl")
@@ -39,6 +42,7 @@ include("metrics.jl")
 include("forecaster.jl")
 include("recursive.jl")
 include("direct.jl")
+include("panel.jl")
 include("backtest.jl")
 include("tune.jl")
 

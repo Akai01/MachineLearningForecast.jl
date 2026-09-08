@@ -28,6 +28,14 @@ Expanding-window time-series cross-validation: train on rows `1:initial`,
 forecast `horizon` steps, evaluate against the held-out actuals; advance the
 origin by `step` rows and repeat while a full horizon of actuals remains.
 
+For a **panel** forecaster (one with `id` set), folds are cut on the *global
+timestamp grid* rather than on row counts, since rows are then spread across
+series: `initial`, `step` and `horizon` count distinct timestamps. Each fold
+trains on every row at or before the origin timestamp, forecasts each series
+forward from its own last observed timestamp, and scores the result by joining
+forecasts to actuals on `(id, time)` — so ragged series contribute wherever
+they have actuals. The `folds` table then carries the id column too.
+
 `metrics` is a tuple of callables `(y, ŷ) -> Float64` (e.g. [`mae`](@ref),
 [`rmse`](@ref), [`smape`](@ref)). Scaled metrics that also need the fold's
 training target — [`mase`](@ref), or your own, declared via
@@ -54,6 +62,15 @@ function backtest(fc::Forecaster, data; horizon::Integer, initial::Integer,
             "$(fc.strategy.max_horizon). Use Direct($horizon) or reduce horizon."))
     end
     tbl = normalize_table(data)
+    return _backtest_spec(fc, tbl, horizon, initial, step, metrics)
+end
+
+# Panel: folds are cut on the global timestamp grid (see panel.jl).
+_backtest_spec(fc::Forecaster{M,S,Symbol}, tbl, horizon, initial, step, metrics) where {M,S} =
+    _backtest_panel(fc, tbl, horizon, initial, step, metrics)
+
+function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, initial,
+                        step, metrics) where {M,S}
     t_all = require_column(tbl, fc.time, "time")
     validate_time_column(t_all, fc.time, fc.freq)
     y_all = target_vector(tbl, fc.target)
@@ -115,8 +132,10 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", r::BacktestResult)
     # Derive both counts from `folds`, which is populated even when `metrics=()`.
-    h = isempty(r.folds.origin) ? 0 : count(==(first(r.folds.origin)), r.folds.origin)
-    nfolds = h == 0 ? 0 : length(r.folds.origin) ÷ h
+    # `step` runs 1..horizon per series, so this is right for panels too, where a
+    # fold contributes nseries * horizon rows rather than horizon.
+    h = isempty(r.folds.step) ? 0 : maximum(r.folds.step)
+    nfolds = length(unique(r.folds.origin))
     println(io, "BacktestResult: $nfolds fold$(nfolds == 1 ? "" : "s"), horizon $h")
     for i in eachindex(r.metrics.fold)
         r.metrics.fold[i] == 0 || continue
@@ -126,7 +145,5 @@ function Base.show(io::IO, ::MIME"text/plain", r::BacktestResult)
     print(io, "  (see .folds and .metrics for details)")
 end
 
-function Base.show(io::IO, r::BacktestResult)
-    h = isempty(r.folds.origin) ? 0 : count(==(first(r.folds.origin)), r.folds.origin)
-    print(io, "BacktestResult(", h == 0 ? 0 : length(r.folds.origin) ÷ h, " folds)")
-end
+Base.show(io::IO, r::BacktestResult) =
+    print(io, "BacktestResult(", length(unique(r.folds.origin)), " folds)")

@@ -19,6 +19,14 @@ Immutable forecasting specification.
 - `target`: name of the target column (default `:y`).
 - `time`: name of the time column (default `:ds`), of a type supporting
   `+` with `freq` (`Date`, `DateTime`).
+- `id`: name of the series-id column for **panel (multi-series) data**, or
+  `nothing` (the default) for a single series. When set, `data` is a long-format
+  panel: one row per (series, timestamp). Features are materialised *within*
+  each series — a lag never reaches across a series boundary — and the rows of
+  every series are then pooled to fit **one global model**, so short or noisy
+  series borrow strength from the rest. Series may be ragged (different start
+  dates, end dates and lengths); each forecasts forward from its own last
+  timestamp. `forecast` then returns an id column alongside the timestamps.
 
 Fit with [`fit`](@ref), which returns a [`FittedForecaster`](@ref); the spec
 itself is never mutated.
@@ -29,17 +37,25 @@ using MachineLearningForecast, Dates
 fc = Forecaster(model;
                 features=FeatureSet(Lag(1), Lag(7), Calendar(:dayofweek)),
                 strategy=Recursive(), freq=Day(1), target=:y, time=:ds)
+
+# a panel of many series, fitted as one global model
+panel = Forecaster(model;
+                   features=FeatureSet(Lag(1), Lag(7)),
+                   strategy=Recursive(), freq=Day(1),
+                   target=:y, time=:ds, id=:unique_id)
 ```
 """
-struct Forecaster{M,S<:ForecastStrategy}
+struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
     model::M
     features::FeatureSet
     strategy::S
     freq::Period
     target::Symbol
     time::Symbol
+    id::I
     function Forecaster(model::M, features::FeatureSet, strategy::S, freq::Period,
-                        target::Symbol, time::Symbol) where {M,S<:ForecastStrategy}
+                        target::Symbol, time::Symbol,
+                        id::I=nothing) where {M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
         model isa MLJModelInterface.Model || throw(ArgumentError(
             "model must be an MLJ model instance (subtype of MLJModelInterface.Model), " *
             "got $(typeof(model)). Pass e.g. EvoTreeRegressor(), " *
@@ -76,13 +92,59 @@ struct Forecaster{M,S<:ForecastStrategy}
                 "backtest() results ($(join(":" .* string.(RESERVED_OUTPUT_NAMES), ", "))). " *
                 "Rename the time column in your data."))
         end
-        new{M,S}(model, features, strategy, freq, target, time)
+        if id !== nothing
+            id == target && throw(ArgumentError(
+                "id and target must be different columns, both were :$id."))
+            id == time && throw(ArgumentError(
+                "id and time must be different columns, both were :$id."))
+            id in outs && throw(ArgumentError(
+                "the feature set produces a column named :$id, which is the series id " *
+                "column. Rename the feature's output column, or the id column."))
+            id in RESERVED_OUTPUT_NAMES && throw(ArgumentError(
+                "id=:$id collides with a column name reserved by forecast()/backtest() " *
+                "results ($(join(":" .* string.(RESERVED_OUTPUT_NAMES), ", "))). " *
+                "Rename the id column in your data."))
+        end
+        new{M,S,I}(model, features, strategy, freq, target, time, id)
     end
 end
 
 function Forecaster(model; features::FeatureSet, strategy::ForecastStrategy=Recursive(),
-                    freq::Period, target::Symbol=:y, time::Symbol=:ds)
-    return Forecaster(model, features, strategy, freq, target, time)
+                    freq::Period, target::Symbol=:y, time::Symbol=:ds,
+                    id::Union{Nothing,Symbol}=nothing)
+    return Forecaster(model, features, strategy, freq, target, time, id)
+end
+
+"Is this a panel (multi-series) specification?"
+ispanel(::Forecaster{M,S,Nothing}) where {M,S} = false
+ispanel(::Forecaster{M,S,Symbol}) where {M,S} = true
+
+"""
+    SeriesState
+
+Everything `forecast` needs about one series: its id (`nothing` for a
+single-series forecaster), the training target history that lag and rolling
+features are computed from, the first and last training timestamps, and the
+number of training rows (which fixes the Fourier step index).
+
+Read them off a fitted panel forecaster via `f.series`; for a single-series
+forecaster the same values are reachable directly as `f.y_history`, `f.t_last`,
+`f.t_start` and `f.n_train`.
+
+# Example
+```julia
+f = fit(panel_spec, panel)
+for st in f.series
+    println(st.id, ": ", st.n_train, " rows ending ", st.t_last)
+end
+```
+"""
+struct SeriesState
+    id::Any
+    y_history::Vector{Float64}
+    t_last::Any
+    t_start::Any
+    n_train::Int
 end
 
 """
@@ -97,12 +159,45 @@ the stable feature column order. Use with [`forecast`](@ref).
 struct FittedForecaster{F<:Forecaster}
     spec::F
     machines::Vector{MLJBase.Machine}
-    y_history::Vector{Float64}
-    t_last::Any
-    t_start::Any
-    n_train::Int
+    series::Vector{SeriesState}
     feature_names::Vector{Symbol}
 end
+
+# Single-series state stays reachable as `fitted.y_history` etc., as documented,
+# but those names are meaningless for a panel — say so rather than silently
+# returning the first series.
+const _SERIES_PROPS = (:y_history, :t_last, :t_start, :n_train)
+
+function Base.getproperty(f::FittedForecaster, name::Symbol)
+    name in _SERIES_PROPS || return getfield(f, name)
+    st = getfield(f, :series)
+    length(st) == 1 || throw(ArgumentError(
+        "`fitted.$name` is single-series state, but this forecaster was fit on " *
+        "$(length(st)) series. Use `fitted.series` for the per-series states, " *
+        "each of which has .id, .y_history, .t_last, .t_start and .n_train."))
+    return getfield(only(st), name)
+end
+
+Base.propertynames(f::FittedForecaster, private::Bool=false) =
+    (fieldnames(FittedForecaster)..., _SERIES_PROPS...)
+
+"""
+    nseries(f::FittedForecaster) -> Int
+
+The number of series the forecaster was fitted on: `1` for a single series, or
+the number of usable series in the panel. Series too short for the feature set
+are skipped at fit time, so this can be smaller than the number of ids in the
+input.
+
+# Example
+```julia
+f = fit(Forecaster(model; features=FeatureSet(Lag(1)), freq=Day(1), id=:unique_id),
+        panel)
+nseries(f)                       # e.g. 3
+[s.id for s in f.series]         # the ids, in first-appearance order
+```
+"""
+nseries(f::FittedForecaster) = length(getfield(f, :series))
 
 """
     fit(fc::Forecaster, data) -> FittedForecaster
@@ -122,10 +217,18 @@ fcast  = forecast(fitted, 28)
 """
 function fit(fc::Forecaster, data)
     tbl = normalize_table(data)
+    return _fit_spec(fc, tbl)
+end
+
+# Single series: validate the one time column and fit directly.
+function _fit_spec(fc::Forecaster{M,S,Nothing}, tbl::NamedTuple) where {M,S}
     t = require_column(tbl, fc.time, "time")
     validate_time_column(t, fc.time, fc.freq)
     return _fit(fc, fc.strategy, tbl)
 end
+
+# Panel: group by id, then fit ONE global model on the pooled rows (see panel.jl).
+_fit_spec(fc::Forecaster{M,S,Symbol}, tbl::NamedTuple) where {M,S} = _fit_panel(fc, tbl)
 
 # Shared by both strategies: materialize the design matrix and package the state.
 _training_frame(fc::Forecaster, tbl::NamedTuple) =
@@ -133,8 +236,8 @@ _training_frame(fc::Forecaster, tbl::NamedTuple) =
 
 function _fitted(fc::Forecaster, tbl::NamedTuple, machines::Vector{MLJBase.Machine})
     t = tbl[fc.time]
-    return FittedForecaster(fc, machines, target_vector(tbl, fc.target),
-                            t[end], t[1], length(t), outputnames(fc.features))
+    st = SeriesState(nothing, target_vector(tbl, fc.target), t[end], t[1], length(t))
+    return FittedForecaster(fc, machines, [st], outputnames(fc.features))
 end
 
 """
@@ -160,8 +263,16 @@ fcast.y_hat                                          # the point forecasts
 """
 function forecast(f::FittedForecaster, h::Integer; new_data=nothing)
     h ≥ 1 || throw(ArgumentError("forecast horizon h must be ≥ 1, got $h."))
-    spec = f.spec
-    grid = future_grid(f.t_start, spec.freq, f.n_train, h)
+    return _forecast_spec(f, f.spec, h, new_data)
+end
+
+_forecast_spec(f::FittedForecaster, spec::Forecaster{M,S,Symbol}, h, new_data) where {M,S} =
+    _forecast_panel(f, h, new_data)
+
+function _forecast_spec(f::FittedForecaster, spec::Forecaster{M,S,Nothing},
+                        h::Integer, new_data) where {M,S}
+    st = only(getfield(f, :series))
+    grid = future_grid(st.t_start, spec.freq, st.n_train, h)
     exogcols = exogenouscolumns(spec.features)
     exog_rows = nothing
     if !isempty(exogcols)
