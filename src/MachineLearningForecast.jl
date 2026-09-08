@@ -25,5 +25,6 @@ include("strategies.jl")
 include("metrics.jl")
 include("forecaster.jl")
 include("recursive.jl")
+include("direct.jl")
 
 end # module

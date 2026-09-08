@@ -8,5 +8,6 @@ using .TestModels
 
 @testset "MachineLearningForecast" begin
     include("test_features.jl")
+    include("test_strategies.jl")
     include("test_forecaster.jl")
 end
