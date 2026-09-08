@@ -13,6 +13,11 @@ import Random
 import Statistics
 import Tables
 
+export FeatureSet, Lag, RollingMean, RollingStd, RollingMin, RollingMax, Diff,
+       Calendar, Fourier, Exogenous, CustomFeature
+
 include("utils.jl")
+include("features.jl")
+include("featureset.jl")
 
 end # module
