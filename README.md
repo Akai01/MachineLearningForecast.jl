@@ -12,6 +12,10 @@ learner.
 - **Pluggable forecasting strategies**: `Recursive` (one model, iterated) and
   `Direct` (one model per horizon step), chosen by dispatch — extensible by
   design.
+- **Panel (multi-series) forecasting**: set `id=` and MachineLearningForecast fits *one
+  global model* across every series, so short or noisy series borrow strength
+  from the rest. Series may be ragged, and features never reach across a series
+  boundary.
 - **Backtesting**: expanding-window time-series cross-validation with pluggable
   metrics.
 - **Pipeline tuning**: grid/random search over models, feature sets, and
@@ -176,6 +180,52 @@ stop) and `tell!(s, candidate, score)` (receive the backtest score, or
 `missing` on failure), and pass it as `tuner=`. That is the exact interface a
 sequential Bayesian optimizer needs — see the `TuningStrategy` docstring.
 
+## Panel (multi-series) forecasting
+
+Pass `id=` and give MachineLearningForecast a long-format table — one row per (series,
+timestamp). Every feature is materialised **within** each series, then the rows
+of all series are pooled to fit a single global model:
+
+```julia
+panel = (unique_id = repeat(["store_a", "store_b", "store_c"], inner = 365),
+         ds        = repeat(collect(Date(2023,1,1):Day(1):Date(2023,12,31)), 3),
+         y         = vcat(sales_a, sales_b, sales_c))
+
+fc = Forecaster(EvoTreeRegressor(nrounds = 200);
+                features = FeatureSet(Lag(1), Lag(7), RollingMean(7),
+                                      Calendar(:dayofweek)),
+                strategy = Recursive(),
+                freq     = Day(1),
+                target   = :y,
+                time     = :ds,
+                id       = :unique_id)      # <- the only change
+
+fitted = fit(fc, panel)
+nseries(fitted)                              # 3
+forecast(fitted, 28)                         # (unique_id, ds, y_hat), 3 x 28 rows
+```
+
+Notes:
+
+- **One global model.** `fitted.machines` holds a single machine (or
+  `max_horizon` of them under `Direct`), trained on the pooled rows — not one
+  model per series.
+- **No cross-series leakage.** `Lag(1)` at the first row of a series is
+  undefined, never the previous series' last value. Each series drops its own
+  `minhistory` rows.
+- **Ragged panels are fine.** Series need not share a start date, an end date
+  or a length, and each forecasts forward from *its own* last timestamp. Series
+  shorter than the feature set needs are skipped with a warning rather than
+  aborting the fit.
+- **Exogenous covariates** join on `(id, time)`, so `new_data` must carry the id
+  column too.
+- **Backtesting** cuts folds on the *global timestamp grid* — `initial`, `step`
+  and `horizon` count distinct timestamps, not rows — and scores by joining
+  forecasts to actuals on `(id, time)`. `tune` works on panels unchanged.
+- Per-series state is available as `fitted.series`, a vector of
+  [`SeriesState`]; for a single series the familiar `fitted.y_history`,
+  `fitted.t_last` and `fitted.n_train` still work.
+
 ## Metrics
 
 `mae`, `rmse`, `mape`, `smape`, `mase` — all `(y, ŷ) -> Float64`, lower is
@@ -218,7 +268,7 @@ Reindex your data or resample before fitting.
        horizon=28, initial=730)
   ```
 
-  The other 27 exports are collision-free. Note that MachineLearningForecast's `mae`/`rmse`
+  The other 29 exports are collision-free. Note that MachineLearningForecast's `mae`/`rmse`
   are plain functions of two vectors, whereas MLJ's are measure objects — they
   are not interchangeable, which is exactly why the choice must be explicit.
 - **Multiple dispatch over configuration flags**: strategies, features, and
@@ -238,6 +288,6 @@ MIT — see [LICENSE](LICENSE).
 
 ## Roadmap (not in v1)
 
-Probabilistic forecasts (conformal residuals from `backtest`), panel/
-multi-series fitting, `DirRec` strategy, target transforms, continuous search
-spaces for tuning.
+Probabilistic forecasts (conformal residuals from `backtest`), `DirRec`
+strategy, target transforms, per-series encodings for panel models (a series-id
+feature), and continuous search spaces for tuning.
