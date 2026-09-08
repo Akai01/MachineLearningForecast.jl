@@ -3,6 +3,10 @@ using MachineLearningForecast
 using Dates
 using Statistics: mean, std
 
+include("testmodels.jl")
+using .TestModels
+
 @testset "MachineLearningForecast" begin
-    @test MachineLearningForecast isa Module
+    include("test_features.jl")
+    include("test_forecaster.jl")
 end
