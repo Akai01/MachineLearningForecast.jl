@@ -4,6 +4,7 @@ using MachineLearningForecast
 using Dates
 using Tables
 using Statistics: mean, std
+using Random: shuffle
 using StableRNGs: StableRNG
 using EvoTrees: EvoTreeRegressor
 using MLJDecisionTreeInterface: DecisionTreeRegressor, RandomForestRegressor
@@ -19,6 +20,7 @@ using .TestModels
     include("test_backtest.jl")
     include("test_tune.jl")
     include("test_validation.jl")
+    include("test_panel.jl")
     include("test_integration.jl")
 
     @testset "Aqua quality checks" begin
