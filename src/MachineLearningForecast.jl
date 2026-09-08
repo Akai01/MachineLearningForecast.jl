@@ -13,10 +13,10 @@ import Random
 import Statistics
 import Tables
 
-export Forecaster, FittedForecaster, fit, forecast, FeatureSet, Lag,
-       RollingMean, RollingStd, RollingMin, RollingMax, Diff, Calendar,
-       Fourier, Exogenous, CustomFeature, Recursive, Direct, mae, rmse, mape,
-       smape, mase
+export Forecaster, FittedForecaster, fit, forecast, backtest, BacktestResult,
+       FeatureSet, Lag, RollingMean, RollingStd, RollingMin, RollingMax, Diff,
+       Calendar, Fourier, Exogenous, CustomFeature, Recursive, Direct, mae,
+       rmse, mape, smape, mase
 
 include("utils.jl")
 include("features.jl")
@@ -26,5 +26,6 @@ include("metrics.jl")
 include("forecaster.jl")
 include("recursive.jl")
 include("direct.jl")
+include("backtest.jl")
 
 end # module
