@@ -14,10 +14,11 @@ import Statistics
 import Tables
 
 export FeatureSet, Lag, RollingMean, RollingStd, RollingMin, RollingMax, Diff,
-       Calendar, Fourier, Exogenous, CustomFeature
+       Calendar, Fourier, Exogenous, CustomFeature, Recursive, Direct
 
 include("utils.jl")
 include("features.jl")
 include("featureset.jl")
+include("strategies.jl")
 
 end # module

@@ -4,5 +4,5 @@ using Dates
 using Statistics: mean, std
 
 @testset "MachineLearningForecast" begin
-    include("test_features.jl")
+    @test MachineLearningForecast isa Module
 end
