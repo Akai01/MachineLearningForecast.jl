@@ -19,4 +19,10 @@ using .TestModels
     include("test_backtest.jl")
     include("test_tune.jl")
     include("test_validation.jl")
+    include("test_integration.jl")
+
+    @testset "Aqua quality checks" begin
+        Aqua.test_all(MachineLearningForecast; ambiguities=false)
+        Aqua.test_ambiguities(MachineLearningForecast)
+    end
 end
