@@ -288,6 +288,11 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
               metric=smape)
     max_evals === nothing || max_evals ≥ 1 || throw(ArgumentError(
         "max_evals must be ≥ 1 (or nothing for no budget), got $max_evals."))
+    # Validate here too, so a bad value is diagnosed before any candidate is built
+    # rather than surfacing as a bare `step cannot be zero` from the range below.
+    horizon ≥ 1 || throw(ArgumentError("tune horizon must be ≥ 1, got $horizon."))
+    initial ≥ 1 || throw(ArgumentError("tune initial must be ≥ 1, got $initial."))
+    step ≥ 1 || throw(ArgumentError("tune step must be ≥ 1, got $step."))
     tbl = normalize_table(data)
     seq = _sequence(tuner, grid)
     # Only warn about fits that will actually run: max_evals truncates the queue.

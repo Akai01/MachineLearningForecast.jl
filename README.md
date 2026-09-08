@@ -114,10 +114,12 @@ tuned = TunedModel(model = EvoTreeRegressor(),
 fc = Forecaster(tuned; features=..., strategy=Recursive(), freq=Day(1))
 ```
 
-> **⚠️ Leakage warning.** Never use MLJ's default `CV()` or
-> `Holdout(shuffle=true)` resampling here — shuffled folds put future rows in
-> the training folds, leaking future lag information. Use **`TimeSeriesCV`
-> only**.
+> **⚠️ Leakage warning.** Never use MLJ's `CV()` — shuffled *or not* — or
+> `Holdout(shuffle=true)` here. Plain K-fold is not safe merely because
+> `shuffle=false`: every fold but the last trains on rows that come *after* its
+> test rows, so the model sees the future of the block it is scored on, and
+> lag features carry that information directly. Shuffling makes it worse by
+> mixing future rows into training outright. Use **`TimeSeriesCV` only**.
 >
 > Also note the caveat: this tunes *one-step-ahead tabular* error, which is a
 > proxy — recursion error compounds over the horizon, and pipeline-level
@@ -216,7 +218,7 @@ Reindex your data or resample before fitting.
        horizon=28, initial=730)
   ```
 
-  The other 28 exports are collision-free. Note that MachineLearningForecast's `mae`/`rmse`
+  The other 27 exports are collision-free. Note that MachineLearningForecast's `mae`/`rmse`
   are plain functions of two vectors, whereas MLJ's are measure objects — they
   are not interchangeable, which is exactly why the choice must be explicit.
 - **Multiple dispatch over configuration flags**: strategies, features, and

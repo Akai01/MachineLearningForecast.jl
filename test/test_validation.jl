@@ -73,6 +73,77 @@
         @test_throws ArgumentError MachineLearningForecast.validate_time_column(gapped, :ds, Month(1))
     end
 
+    @testset "gap count reports discontinuities, not off-grid rows" begin
+        # Regression: comparing every row against the anchored grid made one
+        # missing day report as one gap per *subsequent row* (hundreds), which
+        # is also the message quality the README advertises.
+        full = collect(Date(2020, 1, 1):Day(1):Date(2020, 1, 1) + Day(999))
+        one = vcat(full[1:100], full[102:end])
+        err = try MachineLearningForecast.validate_time_column(one, :ds, Day(1)) catch e; e end
+        @test err isa ArgumentError
+        @test occursin("has 1 gap for", err.msg)          # singular, and exactly one
+        @test occursin(string(full[100]), err.msg)        # "first gap after <ts>"
+
+        three = vcat(full[1:100], full[102:200], full[202:300], full[302:end])
+        err3 = try MachineLearningForecast.validate_time_column(three, :ds, Day(1)) catch e; e end
+        @test occursin("has 3 gaps for", err3.msg)
+
+        # a contiguous run of missing days is still ONE discontinuity
+        run5 = vcat(full[1:100], full[106:end])
+        err5 = try MachineLearningForecast.validate_time_column(run5, :ds, Day(1)) catch e; e end
+        @test occursin("has 1 gap for", err5.msg)
+    end
+
+    @testset "missing, off-grid and non-advancing time columns" begin
+        days = collect(Date(2020, 1, 1):Day(1):Date(2020, 1, 20))
+        withmissing = Vector{Union{Missing,Date}}(days); withmissing[5] = missing
+        err = try MachineLearningForecast.validate_time_column(withmissing, :ds, Day(1)) catch e; e end
+        @test err isa ArgumentError                       # not a bare TypeError
+        @test occursin("missing values", err.msg) && occursin("row 5", err.msg)
+
+        # a timestamp that is not on the declared grid gets its own diagnosis
+        offgrid = collect(DateTime(2020, 1, 1):Hour(1):DateTime(2020, 1, 1) + Hour(9))
+        offgrid[6] += Minute(30)
+        err2 = try MachineLearningForecast.validate_time_column(offgrid, :ds, Hour(1)) catch e; e end
+        @test err2 isa ArgumentError
+        @test occursin("does not", err2.msg) && occursin("grid", err2.msg)
+
+        err3 = try MachineLearningForecast.validate_time_column(days, :ds, Day(0)) catch e; e end
+        @test err3 isa ArgumentError && occursin("does not advance", err3.msg)
+    end
+
+    @testset "tune validates horizon/initial/step like backtest" begin
+        df2 = (ds=collect(Date(2022, 1, 1):Day(1):Date(2022, 4, 10)), y=Float64.(1:100))
+        base = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                          strategy=Recursive(), freq=Day(1))
+        grid = (model=[TestModels.LinAR(1.0, 0.0)],)
+        for (kw, word) in ((:horizon, "horizon"), (:initial, "initial"), (:step, "step"))
+            args = Dict(:horizon => 10, :initial => 60, :step => 10)
+            args[kw] = 0
+            err = try tune(base, df2; grid=grid, args...) catch e; e end
+            @test err isa ArgumentError
+            @test occursin(word, err.msg)      # not a bare "step cannot be zero"
+        end
+    end
+
+    @testset "BacktestResult show is correct with no metrics" begin
+        df3 = (ds=collect(Date(2022, 1, 1):Day(1):Date(2022, 4, 10)), y=Float64.(1:100))
+        fcb = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                         strategy=Recursive(), freq=Day(1))
+        r = backtest(fcb, df3; horizon=10, initial=60, step=10, metrics=())
+        nfolds = length(unique(r.folds.origin))
+        @test nfolds > 1
+        @test occursin("$nfolds fold", sprint(show, MIME"text/plain"(), r))
+        @test occursin("$nfolds folds", sprint(show, r))
+    end
+
+    @testset "export surface is pinned" begin
+        # The README quotes these counts; keep them honest.
+        exports = setdiff(names(MachineLearningForecast), [:MachineLearningForecast])
+        @test length(exports) == 31
+        @test :Forecaster in exports && :tune in exports && :mase in exports
+    end
+
     @testset "Calendar sub-daily parts need a DateTime column" begin
         err = try fit(mk(features=FeatureSet(Lag(1), Calendar(:hour))), df) catch e; e end
         @test err isa ArgumentError

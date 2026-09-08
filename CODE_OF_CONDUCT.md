@@ -59,13 +59,18 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement by opening a
-**private report** on the project's GitHub repository:
+reported to the community leaders responsible for enforcement by **contacting a
+maintainer privately**. Any of the following works:
 
-- Use GitHub's private vulnerability reporting / security advisory form under
-  the repository's **Security** tab, which is visible only to the maintainers, or
-- if that is unavailable to you, open a public issue asking a maintainer to
-  contact you privately, without including the details of the incident.
+- Send a direct message to the maintainer on the Julia community Zulip or Slack
+  (`@Akai01`), or
+- use GitHub's private vulnerability reporting form under the repository's
+  **Security** tab, if it is enabled (see [SECURITY.md](SECURITY.md)), or
+- if neither is available to you, open an issue asking a maintainer to contact
+  you privately — **without** including the details of the incident.
+
+Do not include sensitive details in a public issue; a maintainer will follow up
+through a private channel.
 
 All complaints will be reviewed and investigated promptly and fairly.
 

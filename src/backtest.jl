@@ -114,8 +114,9 @@ function backtest(fc::Forecaster, data; horizon::Integer, initial::Integer,
 end
 
 function Base.show(io::IO, ::MIME"text/plain", r::BacktestResult)
-    nfolds = isempty(r.metrics.fold) ? 0 : maximum(r.metrics.fold)
-    h = nfolds == 0 ? 0 : count(==(first(r.folds.origin)), r.folds.origin)
+    # Derive both counts from `folds`, which is populated even when `metrics=()`.
+    h = isempty(r.folds.origin) ? 0 : count(==(first(r.folds.origin)), r.folds.origin)
+    nfolds = h == 0 ? 0 : length(r.folds.origin) ÷ h
     println(io, "BacktestResult: $nfolds fold$(nfolds == 1 ? "" : "s"), horizon $h")
     for i in eachindex(r.metrics.fold)
         r.metrics.fold[i] == 0 || continue
@@ -125,5 +126,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::BacktestResult)
     print(io, "  (see .folds and .metrics for details)")
 end
 
-Base.show(io::IO, r::BacktestResult) = print(io,
-    "BacktestResult(", isempty(r.metrics.fold) ? 0 : maximum(r.metrics.fold), " folds)")
+function Base.show(io::IO, r::BacktestResult)
+    h = isempty(r.folds.origin) ? 0 : count(==(first(r.folds.origin)), r.folds.origin)
+    print(io, "BacktestResult(", h == 0 ? 0 : length(r.folds.origin) ÷ h, " folds)")
+end

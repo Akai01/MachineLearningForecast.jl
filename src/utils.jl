@@ -54,11 +54,20 @@ free of duplicates, and gap-free with respect to the step `freq`. Throws an
 function validate_time_column(t::AbstractVector, time::Symbol, freq)
     n = length(t)
     n ≥ 1 || throw(ArgumentError("time column :$time is empty. Provide at least one row."))
+    if any(ismissing, t)
+        i = findfirst(ismissing, t)
+        throw(ArgumentError(
+            "time column :$time contains missing values (first at row $i). Every row " *
+            "must carry a timestamp; drop or fill those rows before fitting."))
+    end
     applicable(+, t[1], freq) || throw(ArgumentError(
         "time column :$time has element type $(eltype(t)), which does not support " *
         "`+ $freq`. The time column must be a Date/DateTime (or another type " *
         "supporting `+` with $(typeof(freq))) — if these are strings, parse them " *
         "first, e.g. `Date.(col, dateformat\"yyyy-mm-dd\")`."))
+    t[1] + freq > t[1] || throw(ArgumentError(
+        "freq=$freq does not advance the time column; the frequency must be a " *
+        "positive period, e.g. Day(1) or Month(1)."))
     issorted(t) || begin
         i = findfirst(i -> t[i] < t[i-1], 2:n) + 1
         throw(ArgumentError(
@@ -69,16 +78,31 @@ function validate_time_column(t::AbstractVector, time::Symbol, freq)
     firstdup = nothing
     ngap = 0
     firstgap = nothing
-    # Compare against the grid ANCHORED at t[1] rather than stepping from the
-    # previous row. For Month/Year steps these differ: a month-end series
-    # (Jan 31, Feb 29, Mar 31, ...) is gap-free anchored, but stepping would
-    # read Feb 29 + Month(1) = Mar 29 and report a spurious gap. `future_grid`
-    # is anchored the same way, so validation and forecasting agree.
+    # Walk the grid ANCHORED at t[1] (`t[1] + g*freq`) rather than stepping from the
+    # previous row: for Month/Year steps the two differ, and only the anchored form
+    # accepts a month-end series (Jan 31, Feb 29, Mar 31, ...). `future_grid` is
+    # anchored the same way, so validation and forecasting agree.
+    #
+    # `g` tracks the grid position of the previous row, so a gap is counted once per
+    # DISCONTINUITY. Counting rows that merely sit off the anchored grid would report
+    # every row after the first gap, turning one missing day into hundreds of "gaps".
+    g = 0
     for i in 2:n
         if t[i] == t[i-1]
             ndup += 1
             firstdup === nothing && (firstdup = t[i])
-        elseif t[i] != t[1] + (i - 1) * freq
+            continue
+        end
+        gprev = g
+        g += 1
+        while t[1] + g * freq < t[i]
+            g += 1
+        end
+        t[1] + g * freq == t[i] || throw(ArgumentError(
+            "time column :$time has the timestamp $(t[i]) at row $i, which does not " *
+            "lie on the freq=$freq grid starting at $(t[1]). Resample your data onto " *
+            "a regular grid, or pass the freq the data actually uses."))
+        if g > gprev + 1
             ngap += 1
             firstgap === nothing && (firstgap = t[i-1])
         end
