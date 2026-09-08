@@ -1,0 +1,18 @@
+# Julia
+Manifest.toml
+docs/Manifest.toml
+docs/build/
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Claude Code / agent session transcripts. These contain full conversation
+# history and must never be committed.
+/-*/
+/.claude/
+*.jsonl
