@@ -78,6 +78,16 @@
             append!(exp7, lv .+ Float64.(8:n))
         end
         @test only(unique(forecast(f7, 1).y_hat)) ≈ mean(exp7)
+
+        # every target feature type drops its minhistory rows per series
+        for g in (RollingMean(3; lag=2), RollingStd(2), RollingMin(2; lag=4),
+                  RollingMax(6), Diff(2), CustomFeature(:hm, mean, 7))
+            mh = MachineLearningForecast.minhistory(g)
+            fg = fit(mk(TestModels.MeanModel(), FeatureSet(Lag(1), g)), panel)
+            kept = reduce(vcat, [lv .+ Float64.((mh + 1):n)
+                                 for (n, lv) in zip((40, 30, 35), (100.0, 10.0, 50.0))])
+            @test only(unique(forecast(fg, 1).y_hat)) ≈ mean(kept)
+        end
     end
 
     @testset "each series forecasts from its own history and timestamp" begin

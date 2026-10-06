@@ -133,6 +133,50 @@
         end
     end
 
+    @testset "every feature: single-row value equals the batch value" begin
+        n = 30
+        yr = 10 .* randn(StableRNG(10), n)
+        # Steps of 29h17m cross a year end and move every part.
+        tr = [DateTime(2021, 12, 20, 22, 15) + (i - 1) * Minute(1757) for i in 1:n]
+        promo, price = randn(StableRNG(11), n), Float64.(rand(StableRNG(12), 1:9, n))
+        data = (ds=tr, y=yr, promo=promo, price=price)
+        batch(f, yv) = begin
+            acc = MachineLearningForecast.ColumnAccumulator()
+            MachineLearningForecast.materialize!(acc, f, yv, tr, merge(data, (y=yv,)))
+            acc
+        end
+        feats = [Lag(1), Lag(3), Lag(7),
+                 RollingMean(3), RollingMean(4; lag=2), RollingStd(2),
+                 RollingStd(5; lag=3), RollingMin(3), RollingMin(2; lag=4),
+                 RollingMax(4), RollingMax(3; lag=2),
+                 Diff(1), Diff(2; lag=3), Diff(5), Diff(1; lag=4),
+                 Calendar(:year, :quarter, :month, :weekofyear, :dayofweek,
+                          :dayofmonth, :dayofyear, :hour, :minute),
+                 Fourier(7, 2), Fourier(365.25, 3), Fourier(2.5, 1),
+                 Exogenous(:promo, :price),
+                 CustomFeature(:hm, mean, 1), CustomFeature(:len, length, 0),
+                 CustomFeature(:d2, h -> h[end] - h[end - 1], 2)]
+        @testset "$(repr(f))" for f in feats
+            acc = batch(f, yr)
+            @test first.(acc) == MachineLearningForecast.outputnames(f)
+            mh = MachineLearningForecast.minhistory(f)
+            @test all(ismissing(c[i]) for (_, c) in acc, i in 1:mh)
+            rows = (mh + 1):n
+            # Fourier takes the 0-based step index, not the time.
+            single = [collect(MachineLearningForecast.featurevalues(
+                          f, yr[1:(i - 1)], f isa Fourier ? i - 1 : tr[i],
+                          (promo=promo[i], price=price[i]))) for i in rows]
+            @test single == [[c[i] for (_, c) in acc] for i in rows]
+            f isa MachineLearningForecast.TargetFeature || continue
+            # Leakage: rewriting y[t:end] must leave rows 1:t alone.
+            @test all(1:n) do t
+                y2 = copy(yr)
+                y2[t:end] .= 1e6 .* (1:(n - t + 1))
+                all(isequal(a[1:t], b[1:t]) for ((_, a), (_, b)) in zip(acc, batch(f, y2)))
+            end
+        end
+    end
+
     @testset "rolling std/min/max and Diff exact values" begin
         @test materialize(RollingStd(3)).y_rollstd_3_lag_1[5] ≈ std(y[2:4])
         @test materialize(RollingMin(4)).y_rollmin_4_lag_1[6] == minimum(y[2:5])
