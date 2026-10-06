@@ -266,13 +266,9 @@ function _panel_exogenous_rows(spec::Forecaster, exogcols, states, grids, new_da
         "column :$(spec.id), the time column :$(spec.time) and the exogenous " *
         "column$(length(exogcols) == 1 ? "" : "s") $(join(":" .* string.(exogcols), ", "))."))
     idv, tv = nd[spec.id], nd[spec.time]
-    eltype(tv) == eltype(first(grids)) || throw(ArgumentError(
-        "new_data's time column :$(spec.time) has element type $(eltype(tv)) but " *
-        "the training time column is $(eltype(first(grids))). Convert it so " *
-        "timestamps compare equal."))
     lookup = Dict{Tuple{Any,Any},Int}()
     for i in eachindex(tv)
-        key = (idv[i], tv[i])
+        key = (idv[i], _new_time(tv[i], eltype(first(grids)), spec.time, i))
         haskey(lookup, key) && throw(ArgumentError(
             "new_data has duplicate rows for $(spec.id)=$(repr(idv[i])) at " *
             "$(tv[i]). Deduplicate new_data — otherwise which row supplies each " *

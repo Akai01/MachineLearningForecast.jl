@@ -148,6 +148,34 @@
         @test err2 isa ArgumentError && occursin("unique_id", err2.msg)
     end
 
+    @testset "time columns typed Union{Missing,Date} or Any work with Exogenous" begin
+        ex = merge(makepanel(lens=(60, 50, 55)), (promo=Float64.(1:165),))
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+            fc = mk(m, FeatureSet(Lag(1), Exogenous(:promo)))
+            f = fit(fc, ex)
+            grids = [[s.t_last + Day(i) for i in 1:2] for s in f.series]
+            nd = (unique_id=repeat(["s1", "s2", "s3"], inner=2), ds=vcat(grids...),
+                  promo=[11.0, 12.0, 21.0, 22.0, 31.0, 32.0])
+            want = forecast(f, 2; new_data=nd)
+            bt = backtest(fc, ex; horizon=5, initial=40, step=10)
+            for T in (Union{Missing,Date}, Any)
+                @test forecast(f, 2; new_data=merge(nd, (ds=Vector{T}(nd.ds),))) == want
+                r = backtest(fc, merge(ex, (ds=Vector{T}(ex.ds),)); horizon=5,
+                             initial=40, step=10)
+                @test isequal(r.folds, bt.folds) && isequal(r.metrics, bt.metrics)
+            end
+            holed = merge(nd, (ds=Vector{Union{Missing,Date}}(nd.ds),))
+            holed.ds[4] = missing
+            @test_throws ArgumentError forecast(f, 2; new_data=holed)
+            @test_throws "new_data's time column :ds has a missing value at row 4" forecast(
+                f, 2; new_data=holed)
+            @test_throws "has element type DateTime at row 1, but the training time " *
+                         "column is Date" forecast(f, 2; new_data=merge(
+                             nd, (ds=DateTime.(nd.ds),)))
+        end
+    end
+
     @testset "Direct on a panel" begin
         f = fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)); strat=Direct(4)), panel)
         @test length(f.machines) == 4

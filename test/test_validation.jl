@@ -194,6 +194,26 @@ end # module
                          strategy=Recursive(), freq=Hour(1), target=:y, time=:ds)
         got = forecast(fit(fch, (ds=hds, y=Float64.(1:50))), 3)
         @test got.y_hat == Float64.(hour.(hds[end] .+ Hour.(1:3)))
+        # the check reads values, so a loosely typed DateTime column works
+        for T in (Union{Missing,DateTime}, Any)
+            @test forecast(fit(fch, (ds=Vector{T}(hds), y=Float64.(1:50))), 3) == got
+            for m in (EvoTreeRegressor(nrounds=5),
+                      DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+                fcm = Forecaster(m; features=FeatureSet(Lag(1), Calendar(:hour, :minute)),
+                                 freq=Hour(1))
+                @test forecast(fit(fcm, (ds=Vector{T}(hds), y=Float64.(1:50))), 3) ==
+                      forecast(fit(fcm, (ds=hds, y=Float64.(1:50))), 3)
+            end
+        end
+        # a Date column is still rejected with the same message
+        msg = "Calendar(:hour) needs a sub-daily time column, but the time column " *
+              "has element type Date. Use a DateTime time column, or drop :hour " *
+              "from the Calendar feature."
+        @test err.msg == msg
+        for T in (Union{Missing,Date}, Any)
+            @test_throws msg fit(mk(features=FeatureSet(Lag(1), Calendar(:hour))),
+                                 (ds=Vector{T}(df.ds), y=df.y))
+        end
     end
 
     @testset "new_data: duplicates and eltype mismatches are diagnosed" begin
@@ -217,6 +237,35 @@ end # module
         # out-of-order new_data joins correctly (join is by timestamp, not position)
         shuffled = (ds=grid[[3, 1, 2]], promo=[30.0, 10.0, 20.0])
         @test forecast(fitted, 3; new_data=shuffled).y_hat == [10.0, 20.0, 30.0]
+    end
+
+    @testset "new_data's time column is checked by value, not element type" begin
+        dfe = (ds=df.ds, y=df.y, promo=Float64.(1:50))
+        grid = collect(df.ds[end] + Day(1):Day(1):df.ds[end] + Day(3))
+        nd = (ds=grid, promo=[1.0, 2.0, 3.0])
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+            fce = Forecaster(m; features=FeatureSet(Lag(1), Exogenous(:promo)),
+                             freq=Day(1))
+            f = fit(fce, dfe)
+            want = forecast(f, 3; new_data=nd)
+            bt = backtest(fce, dfe; horizon=3, initial=40)
+            for T in (Union{Missing,Date}, Any)
+                @test forecast(f, 3; new_data=(ds=Vector{T}(grid), promo=nd.promo)) == want
+                # backtest slices new_data from the user's own time column
+                r = backtest(fce, merge(dfe, (ds=Vector{T}(df.ds),)); horizon=3,
+                             initial=40)
+                @test isequal(r.folds, bt.folds) && isequal(r.metrics, bt.metrics)
+            end
+            holed = (ds=Union{Missing,Date}[grid[1], missing, grid[2], grid[3]],
+                     promo=[1.0, 9.0, 2.0, 3.0])
+            @test_throws ArgumentError forecast(f, 3; new_data=holed)
+            @test_throws "new_data's time column :ds has a missing value at row 2" forecast(
+                f, 3; new_data=holed)
+            mixed = (ds=Any[grid[1], DateTime(grid[2]), grid[3]], promo=nd.promo)
+            @test_throws "has element type DateTime at row 2, but the training time " *
+                         "column is Date" forecast(f, 3; new_data=mixed)
+        end
     end
 
     @testset "FeatureSet accepts a plain vector of features" begin

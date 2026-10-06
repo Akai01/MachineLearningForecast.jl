@@ -239,10 +239,11 @@ minhistory(::TimeFeature) = 0
 function materialize!(out::ColumnAccumulator, f::Calendar, y::AbstractVector{Float64},
                       t::AbstractVector, data::NamedTuple)
     for p in f.parts
-        if p in (:hour, :minute) && !(eltype(t) <: Dates.AbstractDateTime)
-            throw(ArgumentError(
+        if p in (:hour, :minute)
+            i = findfirst(v -> !(v isa Dates.AbstractDateTime), t)
+            i === nothing || throw(ArgumentError(
                 "Calendar($(repr(p))) needs a sub-daily time column, but the time " *
-                "column has element type $(eltype(t)). Use a DateTime time column, " *
+                "column has element type $(typeof(t[i])). Use a DateTime time column, " *
                 "or drop $(repr(p)) from the Calendar feature."))
         end
         push!(out, p => Vector{Union{Missing,Float64}}(Float64.(CALENDAR_PARTS[p].(t))))

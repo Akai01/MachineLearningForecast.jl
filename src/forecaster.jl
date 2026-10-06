@@ -300,19 +300,14 @@ function _exogenous_rows(spec::Forecaster, exogcols::Vector{Symbol}, grid, new_d
         ":$(spec.time) and the exogenous column$(length(exogcols) == 1 ? "" : "s") " *
         "$(join(":" .* string.(exogcols), ", "))."))
     tcol = nd[spec.time]
-    # A Date/DateTime (or otherwise incompatible) eltype would make every
-    # lookup miss and be reported as "missing timestamps" — diagnose it directly.
-    eltype(tcol) == eltype(grid) || throw(ArgumentError(
-        "new_data's time column :$(spec.time) has element type $(eltype(tcol)) but " *
-        "the training time column is $(eltype(grid)). Convert it (e.g. " *
-        "`Date.(col)` / `DateTime.(col)`) so timestamps compare equal."))
     lookup = Dict{eltype(grid),Int}()
     for i in eachindex(tcol)
-        haskey(lookup, tcol[i]) && throw(ArgumentError(
+        v = _new_time(tcol[i], eltype(grid), spec.time, i)
+        haskey(lookup, v) && throw(ArgumentError(
             "new_data has duplicate timestamps in column :$(spec.time); first " *
-            "duplicate at $(tcol[i]). Deduplicate new_data — otherwise which row " *
+            "duplicate at $v. Deduplicate new_data — otherwise which row " *
             "supplies each forecast step is arbitrary."))
-        lookup[tcol[i]] = i
+        lookup[v] = i
     end
     absent_t = [t for t in grid if !haskey(lookup, t)]
     isempty(absent_t) || throw(ArgumentError(
@@ -332,6 +327,19 @@ function _exogenous_rows(spec::Forecaster, exogcols::Vector{Symbol}, grid, new_d
         rows[s] = row
     end
     return rows
+end
+
+# Check row i of new_data's time column against the training type T.
+function _new_time(v, T::Type, time::Symbol, i::Integer)
+    ismissing(v) && throw(ArgumentError(
+        "new_data's time column :$time has a missing value at row $i. Every " *
+        "new_data row needs a timestamp; drop or fill that row."))
+    # A Date vs DateTime mismatch would make every lookup miss.
+    v isa T || throw(ArgumentError(
+        "new_data's time column :$time has element type $(typeof(v)) at row $i, " *
+        "but the training time column is $T. Convert it (e.g. `Date.(col)` / " *
+        "`DateTime.(col)`) so timestamps compare equal."))
+    return v
 end
 
 # Assemble one future feature row in-place into preallocated length-1 column
