@@ -26,7 +26,7 @@ struct FeatureSet
                 "$(join(repr.(dups), ", ")). Remove the duplicated feature(s) or rename " *
                 "exogenous/custom columns."))
         end
-        new(features)
+        new(copy(features))
     end
 end
 FeatureSet(fs::AbstractFeature...) = FeatureSet(collect(AbstractFeature, fs))

@@ -39,6 +39,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   example a model that predicts `NaN`). A non-finite mean score now marks the
   candidate as failed, with the reason in the `:error` column, and excludes it
   from ranking.
+- `FeatureSet`, `Calendar` and `Exogenous` store a copy of the vector passed
+  in. Mutating that vector after construction could get around their checks,
+  including the `Forecaster` guard against a feature that emits the target
+  column.
 
 ## [0.1.0]
 

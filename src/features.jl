@@ -223,7 +223,7 @@ struct Calendar <: TimeFeature
         isempty(bad) || throw(ArgumentError(
             "unknown Calendar part$(length(bad) == 1 ? "" : "s") $(join(repr.(bad), ", ")); " *
             "valid parts are $(join(repr.(sort!(collect(keys(CALENDAR_PARTS)))), ", "))."))
-        new(parts)
+        new(copy(parts))
     end
 end
 Calendar(parts::Symbol...) = Calendar(collect(Symbol, parts))
@@ -333,7 +333,7 @@ struct Exogenous <: ExogenousFeature
     function Exogenous(cols::Vector{Symbol})
         isempty(cols) && throw(ArgumentError(
             "Exogenous needs at least one column, e.g. Exogenous(:promo)."))
-        new(cols)
+        new(copy(cols))
     end
 end
 Exogenous(cols::Symbol...) = Exogenous(collect(Symbol, cols))

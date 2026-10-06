@@ -149,6 +149,21 @@
         @test occursin("Lag(1)", sprint(show, FeatureSet(Lag(1))))
     end
 
+    @testset "constructors copy their vector arguments" begin
+        v = MachineLearningForecast.AbstractFeature[Lag(1)]
+        fs = FeatureSet(v)
+        push!(v, Lag(1))      # a duplicate the constructor would reject
+        @test fs == FeatureSet(Lag(1))
+        parts = [:month]
+        c = Calendar(parts)
+        push!(parts, :bogus)  # an unknown part the constructor would reject
+        @test c == Calendar(:month)
+        cols = [:promo]
+        ex = Exogenous(cols)
+        push!(cols, :price)
+        @test ex == Exogenous(:promo)
+    end
+
     @testset "build_training_frame" begin
         fs = FeatureSet(Lag(2), RollingMean(2), Calendar(:dayofweek))
         X, ykept, keep = MachineLearningForecast.build_training_frame(fs, df, :y, :ds)

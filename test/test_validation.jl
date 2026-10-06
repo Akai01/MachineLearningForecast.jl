@@ -25,6 +25,16 @@
         @test occursin("Calendar", err2.msg)
     end
 
+    @testset "mutating the features vector cannot bypass the leak guard" begin
+        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+            v = MachineLearningForecast.AbstractFeature[Lag(1)]
+            fc = Forecaster(m; features=FeatureSet(v), freq=Day(1))
+            push!(v, Exogenous(:y))
+            @test MachineLearningForecast.outputnames(fc.features) == [:y_lag_1]
+            @test fit(fc, df).feature_names == [:y_lag_1]
+        end
+    end
+
     @testset "time column may not shadow reserved result columns" begin
         for bad in (:origin, :step, :y_hat)
             err = try mk(target=:v, time=bad) catch e; e end
