@@ -257,7 +257,7 @@ function materialize!(out::ColumnAccumulator, f::Calendar, y::AbstractVector{Flo
 end
 
 featurevalues(f::Calendar, y_hist::AbstractVector, t_next, exog_row) =
-    Tuple(Float64(CALENDAR_PARTS[p](t_next)) for p in f.parts)
+    Tuple(Float64(CALENDAR_PARTS[p](t_next))::Float64 for p in f.parts)
 
 # ---------------------------------------------------------------------------
 # Fourier
@@ -363,14 +363,18 @@ function materialize!(out::ColumnAccumulator, f::Exogenous, y::AbstractVector{Fl
             "features contain Exogenous(:$c) but column :$c is not present in the " *
             "training data. Available columns: $(join(keys(data), ", ")). Add " *
             "column :$c to the data, or remove it from the Exogenous feature."))
-        raw = data[c]
-        vals = Vector{Union{Missing,Float64}}(missing, length(raw))
-        for i in eachindex(raw)
-            ismissing(raw[i]) || (vals[i] = _tofloat(raw[i], c))
-        end
-        push!(out, c => vals)
+        push!(out, c => _exog_column(data[c], c))
     end
     return out
+end
+
+# A function barrier: data[c] is only known at run time.
+function _exog_column(raw, c::Symbol)
+    vals = Vector{Union{Missing,Float64}}(missing, length(raw))
+    for i in eachindex(raw)
+        ismissing(raw[i]) || (vals[i] = _tofloat(raw[i], c))
+    end
+    return vals
 end
 
 function _tofloat(v, name::Symbol)

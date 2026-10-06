@@ -233,6 +233,29 @@
         @test MachineLearningForecast.featurevalues(Exogenous(:promo), y, t[1], (promo=true,)) == (1.0,)
     end
 
+    @testset "forecast-row and Exogenous hot paths are type-stable" begin
+        M = MachineLearningForecast
+        rt = Base.return_types(M.featurevalues, (Calendar, Vector{Float64}, Date, Nothing))
+        @test only(rt) <: Tuple{Vararg{Float64}}
+        fs = FeatureSet(Lag(1), RollingMean(3), Diff(1))
+        cols = [zeros(1) for _ in 1:3]
+        yh = collect(1.0:10.0)
+        tn = Date(2021, 3, 11)
+        fill_row() = M._fill_row!(cols, fs, yh, tn, 10, nothing)
+        fill_row()
+        @test @allocated(fill_row()) ≤ 64 * length(fs)
+        @test [c[1] for c in cols] == [10.0, 9.0, 1.0]
+        # Five element types make data[c] infer as plain Vector.
+        n = 1000
+        mixed = (uid=fill("a", n), ds=tn .+ Day.(0:(n - 1)), y=ones(n),
+                 promo=isodd.(1:n), qty=collect(1:n))
+        acc() = M.materialize!(M.ColumnAccumulator(), Exogenous(:promo), mixed.y,
+                               mixed.ds, mixed)
+        acc()
+        @test @allocated(acc()) < 16n
+        @test only(acc()) == (:promo => Float64.(isodd.(1:n)))
+    end
+
     @testset "CustomFeature" begin
         f = CustomFeature(:hist_mean, mean, 2)
         out = materialize(f)

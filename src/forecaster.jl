@@ -356,13 +356,20 @@ function _fill_row!(colvecs::Vector{Vector{Float64}}, features::FeatureSet,
                     exog_row)
     j = 1
     for feat in features
-        targ = _uses_step_index(feat) ? n_next : t_next
-        for v in featurevalues(feat, y_hist, targ, exog_row)
-            colvecs[j][1] = Float64(v)
-            j += 1
-        end
+        j = _fill_feature!(colvecs, j, feat, y_hist, t_next, n_next, exog_row)::Int
     end
     return nothing
+end
+
+# A function barrier: features is abstractly typed, this is not.
+function _fill_feature!(colvecs::Vector{Vector{Float64}}, j::Int, feat::AbstractFeature,
+                        y_hist, t_next, n_next, exog_row)
+    targ = _uses_step_index(feat) ? n_next : t_next
+    for v in featurevalues(feat, y_hist, targ, exog_row)
+        colvecs[j][1] = Float64(v)
+        j += 1
+    end
+    return j
 end
 
 function _prediction_row(f::FittedForecaster)

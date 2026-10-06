@@ -65,6 +65,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `got DataType`. A panel `backtest` fold with nothing to score says that no
   series trained up to its origin has data after it, instead of suggesting a
   `freq` grid mismatch.
+- Forecasting allocates less per step: each feature fills the forecast row
+  through a function barrier, and `Calendar` returns a concretely typed tuple.
+  `Exogenous` converts its columns in a type-stable loop, so building the
+  training frame from a table with many column types (for example a `String`
+  id, a `Date`, and `Bool` and `Int` covariates) is several times faster.
+  Forecasts are unchanged.
 
 ### Fixed
 
