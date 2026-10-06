@@ -79,16 +79,35 @@ end
 
     @testset "argument validation" begin
         @test_throws ArgumentError backtest(fc, df; horizon=0, initial=50)
+        @test_throws "backtest horizon must be ≥ 1, got 0. Pass the number of steps each " *
+                     "fold forecasts, e.g. horizon=28." backtest(fc, df; horizon=0,
+                                                                  initial=50)
         @test_throws ArgumentError backtest(fc, df; horizon=5, initial=0)
+        @test_throws "backtest initial must be ≥ 1, got 0. Pass the size of the first " *
+                     "training window, e.g. initial=730." backtest(fc, df; horizon=5,
+                                                                    initial=0)
         @test_throws ArgumentError backtest(fc, df; horizon=5, initial=50, step=0)
+        @test_throws "backtest step must be ≥ 1, got 0. Pass how many steps each fold " *
+                     "moves the origin, e.g. step=5, which equals horizon (the " *
+                     "default)." backtest(fc, df; horizon=5, initial=50, step=0)
         # no complete folds
         @test_throws ArgumentError backtest(fc, df; horizon=30, initial=90)
+        @test_throws "no complete backtest folds: data has 100 rows, but the first fold " *
+                     "needs initial + horizon = 120. Provide more data" backtest(
+            fc, df; horizon=30, initial=90)
         # initial must exceed minhistory
         fc_deep = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(30)), freq=Day(1))
         @test_throws ArgumentError backtest(fc_deep, df; horizon=5, initial=30)
+        @test_throws "backtest initial=30 must exceed the feature set's minimum history " *
+                     "(30 rows) so the first training window has at least one usable " *
+                     "row. Pass initial=31 or more, or reduce lags/windows." backtest(
+            fc_deep, df; horizon=5, initial=30)
         # Direct max_horizon < backtest horizon
         fc_d = Forecaster(TestModels.LinAR(1.0, 0.0); features=fs, strategy=Direct(3), freq=Day(1))
         @test_throws ArgumentError backtest(fc_d, df; horizon=5, initial=80)
+        @test_throws "backtest horizon=5 exceeds the Direct strategy's max_horizon=3. " *
+                     "Use Direct(5) or reduce horizon." backtest(fc_d, df; horizon=5,
+                                                                initial=80)
         # ... but works when compatible
         res = backtest(fc_d, df; horizon=3, initial=90, metrics=(mae,))
         @test maximum(res.metrics.fold) == 3   # origins 90, 93, 96

@@ -56,9 +56,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   series after sorting it by time.
 - More `ArgumentError` messages name the offending value and the fix: those of
   the feature constructors (`Lag`, the rolling statistics, `Diff`, `Fourier`,
-  `CustomFeature`), `Direct`, `Forecaster` and `forecast`, of an `Exogenous`
-  column absent from the training data, and of panel data with a missing id,
-  no rows, or a missing exogenous value in `new_data`. Passing a model type
+  `CustomFeature`), `Direct`, `Forecaster`, `forecast`, `backtest`,
+  `RandomSearch` and `tune`, of an `Exogenous` column absent from the training
+  data, and of panel data with a missing id, no rows, or a missing exogenous
+  value in `new_data`. A panel `backtest` fold with nothing to score now says
+  that no series trained up to its origin has data after it, instead of
+  suggesting a `freq` grid mismatch. Passing a model type
   instead of an instance (`Forecaster(DecisionTreeRegressor; ...)`) names the
   type and the instance to pass, instead of reporting `got DataType`.
 

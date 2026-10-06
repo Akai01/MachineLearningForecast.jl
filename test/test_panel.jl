@@ -300,11 +300,40 @@
         @test_throws ArgumentError backtest(mk(TestModels.LinAR(1.0, 0.0),
                                                FeatureSet(Lag(30))), big;
                                             horizon=5, initial=20, step=10)
+        @test_throws "backtest initial=20 must exceed the feature set's minimum history " *
+                     "(30 timestamps) so the first training window has at least one " *
+                     "usable row. For a panel, initial counts distinct timestamps, not " *
+                     "rows. Pass initial=31 or more, or reduce lags/windows." backtest(
+            mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(30))), big; horizon=5,
+            initial=20, step=10)
         for bad in (mae, (:mae,), ("mae",))
             @test_throws ArgumentError backtest(fc, big; horizon=5, initial=40,
                                                 metrics=bad)
             @test_throws "metrics=(mae, rmse)" backtest(fc, big; horizon=5,
                                                         initial=40, metrics=bad)
+        end
+    end
+
+    @testset "backtest folds that cannot be cut or scored" begin
+        big = makepanel(lens=(60, 50, 55))
+        # s2 starts after s1 ends: origin 50 has nothing to score
+        s1 = collect(Date(2022, 1, 1):Day(1):Date(2022, 2, 19))
+        s2 = collect(Date(2022, 2, 20):Day(1):Date(2022, 3, 1))
+        apart = (unique_id=[fill("s1", 50); fill("s2", 10)], ds=[s1; s2],
+                 y=Float64.(1:60))
+        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+            fc = mk(m, FeatureSet(Lag(1)))
+            @test_throws ArgumentError backtest(fc, big; horizon=5, initial=58)
+            @test_throws "no complete backtest folds: the panel spans 60 distinct " *
+                         "timestamps, but the first fold needs initial + horizon = 63. " *
+                         "Provide more history" backtest(fc, big; horizon=5, initial=58)
+            @test_throws ArgumentError backtest(fc, apart; horizon=5, initial=50,
+                                                step=100)
+            @test_throws "backtest fold 1 (origin 2022-02-19) produced no forecast that " *
+                         "lines up with an actual: no series trained on data up to the " *
+                         "origin has data after it. Choose initial and step so each " *
+                         "origin falls inside the data of a series." backtest(
+                fc, apart; horizon=5, initial=50, step=100)
         end
     end
 

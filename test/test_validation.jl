@@ -166,6 +166,7 @@ end # module
             err = try tune(base, df2; grid=grid, args...) catch e; e end
             @test err isa ArgumentError
             @test occursin(word, err.msg)      # not a bare "step cannot be zero"
+            @test occursin("tune $word must be ≥ 1, got 0. Pass", err.msg)
         end
     end
 

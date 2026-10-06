@@ -75,7 +75,9 @@ struct RandomSearch{R<:Random.AbstractRNG} <: TuningStrategy
     n::Int
     rng::R
     function RandomSearch(n::Integer, rng::Random.AbstractRNG)
-        n ≥ 1 || throw(ArgumentError("RandomSearch n must be ≥ 1, got $n."))
+        n ≥ 1 || throw(ArgumentError(
+            "RandomSearch n must be ≥ 1, got $n. Pass the number of candidates to " *
+            "draw, e.g. RandomSearch(10)."))
         new{typeof(rng)}(Int(n), rng)
     end
 end
@@ -111,7 +113,8 @@ function tell! end
 function _validate_grid(grid)
     grid isa NamedTuple || throw(ArgumentError(
         "grid must be a NamedTuple of Forecaster field names to candidate value " *
-        "lists, e.g. grid=(model=[m1, m2], strategy=[Recursive(), Direct(28)])."))
+        "lists, got $(typeof(grid)). Use e.g. grid=(model=[m1, m2], " *
+        "strategy=[Recursive(), Direct(28)])."))
     valid = fieldnames(Forecaster)
     bad = setdiff(keys(grid), valid)
     isempty(bad) || throw(ArgumentError(
@@ -300,9 +303,15 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
         "max_evals must be ≥ 1 (or nothing for no budget), got $max_evals."))
     # Validate here too, so a bad value is diagnosed before any candidate is built
     # rather than surfacing as a bare `step cannot be zero` from the range below.
-    horizon ≥ 1 || throw(ArgumentError("tune horizon must be ≥ 1, got $horizon."))
-    initial ≥ 1 || throw(ArgumentError("tune initial must be ≥ 1, got $initial."))
-    step ≥ 1 || throw(ArgumentError("tune step must be ≥ 1, got $step."))
+    horizon ≥ 1 || throw(ArgumentError(
+        "tune horizon must be ≥ 1, got $horizon. Pass the number of steps each " *
+        "fold forecasts, e.g. horizon=28."))
+    initial ≥ 1 || throw(ArgumentError(
+        "tune initial must be ≥ 1, got $initial. Pass the size of the first " *
+        "training window, e.g. initial=730."))
+    step ≥ 1 || throw(ArgumentError(
+        "tune step must be ≥ 1, got $step. Pass how many steps each fold moves " *
+        "the origin, e.g. step=$horizon, which equals horizon (the default)."))
     _iscallable(metric) || throw(ArgumentError(
         "tune metric must be one metric function, got $(repr(metric)). Pass e.g. " *
         "metric=smape; tune ranks candidates by a single metric."))
@@ -331,8 +340,9 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
         push!(cands, cand); push!(means, m); push!(stds, sd); push!(errors, err)
     end
     isempty(cands) && throw(ArgumentError(
-        "the tuning strategy proposed no candidates ($(nameof(typeof(tuner)))); " *
-        "nothing to tune."))
+        "the tuning strategy proposed no candidates ($(nameof(typeof(tuner)))): ask " *
+        "returned nothing on its first call, so there is nothing to tune. Make ask " *
+        "return at least one NamedTuple of Forecaster field overrides before nothing."))
 
     table = _tune_table(cands, means, stds, errors)
     ok = findall(!ismissing, means)

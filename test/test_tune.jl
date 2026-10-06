@@ -21,6 +21,13 @@ end
 
 tell!(s::Midpoint, candidate, score) = push!(s.told, (candidate, score))
 
+"Always proposes `out`, to check what tune does with each kind of answer."
+struct Fixed{T} <: TuningStrategy
+    out::T
+end
+ask(s::Fixed) = s.out
+tell!(::Fixed, candidate, score) = nothing
+
 end # module
 
 @testset "tune" begin
@@ -147,6 +154,8 @@ end # module
         @test r1.table.model == r2.table.model
         @test all(r1.table.mean_score .≈ r2.table.mean_score)
         @test_throws ArgumentError RandomSearch(0)
+        @test_throws "RandomSearch n must be ≥ 1, got 0. Pass the number of candidates " *
+                     "to draw, e.g. RandomSearch(10)." RandomSearch(0)
 
         # A RandomSearch that always returned the same candidate (or always the
         # first) would pass the checks above. Draw enough to make that visible:
@@ -164,11 +173,46 @@ end # module
 
     @testset "grid validation" begin
         @test_throws ArgumentError tune(base, df; horizon=14, initial=90)  # GridSearch needs grid
+        @test_throws "GridSearch() requires the grid keyword: pass grid=(model=[...], " *
+                     "features=[...], ...) to tune." tune(base, df; horizon=14, initial=90)
         @test_throws ArgumentError tune(base, df; grid=(bogus=[1, 2],), horizon=14, initial=90)
+        @test_throws "grid has unknown key :bogus; valid keys are :model, :features" tune(
+            base, df; grid=(bogus=[1, 2],), horizon=14, initial=90)
         @test_throws ArgumentError tune(base, df; grid=(model=Int[],), horizon=14, initial=90)
+        @test_throws "grid key :model must map to a nonempty vector or tuple of " *
+                     "candidate values, got Int64[]." tune(base, df; grid=(model=Int[],),
+                                                           horizon=14, initial=90)
         @test_throws ArgumentError tune(base, df; grid="not a namedtuple", horizon=14, initial=90)
+        @test_throws "candidate value lists, got String. Use e.g. grid=(model=[m1, m2]" (
+            tune(base, df; grid="not a namedtuple", horizon=14, initial=90))
+        @test_throws "got Vector{FeatureSet}" tune(base, df; grid=[FeatureSet(Lag(1))],
+                                                   horizon=14, initial=90)
         @test_throws ArgumentError tune(base, df; grid=(model=[base.model],),
                                         horizon=14, initial=90, max_evals=0)
+        @test_throws "max_evals must be ≥ 1 (or nothing for no budget), got 0." tune(
+            base, df; grid=(model=[base.model],), horizon=14, initial=90, max_evals=0)
+    end
+
+    @testset "ask must answer with a NamedTuple of known fields or nothing" begin
+        for m in (DecisionTreeRegressor(max_depth=2), EvoTreeRegressor(nrounds=5))
+            fcm = Forecaster(m; features=FeatureSet(Lag(1)), freq=Day(1))
+            run(out) = tune(fcm, df; tuner=ThirdPartyTuning.Fixed(out), max_evals=2,
+                            horizon=14, initial=90)
+            @test_throws ArgumentError run(42)
+            @test_throws "ask(Fixed) returned 42; the ask/tell contract requires a " *
+                         "NamedTuple of Forecaster field overrides, or nothing to stop." (
+                run(42))
+            @test_throws ArgumentError run(nothing)
+            @test_throws "the tuning strategy proposed no candidates (Fixed): ask " *
+                         "returned nothing on its first call, so there is nothing to " *
+                         "tune. Make ask return at least one NamedTuple of Forecaster " *
+                         "field overrides before nothing." run(nothing)
+            # reconstruct rejects it inside the candidate's try
+            @test_throws "all 2 tuning candidates failed" run((bogus=1,))
+            @test_throws "ArgumentError: cannot reconstruct Forecaster with unknown " *
+                         "field :bogus; valid fields are :model, :features" run(
+                (bogus=1,))
+        end
     end
 
     @testset "grid values of the wrong type are rejected before any fit" begin

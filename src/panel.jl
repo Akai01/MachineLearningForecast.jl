@@ -329,7 +329,8 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
     initial > mh || throw(ArgumentError(
         "backtest initial=$initial must exceed the feature set's minimum history " *
         "($mh timestamps) so the first training window has at least one usable row. " *
-        "For a panel, initial counts distinct timestamps, not rows."))
+        "For a panel, initial counts distinct timestamps, not rows. Pass " *
+        "initial=$(mh + 1) or more, or reduce lags/windows."))
     origins = initial:step:(ngrid - horizon)
     isempty(origins) && throw(ArgumentError(
         "no complete backtest folds: the panel spans $ngrid distinct timestamps, " *
@@ -381,7 +382,9 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
         end
         isempty(ytrue) && throw(ArgumentError(
             "backtest fold $k (origin $t_origin) produced no forecast that lines up " *
-            "with an actual. Check that the series share the freq=$(fc.freq) grid."))
+            "with an actual: no series trained on data up to the origin has data " *
+            "after it. Choose initial and step so each origin falls inside the data " *
+            "of a series."))
         ytrain = y_all[train_rows]
         for m in metrics
             push!(m_fold, k); push!(m_origin, t_origin)

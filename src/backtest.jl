@@ -53,9 +53,15 @@ results.metrics   # per-fold and overall scores
 """
 function backtest(fc::Forecaster, data; horizon::Integer, initial::Integer,
                   step::Integer=horizon, metrics=(mae, rmse))
-    horizon ≥ 1 || throw(ArgumentError("backtest horizon must be ≥ 1, got $horizon."))
-    initial ≥ 1 || throw(ArgumentError("backtest initial must be ≥ 1, got $initial."))
-    step ≥ 1 || throw(ArgumentError("backtest step must be ≥ 1, got $step."))
+    horizon ≥ 1 || throw(ArgumentError(
+        "backtest horizon must be ≥ 1, got $horizon. Pass the number of steps each " *
+        "fold forecasts, e.g. horizon=28."))
+    initial ≥ 1 || throw(ArgumentError(
+        "backtest initial must be ≥ 1, got $initial. Pass the size of the first " *
+        "training window, e.g. initial=730."))
+    step ≥ 1 || throw(ArgumentError(
+        "backtest step must be ≥ 1, got $step. Pass how many steps each fold moves " *
+        "the origin, e.g. step=$horizon, which equals horizon (the default)."))
     if fc.strategy isa Direct && horizon > fc.strategy.max_horizon
         throw(ArgumentError(
             "backtest horizon=$horizon exceeds the Direct strategy's max_horizon=" *
@@ -83,7 +89,8 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, initial,
     mh = minhistory(fc.features)
     initial > mh || throw(ArgumentError(
         "backtest initial=$initial must exceed the feature set's minimum history " *
-        "($mh rows) so the first training window has at least one usable row."))
+        "($mh rows) so the first training window has at least one usable row. " *
+        "Pass initial=$(mh + 1) or more, or reduce lags/windows."))
     origins = initial:step:(n - horizon)
     isempty(origins) && throw(ArgumentError(
         "no complete backtest folds: data has $n rows, but the first fold needs " *
