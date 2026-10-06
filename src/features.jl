@@ -56,7 +56,8 @@ struct Lag <: TargetFeature
         k isa Real && isinteger(k) || throw(ArgumentError(
             "lag must be a whole number of steps, got Lag($(repr(k))). Use e.g. Lag(7)."))
         k ≥ 1 || throw(ArgumentError(
-            "lag must be ≥ 1, got Lag($k). Lag(0) would leak the current target."))
+            "lag must be ≥ 1, got Lag($k), which would leak the current or a future " *
+            "target. Use Lag(1) or a larger lag."))
         new(k)
     end
 end
@@ -108,10 +109,12 @@ for (T, stem, fun, minw, example) in (
             lag::Int
             function $T(window::Integer, lag::Integer)
                 window ≥ $minw || throw(ArgumentError(
-                    string($(string(T)), " window must be ≥ ", $minw, ", got ", window, ".")))
+                    string($(string(T)), " window must be ≥ ", $minw, ", got ", window,
+                           ". Use e.g. ", $(string(T)), "(7).")))
                 lag ≥ 1 || throw(ArgumentError(
-                    string($(string(T)), " lag must be ≥ 1, got ", lag,
-                           ". lag=0 would include the current target (leakage).")))
+                    string($(string(T)), " lag must be ≥ 1, got ", lag, ", which ",
+                           "would include the current or a future target (leakage). ",
+                           "Use lag=1, the default.")))
                 new(Int(window), Int(lag))
             end
         end
@@ -164,9 +167,11 @@ struct Diff <: TargetFeature
     k::Int
     lag::Int
     function Diff(k::Integer, lag::Integer)
-        k ≥ 1 || throw(ArgumentError("Diff k must be ≥ 1, got $k."))
+        k ≥ 1 || throw(ArgumentError(
+            "Diff k must be ≥ 1, got $k. Use e.g. Diff(1) for the first difference."))
         lag ≥ 1 || throw(ArgumentError(
-            "Diff lag must be ≥ 1, got $lag. lag=0 would use the current target (leakage)."))
+            "Diff lag must be ≥ 1, got $lag, which would use the current or a future " *
+            "target (leakage). Use lag=1, the default."))
         new(Int(k), Int(lag))
     end
 end
@@ -283,7 +288,9 @@ struct Fourier <: TimeFeature
         isfinite(period) && period > 0 || throw(ArgumentError(
             "Fourier period must be finite and > 0 (in freq steps), got $period. " *
             "Use e.g. Fourier(7, 2) for weekly seasonality on daily data."))
-        order ≥ 1 || throw(ArgumentError("Fourier order must be ≥ 1, got $order."))
+        order ≥ 1 || throw(ArgumentError(
+            "Fourier order must be ≥ 1, got $order. Use e.g. Fourier($period, 2) for " *
+            "two harmonics."))
         new(Float64(period), Int(order))
     end
 end
@@ -354,7 +361,8 @@ function materialize!(out::ColumnAccumulator, f::Exogenous, y::AbstractVector{Fl
     for c in f.cols
         haskey(data, c) || throw(ArgumentError(
             "features contain Exogenous(:$c) but column :$c is not present in the " *
-            "training data. Available columns: $(join(keys(data), ", "))."))
+            "training data. Available columns: $(join(keys(data), ", ")). Add " *
+            "column :$c to the data, or remove it from the Exogenous feature."))
         raw = data[c]
         vals = Vector{Union{Missing,Float64}}(missing, length(raw))
         for i in eachindex(raw)
@@ -411,7 +419,8 @@ struct CustomFeature <: TargetFeature
     minhistory::Int
     function CustomFeature(name::Symbol, f::Function, minhistory::Integer)
         minhistory ≥ 0 || throw(ArgumentError(
-            "CustomFeature minhistory must be ≥ 0, got $minhistory."))
+            "CustomFeature minhistory must be ≥ 0, got $minhistory. Pass the number " *
+            "of history values f needs, or 0 if it needs none."))
         new(name, f, Int(minhistory))
     end
 end

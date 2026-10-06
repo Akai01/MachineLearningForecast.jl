@@ -6,19 +6,48 @@
 
     @testset "constructor validation" begin
         @test_throws ArgumentError Lag(0)
+        @test_throws "got Lag(0), which would leak the current or a future target. " *
+                     "Use Lag(1) or a larger lag." Lag(0)
         @test_throws ArgumentError Lag(-3)
+        @test_throws "got Lag(-3), which would leak" Lag(-3)
         @test_throws ArgumentError RollingMean(0)
+        @test_throws "RollingMean window must be ≥ 1, got 0. Use e.g. RollingMean(7)." (
+            RollingMean(0))
         @test_throws ArgumentError RollingMean(3; lag=0)   # lag=0 would leak
+        @test_throws "RollingMean lag must be ≥ 1, got 0, which would include the " *
+                     "current or a future target (leakage). Use lag=1, the default." (
+            RollingMean(3; lag=0))
         @test_throws ArgumentError RollingStd(1)           # std needs window ≥ 2
+        @test_throws "RollingStd window must be ≥ 2, got 1. Use e.g. RollingStd(7)." (
+            RollingStd(1))
         @test_throws ArgumentError RollingMin(2; lag=-1)
+        @test_throws "RollingMin lag must be ≥ 1, got -1" RollingMin(2; lag=-1)
         @test_throws ArgumentError Diff(0)
+        @test_throws "Diff k must be ≥ 1, got 0. Use e.g. Diff(1) for the first " *
+                     "difference." Diff(0)
         @test_throws ArgumentError Diff(1; lag=0)
+        @test_throws "Diff lag must be ≥ 1, got 0, which would use the current or a " *
+                     "future target (leakage). Use lag=1, the default." Diff(1; lag=0)
         @test_throws ArgumentError Fourier(0, 3)
+        @test_throws "Fourier period must be finite and > 0 (in freq steps), got 0." (
+            Fourier(0, 3))
         @test_throws ArgumentError Fourier(7, 0)
+        @test_throws "Fourier order must be ≥ 1, got 0. Use e.g. Fourier(7, 2) for two " *
+                     "harmonics." Fourier(7, 0)
+        @test_throws "Use e.g. Fourier(365.25, 2)" Fourier(365.25, -1)
         @test_throws ArgumentError Calendar()
+        @test_throws "Calendar needs at least one part, e.g. Calendar(:dayofweek)." (
+            Calendar())
         @test_throws ArgumentError Calendar(:weekday)      # unknown part
+        @test_throws "unknown Calendar part :weekday; valid parts are :dayofmonth" (
+            Calendar(:weekday))
         @test_throws ArgumentError Exogenous()
+        @test_throws "Exogenous needs at least one column, e.g. Exogenous(:promo)." (
+            Exogenous())
         @test_throws ArgumentError CustomFeature(:f, identity, -1)
+        @test_throws "CustomFeature minhistory must be ≥ 0, got -1. Pass the number of " *
+                     "history values f needs, or 0 if it needs none." (
+            CustomFeature(:f, identity, -1))
     end
 
     @testset "Lag needs a whole number, Fourier a finite period" begin
@@ -138,10 +167,19 @@
         out = materialize(Exogenous(:promo), y, dfe)
         @test out.promo == Float64.(dfe.promo)
         @test_throws ArgumentError materialize(Exogenous(:absent), y, dfe)
+        @test_throws "column :absent is not present in the training data. Available " *
+                     "columns: ds, y, promo. Add column :absent to the data, or remove " *
+                     "it from the Exogenous feature." (
+            materialize(Exogenous(:absent), y, dfe))
         dfs = (ds=t, y=y, label=fill("a", 10))
         @test_throws ArgumentError materialize(Exogenous(:label), y, dfs)
+        @test_throws "exogenous column :label has non-numeric value \"a\" (type String)" (
+            materialize(Exogenous(:label), y, dfs))
         # featurevalues: missing column in the exogenous row errors clearly
         @test_throws ArgumentError MachineLearningForecast.featurevalues(Exogenous(:promo), y, t[1], (other=1.0,))
+        @test_throws "new_data is missing exogenous column :promo required by Exogenous. " *
+                     "Provide it for every forecast timestamp." (
+            MachineLearningForecast.featurevalues(Exogenous(:promo), y, t[1], (other=1.0,)))
         @test MachineLearningForecast.featurevalues(Exogenous(:promo), y, t[1], (promo=true,)) == (1.0,)
     end
 
@@ -193,8 +231,14 @@
         @test collect(fs) == fs.features
         @test MachineLearningForecast.outputnames(fs) == [:y_lag_1, :y_lag_7, :month]
         @test_throws ArgumentError FeatureSet()
+        @test_throws "FeatureSet needs at least one feature, e.g. FeatureSet(Lag(1))." (
+            FeatureSet())
         @test_throws ArgumentError FeatureSet(Lag(1), Lag(1))          # duplicate columns
+        @test_throws "FeatureSet produces duplicate column name :y_lag_1. Remove the " *
+                     "duplicated feature(s)" FeatureSet(Lag(1), Lag(1))
         @test_throws ArgumentError FeatureSet(Calendar(:month), Exogenous(:month))
+        @test_throws "duplicate column name :month" FeatureSet(Calendar(:month),
+                                                               Exogenous(:month))
         @test occursin("Lag(1)", sprint(show, FeatureSet(Lag(1))))
     end
 
@@ -227,11 +271,20 @@
         # too-short data errors with row counts in the message
         short = (ds=t[1:3], y=y[1:3])
         @test_throws ArgumentError MachineLearningForecast.build_training_frame(FeatureSet(Lag(5)), short, :y, :ds)
+        @test_throws "needs 5 history rows before the first usable training row, but " *
+                     "the data has only 3 rows. Provide at least 6 rows" (
+            MachineLearningForecast.build_training_frame(FeatureSet(Lag(5)), short, :y,
+                                                         :ds))
         # missing exogenous values error (interior missing)
         promo = Vector{Union{Missing,Float64}}(1.0:10.0)
         promo[5] = missing
         dfm = (ds=t, y=y, promo=promo)
         @test_throws ArgumentError MachineLearningForecast.build_training_frame(
             FeatureSet(Lag(1), Exogenous(:promo)), dfm, :y, :ds)
+        @test_throws "feature column :promo has a missing value at row 5 (time " *
+                     "2021-03-05). Missing values in exogenous columns are not " *
+                     "supported; impute or drop them" (
+            MachineLearningForecast.build_training_frame(
+                FeatureSet(Lag(1), Exogenous(:promo)), dfm, :y, :ds))
     end
 end

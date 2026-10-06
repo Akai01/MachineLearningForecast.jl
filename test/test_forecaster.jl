@@ -107,6 +107,13 @@
         fc2 = Forecaster(TestModels.LinAR(1.0, 0.0);
                          features=FeatureSet(Lag(1), Exogenous(:absent)), freq=Day(1))
         @test_throws ArgumentError fit(fc2, dfe)
+        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+            fc3 = Forecaster(m; features=FeatureSet(Lag(1), Exogenous(:absent)),
+                             freq=Day(1))
+            @test_throws "Exogenous(:absent) but column :absent is not present in the " *
+                         "training data. Available columns: ds, y, promo. Add column " *
+                         ":absent to the data" fit(fc3, dfe)
+        end
     end
 
     @testset "new_data without exogenous features warns and is ignored" begin

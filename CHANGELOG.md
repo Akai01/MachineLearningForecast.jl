@@ -54,6 +54,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   missing exogenous value were reported without the series and at a row
   counted within it, and a missing or off-grid timestamp at a row of the
   series after sorting it by time.
+- More `ArgumentError` messages name the offending value and the fix: those of
+  the feature constructors (`Lag`, the rolling statistics, `Diff`, `Fourier`,
+  `CustomFeature`) and of an `Exogenous` column absent from the training data.
 
 ### Fixed
 
