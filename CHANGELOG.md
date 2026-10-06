@@ -32,6 +32,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   before training, as `Direct` already did. A model holding an RNG object (e.g.
   `DecisionTreeRegressor(rng=StableRNG(1))`) no longer has its RNG advanced by
   `fit`, so refits, `backtest` folds and `tune` candidates are reproducible.
+- Displaying a forecaster fitted on a panel (REPL echo, `show`, `repr`) no
+  longer throws; it reads "trained on N series". A panel `Forecaster` now shows
+  its `id` column.
 
 ## [0.1.0]
 

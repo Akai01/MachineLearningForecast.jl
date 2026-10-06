@@ -363,13 +363,15 @@ _forecast_table(spec::Forecaster, grid, preds::Vector{Float64}) =
 function Base.show(io::IO, fc::Forecaster)
     print(io, "Forecaster(", nameof(typeof(fc.model)), ", ",
           length(fc.features), " features, ", fc.strategy, ", freq=", fc.freq,
-          ", target=:", fc.target, ", time=:", fc.time, ")")
+          ", target=:", fc.target, ", time=:", fc.time,
+          ispanel(fc) ? ", id=:$(fc.id)" : "", ")")
 end
 
 function Base.show(io::IO, f::FittedForecaster)
     spec = f.spec
+    trained = ispanel(spec) ? "$(nseries(f)) series" :
+              "$(f.n_train) rows ending $(f.t_last)"
     print(io, "FittedForecaster(", nameof(typeof(spec.model)), ", ",
           length(spec.features), " features, ", spec.strategy,
-          ", freq=", spec.freq, ", trained on ", f.n_train,
-          " rows ending ", f.t_last, ")")
+          ", freq=", spec.freq, ", trained on ", trained, ")")
 end

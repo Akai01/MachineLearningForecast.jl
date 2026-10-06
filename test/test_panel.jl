@@ -223,6 +223,21 @@
         end
     end
 
+    @testset "show displays panel specs and fitted panels" begin
+        for s in (Recursive(), Direct(2))
+            fc = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)); strat=s)
+            @test occursin("id=:unique_id", sprint(show, fc))
+            f = fit(fc, panel)
+            for txt in (sprint(show, f), sprint(show, MIME"text/plain"(), f))
+                @test occursin("trained on 3 series", txt)
+                @test occursin(string(s), txt)
+            end
+        end
+        single = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                            freq=Day(1))
+        @test !occursin("id=", sprint(show, single))
+    end
+
     @testset "single-series behaviour is unchanged" begin
         df = (ds=collect(Date(2022, 1, 1):Day(1):Date(2022, 2, 19)), y=Float64.(1:50))
         fc = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
