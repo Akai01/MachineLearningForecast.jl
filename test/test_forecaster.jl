@@ -126,7 +126,8 @@
         fc2 = Forecaster(TestModels.LinAR(1.0, 0.0);
                          features=FeatureSet(Lag(1), Exogenous(:absent)), freq=Day(1))
         @test_throws ArgumentError fit(fc2, dfe)
-        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             fc3 = Forecaster(m; features=FeatureSet(Lag(1), Exogenous(:absent)),
                              freq=Day(1))
             @test_throws "Exogenous(:absent) but column :absent is not present in the " *
@@ -179,7 +180,8 @@
     end
 
     @testset "empty time columns and non-numeric targets" begin
-        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             fc = Forecaster(m; features=FeatureSet(Lag(1)), freq=Day(1))
             @test_throws ArgumentError fit(fc, (ds=Date[], y=Float64[]))
             @test_throws "time column :ds is empty. Provide at least one row." fit(

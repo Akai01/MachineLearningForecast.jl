@@ -56,7 +56,8 @@ end # module
     end
 
     @testset "mutating the features vector cannot bypass the leak guard" begin
-        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             v = MachineLearningForecast.AbstractFeature[Lag(1)]
             fc = Forecaster(m; features=FeatureSet(v), freq=Day(1))
             push!(v, Exogenous(:y))
@@ -332,7 +333,8 @@ end # module
         dfe = (ds=df.ds, y=df.y, promo=Float64.(1:50))
         future = (ds=collect(df.ds[end] + Day(1):Day(1):df.ds[end] + Day(3)),
                   promo=[1.0, 2.0, 3.0])
-        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             bad = Forecaster(m; features=FeatureSet(Lag(1), ThirdPartyExog.NoCols(:promo)),
                              freq=Day(1))
             f = fit(bad, dfe)                     # fitting never reads cols

@@ -129,7 +129,8 @@
     end
 
     @testset "an empty panel, and Direct steps no series can reach" begin
-        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             empty = (unique_id=String[], ds=Date[], y=Float64[])
             @test_throws ArgumentError fit(mk(m, FeatureSet(Lag(1))), empty)
             @test_throws "the panel is empty: no rows found in the id column " *
@@ -152,7 +153,8 @@
                  (:y, NaN, "target column :y contains the non-finite value NaN at row 65"),
                  (:promo, missing,
                   "feature column :promo has a missing value at row 65 (time 2022-01-05)"))
-        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             for (col, val, phrase) in cases
                 fc = mk(m, FeatureSet(Lag(1), Exogenous(:promo)))
                 v = Vector{Union{Missing,Float64}}(big[col])
@@ -217,7 +219,8 @@
         noid = (ds=nd.ds, promo=nd.promo)
         err2 = try forecast(f, 2; new_data=noid) catch e; e end
         @test err2 isa ArgumentError && occursin("unique_id", err2.msg)
-        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             @test_throws "id column :unique_id not found in the data. Available " *
                          "columns: ds, y, promo. Pass id= with the name of your id " *
                          "column, or rename it to :unique_id." fit(
@@ -327,7 +330,8 @@
         s2 = collect(Date(2022, 2, 20):Day(1):Date(2022, 3, 1))
         apart = (unique_id=[fill("s1", 50); fill("s2", 10)], ds=[s1; s2],
                  y=Float64.(1:60))
-        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             fc = mk(m, FeatureSet(Lag(1)))
             @test_throws ArgumentError backtest(fc, big; horizon=5, initial=58)
             @test_throws "no complete backtest folds: the panel spans 60 distinct " *
@@ -356,7 +360,8 @@
                   promo=Float64.(1:60))
         cases = ((daily, Day(1), 5, 30, 4), (weekly, Week(1), 2, 20, 3))
         for (data, freq, h, init, stp) in cases,
-            m in (EvoTreeRegressor(nrounds=10), DecisionTreeRegressor(max_depth=3)),
+            m in (EvoTreeRegressor(nrounds=10),
+                  DecisionTreeRegressor(max_depth=3, rng=StableRNG(1))),
             s in (Recursive(), Direct(h))
             bt(fs) = backtest(Forecaster(m; features=fs, strategy=s, freq=freq,
                                          id=:unique_id),
@@ -391,7 +396,8 @@
         @test nseries(res.best_fitted) == 3
         # a misnamed time column gets backtest's message
         renamed = (unique_id=big.unique_id, when=big.ds, y=big.y)
-        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             grid = (model=[m],)
             @test_throws ArgumentError tune(mk(m, FeatureSet(Lag(1))), renamed;
                                             grid=grid, horizon=5, initial=40)

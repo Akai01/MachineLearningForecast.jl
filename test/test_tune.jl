@@ -37,12 +37,13 @@ end # module
     y = 10.0 .+ 2 .* sin.(2π .* (1:n) ./ 7) .+ 0.3 .* randn(rng, n)
     df = (ds=t, y=y)
     ncand(r) = length(r.table.mean_score)
-    base = Forecaster(DecisionTreeRegressor(max_depth=3);
+    base = Forecaster(DecisionTreeRegressor(max_depth=3, rng=StableRNG(1));
                       features=FeatureSet(Lag(1), Lag(7)),
                       strategy=Recursive(), freq=Day(1))
 
     @testset "2×2 GridSearch with DecisionTree" begin
-        grid = (model=[DecisionTreeRegressor(max_depth=2), DecisionTreeRegressor(max_depth=4)],
+        grid = (model=[DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
+                       DecisionTreeRegressor(max_depth=4, rng=StableRNG(1))],
                 features=[FeatureSet(Lag(1), Lag(7)),
                           FeatureSet(Lag(1), Lag(7), Calendar(:dayofweek))])
         result = tune(base, df; grid=grid, horizon=14, initial=90, step=14, metric=smape)
@@ -83,7 +84,8 @@ end # module
     end
 
     @testset "a non-finite score fails the candidate, never wins" begin
-        for good in (DecisionTreeRegressor(max_depth=3), EvoTreeRegressor(nrounds=10))
+        for good in (DecisionTreeRegressor(max_depth=3, rng=StableRNG(1)),
+                     EvoTreeRegressor(nrounds=10))
             r = tune(base, df; grid=(model=[TestModels.NaNModel(), good],),
                      horizon=14, initial=90, metric=mae)
             @test ismissing(r.table.mean_score[1]) && ismissing(r.table.std_score[1])
@@ -101,7 +103,7 @@ end # module
     end
 
     @testset "third-party sequential strategy drives the ask/tell loop" begin
-        space = [(model=DecisionTreeRegressor(max_depth=d),) for d in 1:5]
+        space = [(model=DecisionTreeRegressor(max_depth=d, rng=StableRNG(1)),) for d in 1:5]
         tuner = ThirdPartyTuning.Midpoint(space)
         result = tune(base, df; tuner=tuner, horizon=14, initial=90, metric=mae)
         # tune asked 3 times (the strategy's own termination), told 3 scores
@@ -136,7 +138,7 @@ end # module
     end
 
     @testset "max_evals budget terminates a never-ending strategy" begin
-        space = [(model=DecisionTreeRegressor(max_depth=d),) for d in 1:5]
+        space = [(model=DecisionTreeRegressor(max_depth=d, rng=StableRNG(1)),) for d in 1:5]
         endless = ThirdPartyTuning.Midpoint(space)
         endless.asks = -10^9   # never reaches its own stop condition in this test
         result = tune(base, df; tuner=endless, max_evals=2, horizon=14, initial=90)
@@ -144,7 +146,7 @@ end # module
     end
 
     @testset "RandomSearch" begin
-        grid = (model=[DecisionTreeRegressor(max_depth=d) for d in 1:4],)
+        grid = (model=[DecisionTreeRegressor(max_depth=d, rng=StableRNG(1)) for d in 1:4],)
         r1 = tune(base, df; grid=grid, tuner=RandomSearch(3; rng=StableRNG(7)),
                   horizon=14, initial=90)
         @test ncand(r1) == 3
@@ -194,7 +196,8 @@ end # module
     end
 
     @testset "ask must answer with a NamedTuple of known fields or nothing" begin
-        for m in (DecisionTreeRegressor(max_depth=2), EvoTreeRegressor(nrounds=5))
+        for m in (DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
+                  EvoTreeRegressor(nrounds=5))
             fcm = Forecaster(m; features=FeatureSet(Lag(1)), freq=Day(1))
             run(out) = tune(fcm, df; tuner=ThirdPartyTuning.Fixed(out), max_evals=2,
                             horizon=14, initial=90)
@@ -219,7 +222,8 @@ end # module
         cases = (((strategy=[:recursive, :direct],), "candidate 1 is :recursive"),
                  ((strategy=[Recursive(), "direct"],), "candidate 2 is \"direct\""),
                  ((features=[Lag(1)],), "candidate 1 is Lag(1)"))
-        for m in (DecisionTreeRegressor(max_depth=2), EvoTreeRegressor(nrounds=5)),
+        for m in (DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
+                  EvoTreeRegressor(nrounds=5)),
             (grid, phrase) in cases, tuner in (GridSearch(), RandomSearch(2))
             fcm = Forecaster(m; features=FeatureSet(Lag(1)), freq=Day(1))
             k = only(keys(grid))

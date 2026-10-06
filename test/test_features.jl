@@ -217,7 +217,8 @@
         @test collect(skipmissing(materialize(ok).s)) == y[1:7]
         @test fv(ok, y, t[1]) == (y[8],)
         @test fv(CustomFeature(:i, length, 0), y, t[1]) === (10.0,)
-        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             bad_fc = Forecaster(m; features=FeatureSet(Lag(1), short), freq=Day(1))
             @test_throws "CustomFeature(:s) indexed past its history" fit(bad_fc, df)
             fc = Forecaster(m; features=FeatureSet(Lag(1), ok), freq=Day(1))

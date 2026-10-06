@@ -128,7 +128,8 @@ end
     end
 
     @testset "metrics must be a tuple or vector of functions" begin
-        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             fcm = Forecaster(m; features=fs, freq=Day(1))
             for bad in (mae, (:mae,), ("mae", "rmse"), Dict(:mae => mae), [mae, :rmse])
                 @test_throws ArgumentError backtest(fcm, df; horizon=5, initial=80,
