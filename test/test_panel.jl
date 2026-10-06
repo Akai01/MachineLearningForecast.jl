@@ -217,6 +217,12 @@
         noid = (ds=nd.ds, promo=nd.promo)
         err2 = try forecast(f, 2; new_data=noid) catch e; e end
         @test err2 isa ArgumentError && occursin("unique_id", err2.msg)
+        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+            @test_throws "id column :unique_id not found in the data. Available " *
+                         "columns: ds, y, promo. Pass id= with the name of your id " *
+                         "column, or rename it to :unique_id." fit(
+                mk(m, FeatureSet(Lag(1))), (ds=ex.ds, y=ex.y, promo=ex.promo))
+        end
     end
 
     @testset "time columns typed Union{Missing,Date} or Any work with Exogenous" begin

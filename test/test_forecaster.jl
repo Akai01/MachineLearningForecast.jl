@@ -155,15 +155,43 @@
         unsorted = (ds=reverse(t), y=y)
         err = try fit(fc, unsorted) catch e; e end
         @test err isa ArgumentError && occursin("not sorted", err.msg)
-        # wrong frequency counts as gaps
+        # a wrong freq puts rows off the declared grid
         fc_w = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)), freq=Week(1))
         @test_throws ArgumentError fit(fc_w, df)
+        @test_throws "time column :ds has the timestamp 2022-01-02 at row 2, which does " *
+                     "not lie on the freq=1 week grid starting at 2022-01-01" fit(fc_w, df)
         # missing time column
         @test_throws ArgumentError fit(fc, (when=t, y=y))
+        @test_throws "time column :ds not found in the data. Available columns: when, " *
+                     "y. Pass time= with the name of your time column, or rename it to " *
+                     ":ds." fit(fc, (when=t, y=y))
+        @test_throws "target column :y not found in the data. Available columns: ds, " *
+                     "value. Pass target= with the name of your target column" fit(
+            fc, (ds=t, value=y))
+        @test_throws "Available columns: none, the table has no columns." fit(
+            fc, NamedTuple())
         # missing target values
         ym = Vector{Union{Missing,Float64}}(y)
         ym[7] = missing
         @test_throws ArgumentError fit(fc, (ds=t, y=ym))
+        @test_throws "target column :y contains missing values (first at row 7). " *
+                     "Impute or drop missing targets before fitting." fit(fc, (ds=t, y=ym))
+    end
+
+    @testset "empty time columns and non-numeric targets" begin
+        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+            fc = Forecaster(m; features=FeatureSet(Lag(1)), freq=Day(1))
+            @test_throws ArgumentError fit(fc, (ds=Date[], y=Float64[]))
+            @test_throws "time column :ds is empty. Provide at least one row." fit(
+                fc, (ds=Date[], y=Float64[]))
+            for (col, T) in ((string.(y), "String"), (Any[y...], "Any"))
+                @test_throws ArgumentError fit(fc, (ds=t, y=col))
+                @test_throws "target column :y has element type $T; expected a Real " *
+                             "(numeric) target. Convert it to numbers before fitting, " *
+                             "e.g. parse.(Float64, col) for strings or Float64.(col) " *
+                             "for a Vector{Any} of numbers." fit(fc, (ds=t, y=col))
+            end
+        end
     end
 
     @testset "table genericity: columntable and rowtable agree" begin
@@ -177,6 +205,9 @@
         dt = Tables.dictcolumntable(df)        # yet another table flavor
         @test forecast(fit(fc, dt), 5).y_hat == ref.y_hat
         @test_throws ArgumentError fit(fc, 42)   # not a table
+        @test_throws "expected a Tables.jl-compatible table (NamedTuple of vectors, " *
+                     "DataFrame, CSV.File, ...), got Int64. Convert your data to a " *
+                     "table first." fit(fc, 42)
         # the forecast output is itself a Tables.jl table
         @test Tables.istable(ref)
         @test Tables.columntable(ref) == ref

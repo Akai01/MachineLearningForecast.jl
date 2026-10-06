@@ -40,7 +40,8 @@ rowsubset(tbl::NamedTuple, r) = map(v -> v[r], tbl)
 function require_column(tbl::NamedTuple, col::Symbol, what::AbstractString)
     haskey(tbl, col) || throw(ArgumentError(
         "$what column :$col not found in the data. Available columns: " *
-        "$(join(keys(tbl), ", "))."))
+        "$(isempty(tbl) ? "none, the table has no columns" : join(keys(tbl), ", ")). " *
+        "Pass $what= with the name of your $what column, or rename it to :$col."))
     return tbl[col]
 end
 
@@ -149,7 +150,9 @@ function target_vector(tbl::NamedTuple, target::Symbol, rows=1:nrows(tbl))
     end
     eltype(col) <: Union{Real,Missing} || throw(ArgumentError(
         "target column :$target has element type $(eltype(col)); expected a Real " *
-        "(numeric) target."))
+        "(numeric) target. Convert it to numbers before fitting, e.g. " *
+        "parse.(Float64, col) for strings or Float64.(col) for a Vector{Any} of " *
+        "numbers."))
     vals = Float64.(col)
     j = findfirst(!isfinite, vals)
     j === nothing || throw(ArgumentError(

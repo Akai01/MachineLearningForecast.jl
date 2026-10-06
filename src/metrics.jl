@@ -4,8 +4,11 @@
 function _validate_metric_args(y, ŷ)
     length(y) == length(ŷ) || throw(ArgumentError(
         "metric inputs must have equal length, got length(y)=$(length(y)) and " *
-        "length(ŷ)=$(length(ŷ))."))
-    isempty(y) && throw(ArgumentError("metric inputs are empty."))
+        "length(ŷ)=$(length(ŷ)). Pass one forecast per actual, aligned element by " *
+        "element."))
+    isempty(y) && throw(ArgumentError(
+        "metric inputs are empty: got length(y)=0 and length(ŷ)=0. Pass at least " *
+        "one actual and its forecast."))
     return nothing
 end
 
@@ -97,10 +100,12 @@ mase([10.0, 12.0], [11.0, 11.0]; y_train=[1.0, 3.0, 1.0, 3.0])   # 0.5
 """
 function mase(y::AbstractVector, ŷ::AbstractVector; y_train::AbstractVector, m::Integer=1)
     _validate_metric_args(y, ŷ)
-    m ≥ 1 || throw(ArgumentError("mase seasonality m must be ≥ 1, got $m."))
+    m ≥ 1 || throw(ArgumentError(
+        "mase seasonality m must be ≥ 1, got $m. Pass the season length in steps, " *
+        "e.g. m=7 for weekly seasonality on daily data, or m=1 (the default)."))
     length(y_train) > m || throw(ArgumentError(
         "mase needs length(y_train) > m; got length(y_train)=$(length(y_train)) " *
-        "with m=$m."))
+        "with m=$m. Pass a longer y_train or a smaller m."))
     denom = Statistics.mean(abs(y_train[i] - y_train[i - m]) for i in (m + 1):length(y_train))
     if iszero(denom)
         @warn "mase is undefined for a constant training series (naive error is " *

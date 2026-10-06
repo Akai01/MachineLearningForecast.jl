@@ -114,6 +114,9 @@ end # module
         # a genuine gap is still caught
         gapped = vcat(me[1:5], me[7:end])
         @test_throws ArgumentError MachineLearningForecast.validate_time_column(gapped, :ds, Month(1))
+        @test_throws "time column :ds has 1 gap for freq=1 month; first gap after " *
+                     "2020-05-31. Reindex your data or resample before fitting." (
+            MachineLearningForecast.validate_time_column(gapped, :ds, Month(1)))
     end
 
     @testset "gap count reports discontinuities, not off-grid rows" begin
