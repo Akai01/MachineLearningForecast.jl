@@ -95,6 +95,28 @@ end # module
         end
     end
 
+    @testset "non-finite exogenous values pass through to the model" begin
+        # Rejecting them like targets was considered and declined.
+        promo = Float64.(1:50); promo[20] = NaN; promo[30] = Inf
+        dfe = (ds=df.ds, y=df.y, promo=promo)
+        fse = FeatureSet(Lag(1), Exogenous(:promo))
+        future = (ds=df.ds[end] .+ Day.(1:3), promo=[NaN, 1.0, -Inf])
+        echo = Forecaster(TestModels.EchoColumn(:promo); features=fse, freq=Day(1))
+        @test isequal(forecast(fit(echo, dfe), 3; new_data=future).y_hat,
+                      [NaN, 1.0, -Inf])
+        X, _, _ = MachineLearningForecast.build_training_frame(fse, dfe, :y, :ds)
+        @test isnan(X.promo[19]) && X.promo[29] == Inf
+        dt = Forecaster(DecisionTreeRegressor(max_depth=2, rng=StableRNG(1));
+                        features=fse, freq=Day(1))
+        @test length(backtest(dt, dfe; horizon=3, initial=40).folds.y_hat) == 9
+        clean = (ds=df.ds, y=df.y, promo=Float64.(1:50))
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+            f = fit(Forecaster(m; features=fse, freq=Day(1)), clean)
+            @test length(forecast(f, 3; new_data=future).y_hat) == 3
+        end
+    end
+
     @testset "time column type must support + freq" begin
         err = try fit(mk(), (ds=string.(df.ds), y=df.y)) catch e; e end
         @test err isa ArgumentError
