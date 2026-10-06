@@ -3,10 +3,11 @@
 @testset "panel" begin
     # three ragged series with very different levels, so any cross-series bleed
     # shows up as an obviously wrong number rather than a subtle one
-    function makepanel(; lens=(40, 30, 35), levels=(100.0, 10.0, 50.0))
+    function makepanel(; lens=(40, 30, 35), levels=(100.0, 10.0, 50.0),
+                       starts=fill(Date(2022, 1, 1), 3))
         ids = String[]; ds = Date[]; y = Float64[]
-        for (k, (n, lv)) in enumerate(zip(lens, levels))
-            t = collect(Date(2022, 1, 1):Day(1):Date(2022, 1, 1) + Day(n - 1))
+        for (k, (n, lv, t0)) in enumerate(zip(lens, levels, starts))
+            t = collect(t0:Day(1):t0 + Day(n - 1))
             append!(ids, fill("s$k", n)); append!(ds, t)
             append!(y, lv .+ Float64.(1:n))
         end
@@ -336,6 +337,36 @@
                                                 metrics=bad)
             @test_throws "metrics=(mae, rmse)" backtest(fc, big; horizon=5,
                                                         initial=40, metrics=bad)
+        end
+    end
+
+    @testset "ragged start dates: fit, forecast, Direct and backtest" begin
+        starts = [Date(2022, 1, 1), Date(2022, 1, 11), Date(2022, 1, 21)]
+        rag = makepanel(lens=(60, 50, 40), starts=starts)     # all end on 2022-03-01
+        actual = Dict((rag.unique_id[i], rag.ds[i]) => rag.y[i] for i in eachindex(rag.y))
+        fourier = FeatureSet(Lag(1), Fourier(7, 1))
+        for s in (Recursive(), Direct(5))
+            f = fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)); strat=s), rag)
+            @test [st.t_start for st in f.series] == starts
+            @test [st.n_train for st in f.series] == [60, 50, 40]
+            out = forecast(f, 3)
+            @test out.ds == repeat(Date(2022, 3, 1) .+ Day.(1:3), 3)
+            @test out.y_hat == repeat([160.0, 60.0, 90.0], inner=3)
+            # Fourier's step index is 0-based per series, as documented.
+            fe = fit(mk(TestModels.EchoColumn(:fourier_7_0_sin_1), fourier; strat=s), rag)
+            got = forecast(fe, 3).y_hat
+            @test got ≈ [sin(2π * (n - 1 + i) / 7) for n in (60, 50, 40) for i in 1:3]
+            @test !(got[1] ≈ got[4]) && !(got[1] ≈ got[7])      # same date, other phase
+            # s3 starts after the first origin and joins at the second.
+            r = backtest(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)); strat=s), rag;
+                         horizon=5, initial=15, step=10)
+            @test unique(r.folds.origin) == Date(2022, 1, 15) .+ Day.(0:10:40)
+            first_fold = r.folds.origin .== Date(2022, 1, 15)
+            @test unique(r.folds.unique_id[first_fold]) == ["s1", "s2"]
+            @test count(==("s3"), r.folds.unique_id) == 4 * 5
+            @test all(yh == actual[(id, o)] for (yh, id, o) in
+                      zip(r.folds.y_hat, r.folds.unique_id, r.folds.origin))
+            @test all(==(3.0), r.metrics.value[r.metrics.metric .== :mae])
         end
     end
 
