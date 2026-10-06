@@ -25,6 +25,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `FittedForecaster` stores `series::Vector{SeriesState}`. For a single series
   `f.y_history`, `f.t_last`, `f.t_start` and `f.n_train` still work; on a panel
   they raise an error pointing at `f.series`.
+- `Lag(1.5)`, `Lag("a")` and `Lag(missing)` throw an `ArgumentError` with an
+  example instead of an `InexactError` or `MethodError`; a whole float such as
+  `Lag(7.0)` is still accepted.
+- `backtest` checks `metrics`, and `tune` checks `metric`, before fitting
+  anything. A bare function (`metrics=mae`), symbols or strings throw an
+  `ArgumentError` with an example (`metrics=(mae, rmse)`, `metric=smape`)
+  instead of a `MethodError` after the first fold's fit, or in `tune` an "all
+  candidates failed" error.
 
 ### Fixed
 
@@ -49,10 +57,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Thursdays). Each series now takes exogenous values from its own rows and is
   forecast only over the steps it has data for, so a fold scores the same
   `(id, time)` rows as it would without the exogenous feature.
-- `Lag(1.5)`, `Lag("a")` and `Lag(missing)` throw an `ArgumentError` with an
-  example instead of an `InexactError` or `MethodError`; a whole float such as
-  `Lag(7.0)` is still accepted. `Fourier` rejects a non-finite period:
-  `Fourier(Inf, 2)` was accepted and produced constant columns.
+- `Fourier` rejects a non-finite period: `Fourier(Inf, 2)` was accepted and
+  produced constant columns.
 
 ## [0.1.0]
 

@@ -93,4 +93,24 @@ end
         res = backtest(fc_d, df; horizon=3, initial=90, metrics=(mae,))
         @test maximum(res.metrics.fold) == 3   # origins 90, 93, 96
     end
+
+    @testset "metrics must be a tuple or vector of functions" begin
+        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+            fcm = Forecaster(m; features=fs, freq=Day(1))
+            for bad in (mae, (:mae,), ("mae", "rmse"), Dict(:mae => mae), [mae, :rmse])
+                @test_throws ArgumentError backtest(fcm, df; horizon=5, initial=80,
+                                                    metrics=bad)
+                @test_throws "got $(repr(bad)). Pass e.g. metrics=(mae, rmse)" backtest(
+                    fcm, df; horizon=5, initial=80, metrics=bad)
+            end
+        end
+        # a vector, a named tuple and an anonymous function keep working
+        r = backtest(fc, df; horizon=5, initial=80, step=10, metrics=[mae, rmse])
+        @test r.metrics.metric == [:mae, :rmse, :mae, :rmse, :mae, :rmse]
+        r2 = backtest(fc, df; horizon=5, initial=80, step=10, metrics=(a=mae,))
+        @test r2.metrics.value == r.metrics.value[r.metrics.metric .== :mae]
+        r3 = backtest(fc, df; horizon=5, initial=80, step=10,
+                      metrics=((a, b) -> mae(a, b),))
+        @test r3.metrics.value == r2.metrics.value
+    end
 end

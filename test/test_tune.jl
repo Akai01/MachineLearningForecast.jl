@@ -171,6 +171,19 @@ end # module
                                         horizon=14, initial=90, max_evals=0)
     end
 
+    @testset "metric must be one function, checked before any fit" begin
+        grid = (model=[DecisionTreeRegressor(max_depth=2), EvoTreeRegressor(nrounds=5)],)
+        for bad in ((mae, rmse), [mae], :mae, "smape")
+            @test_throws ArgumentError tune(base, df; grid=grid, horizon=14, initial=90,
+                                            metric=bad)
+            @test_throws "got $(repr(bad)). Pass e.g. metric=smape" tune(
+                base, df; grid=grid, horizon=14, initial=90, metric=bad)
+        end
+        r = tune(base, df; grid=grid, horizon=14, initial=90, metric=(a, b) -> mae(a, b))
+        @test r.table.mean_score == tune(base, df; grid=grid, horizon=14, initial=90,
+                                         metric=mae).table.mean_score
+    end
+
     @testset "fit-count guard warns on large searches" begin
         big = (features=[FeatureSet(Lag(k)) for k in 1:3],
                strategy=fill(Direct(14), 9))

@@ -295,6 +295,9 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
     horizon ≥ 1 || throw(ArgumentError("tune horizon must be ≥ 1, got $horizon."))
     initial ≥ 1 || throw(ArgumentError("tune initial must be ≥ 1, got $initial."))
     step ≥ 1 || throw(ArgumentError("tune step must be ≥ 1, got $step."))
+    _iscallable(metric) || throw(ArgumentError(
+        "tune metric must be one metric function, got $(repr(metric)). Pass e.g. " *
+        "metric=smape; tune ranks candidates by a single metric."))
     tbl = normalize_table(data)
     seq = _sequence(tuner, grid)
     # Only warn about fits that will actually run: max_evals truncates the queue.

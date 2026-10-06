@@ -186,6 +186,12 @@
         @test_throws ArgumentError backtest(mk(TestModels.LinAR(1.0, 0.0),
                                                FeatureSet(Lag(30))), big;
                                             horizon=5, initial=20, step=10)
+        for bad in (mae, (:mae,), ("mae",))
+            @test_throws ArgumentError backtest(fc, big; horizon=5, initial=40,
+                                                metrics=bad)
+            @test_throws "metrics=(mae, rmse)" backtest(fc, big; horizon=5,
+                                                        initial=40, metrics=bad)
+        end
     end
 
     @testset "backtest with Exogenous on ragged and phase-offset panels" begin

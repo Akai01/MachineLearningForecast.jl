@@ -131,3 +131,5 @@ needs_ytrain(::typeof(mase)) = true
 # Call a metric under its own convention.
 _apply_metric(metric, y, ŷ, y_train) =
     needs_ytrain(metric) ? metric(y, ŷ; y_train=y_train) : metric(y, ŷ)
+
+_iscallable(m) = !isempty(methods(m))
