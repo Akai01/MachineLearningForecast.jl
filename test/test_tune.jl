@@ -6,8 +6,8 @@ module ThirdPartyTuning
 using MachineLearningForecast: TuningStrategy
 import MachineLearningForecast: ask, tell!
 
-mutable struct Midpoint <: TuningStrategy
-    space::Vector{<:NamedTuple}
+mutable struct Midpoint{T<:NamedTuple} <: TuningStrategy
+    space::Vector{T}
     asks::Int
     told::Vector{Tuple{NamedTuple,Union{Missing,Float64}}}
 end
