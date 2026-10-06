@@ -154,6 +154,39 @@
         @test MachineLearningForecast.featurevalues(f, y, t[1], nothing) == (mean(y),)
     end
 
+    @testset "CustomFeature errors name the feature and the fix" begin
+        fv(f, h, tn) = MachineLearningForecast.featurevalues(f, h, tn, nothing)
+        short = CustomFeature(:s, h -> h[end - 2], 1)
+        @test_throws ArgumentError materialize(short)
+        @test_throws "CustomFeature(:s) indexed past its history at time 2021-03-02, " *
+                     "where f sees 1 history value" materialize(short)
+        @test_throws "BoundsError" materialize(short)
+        @test_throws "raise minhistory (now 1)" materialize(short)
+        @test_throws ArgumentError fv(short, y[1:2], t[3])
+        @test_throws "at time 2021-03-03, where f sees 2 history values" fv(
+            short, y[1:2], t[3])
+        # an error that is not about history length passes through unchanged
+        @test_throws DomainError materialize(CustomFeature(:d, h -> sqrt(-1.0), 0))
+        for (ret, shown) in (("x", "\"x\""), (missing, "missing"), ([1.0], "[1.0]"))
+            bad = CustomFeature(:r, h -> ret, 0)
+            @test_throws ArgumentError materialize(bad)
+            msg = "CustomFeature(:r) returned $shown at time 2021-03-01"
+            @test_throws msg materialize(bad)
+            @test_throws "f must return one real number" fv(bad, y, t[1])
+        end
+        # valid features are unchanged, and so is every value they produce
+        ok = CustomFeature(:s, h -> h[end - 2], 3)
+        @test collect(skipmissing(materialize(ok).s)) == y[1:7]
+        @test fv(ok, y, t[1]) == (y[8],)
+        @test fv(CustomFeature(:i, length, 0), y, t[1]) === (10.0,)
+        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+            bad_fc = Forecaster(m; features=FeatureSet(Lag(1), short), freq=Day(1))
+            @test_throws "CustomFeature(:s) indexed past its history" fit(bad_fc, df)
+            fc = Forecaster(m; features=FeatureSet(Lag(1), ok), freq=Day(1))
+            @test all(isfinite, forecast(fit(fc, df), 3).y_hat)
+        end
+    end
+
     @testset "FeatureSet" begin
         fs = FeatureSet(Lag(1), Lag(7), Calendar(:month))
         @test length(fs) == 3

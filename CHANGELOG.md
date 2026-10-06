@@ -40,6 +40,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `tune` on a panel whose data lacks the time column throws the same
   `ArgumentError` as `backtest` instead of a `FieldError` (an `ErrorException`
   on Julia 1.10).
+- A `CustomFeature` whose function indexes past its history (its `minhistory`
+  is too small) or returns something that is not a number throws an
+  `ArgumentError` naming the feature, the timestamp, the history length and
+  the fix, instead of a bare `BoundsError` or `MethodError`. Valid custom
+  features produce the same values as before.
 
 ### Fixed
 

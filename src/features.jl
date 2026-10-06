@@ -423,14 +423,33 @@ function materialize!(out::ColumnAccumulator, f::CustomFeature, y::AbstractVecto
     n = length(y)
     col = Vector{Union{Missing,Float64}}(missing, n)
     for i in (f.minhistory + 1):n
-        col[i] = Float64(f.f(view(y, 1:(i - 1))))
+        col[i] = _customvalue(f, view(y, 1:(i - 1)), t[i])
     end
     push!(out, f.name => col)
     return out
 end
 
 featurevalues(f::CustomFeature, y_hist::AbstractVector, t_next, exog_row) =
-    (Float64(f.f(y_hist)),)
+    (_customvalue(f, y_hist, t_next),)
+
+function _customvalue(f::CustomFeature, h::AbstractVector, t)
+    v = try
+        f.f(h)
+    catch err
+        err isa BoundsError || rethrow()
+        throw(ArgumentError(
+            "CustomFeature(:$(f.name)) indexed past its history at time $t, where f " *
+            "sees $(_nvalues(h)): $(sprint(showerror, err)). If f needs more values, " *
+            "raise minhistory (now $(f.minhistory)) to that number."))
+    end
+    # isa Real is the fast path; applicable keeps the rest.
+    v isa Real || applicable(Float64, v) || throw(ArgumentError(
+        "CustomFeature(:$(f.name)) returned $(repr(v)) at time $t, where f sees " *
+        "$(_nvalues(h)), but f must return one real number, e.g. mean(h)."))
+    return Float64(v)
+end
+
+_nvalues(h) = string(length(h), " history value", length(h) == 1 ? "" : "s")
 
 # ---------------------------------------------------------------------------
 # Equality and hashing: features are value objects — two features with the same
