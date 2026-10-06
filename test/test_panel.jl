@@ -313,6 +313,12 @@
         actual = Dict((big.unique_id[i], big.ds[i]) => big.y[i] for i in eachindex(big.y))
         @test all(actual[(r.folds.unique_id[j], r.folds.ds[j])] == r.folds.y[j]
                   for j in eachindex(r.folds.y))
+        # LinAR(1, 0) is naive: each step repeats the origin's actual.
+        @test all(yh == actual[(id, o)] for (yh, id, o) in
+                  zip(r.folds.y_hat, r.folds.unique_id, r.folds.origin))
+        # y climbs 1 a day, so step s misses by s in every fold.
+        @test r.metrics.fold == [1, 1, 2, 2, 0, 0]
+        @test r.metrics.value ≈ repeat([3.0, sqrt(11.0)], 3)
         @test occursin("horizon 5", sprint(show, MIME"text/plain"(), r))
         @test occursin("folds", sprint(show, r))
         # initial is counted in timestamps, and must clear minhistory
