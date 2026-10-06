@@ -120,7 +120,7 @@ for (T, stem, fun, minw, example) in (
         end
         $T(window::Integer; lag::Integer=1) = $T(window, lag)
         outputnames(f::$T) = [Symbol("y_", $stem, "_", f.window, "_lag_", f.lag)]
-        _rollfun(::$T) = $fun
+        _roll_fun(::$T) = $fun
     end
 end
 
@@ -132,7 +132,7 @@ minhistory(f::RollingFeature) = f.window + f.lag - 1
 function materialize!(out::ColumnAccumulator, f::RollingFeature, y::AbstractVector{Float64},
                       t::AbstractVector, data::NamedTuple)
     n = length(y)
-    g = _rollfun(f)
+    g = _roll_fun(f)
     col = Vector{Union{Missing,Float64}}(missing, n)
     for i in (f.window + f.lag):n
         hi = i - f.lag
@@ -144,7 +144,7 @@ end
 
 function featurevalues(f::RollingFeature, y_hist::AbstractVector, t_next, exog_row)
     hi = length(y_hist) - f.lag + 1
-    return (_rollfun(f)(view(y_hist, (hi - f.window + 1):hi)),)
+    return (_roll_fun(f)(view(y_hist, (hi - f.window + 1):hi)),)
 end
 
 # ---------------------------------------------------------------------------
@@ -372,12 +372,12 @@ end
 function _exog_column(raw, c::Symbol)
     vals = Vector{Union{Missing,Float64}}(missing, length(raw))
     for i in eachindex(raw)
-        ismissing(raw[i]) || (vals[i] = _tofloat(raw[i], c))
+        ismissing(raw[i]) || (vals[i] = _to_float(raw[i], c))
     end
     return vals
 end
 
-function _tofloat(v, name::Symbol)
+function _to_float(v, name::Symbol)
     v isa Real && return Float64(v)
     throw(ArgumentError(
         "exogenous column :$name has non-numeric value $(repr(v)) " *
@@ -390,7 +390,7 @@ function featurevalues(f::Exogenous, y_hist::AbstractVector, t_next, exog_row)
         haskey(exog_row, c) || throw(ArgumentError(
             "new_data is missing exogenous column :$c required by Exogenous. " *
             "Provide it for every forecast timestamp."))
-        _tofloat(exog_row[c], c)
+        _to_float(exog_row[c], c)
     end for c in f.cols)
 end
 

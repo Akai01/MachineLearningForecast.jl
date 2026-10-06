@@ -281,7 +281,7 @@ function _forecast_spec(f::FittedForecaster, spec::Forecaster{M,S,Nothing},
                         h::Integer, new_data) where {M,S}
     st = only(getfield(f, :series))
     grid = future_grid(st.t_start, spec.freq, st.n_train, h)
-    exogcols = exogenouscolumns(spec.features)
+    exogcols = exogenous_columns(spec.features)
     exog_rows = nothing
     if !isempty(exogcols)
         new_data === nothing && throw(ArgumentError(

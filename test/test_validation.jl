@@ -379,7 +379,7 @@ end # module
                           features=FeatureSet(Lag(1), ThirdPartyExog.Doubled([:promo])))
         @test forecast(fit(echo, dfe), 3; new_data=future).y_hat == [2.0, 4.0, 6.0]
         fs3 = FeatureSet(Lag(1), Exogenous(:a, :b), ThirdPartyExog.Doubled([:c]))
-        @test (@inferred MachineLearningForecast.exogenouscolumns(fs3)) == [:a, :b, :c]
-        @test MachineLearningForecast.exogenouscolumns(FeatureSet(Lag(1))) == Symbol[]
+        @test (@inferred MachineLearningForecast.exogenous_columns(fs3)) == [:a, :b, :c]
+        @test MachineLearningForecast.exogenous_columns(FeatureSet(Lag(1))) == Symbol[]
     end
 end

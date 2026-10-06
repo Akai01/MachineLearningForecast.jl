@@ -96,7 +96,7 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, initial,
         "no complete backtest folds: data has $n rows, but the first fold needs " *
         "initial + horizon = $(initial + horizon). Provide more data or reduce " *
         "initial/horizon."))
-    exogcols = exogenouscolumns(fc.features)
+    exogcols = exogenous_columns(fc.features)
 
     T = eltype(t_all)
     origin_col = T[]
@@ -109,9 +109,9 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, initial,
     m_metric = Symbol[]
     m_value = Float64[]
     for (k, o) in enumerate(origins)
-        fitted = fit(fc, rowsubset(tbl, 1:o))
+        fitted = fit(fc, row_subset(tbl, 1:o))
         nd = isempty(exogcols) ? nothing :
-             rowsubset(tbl[Tuple([fc.time; exogcols])], (o + 1):(o + horizon))
+             row_subset(tbl[Tuple([fc.time; exogcols])], (o + 1):(o + horizon))
         fcast = forecast(fitted, horizon; new_data=nd)
         ytrue = y_all[(o + 1):(o + horizon)]
         yhat = fcast.y_hat

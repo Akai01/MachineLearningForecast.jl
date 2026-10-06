@@ -51,7 +51,7 @@ function panel_groups(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
         rows = groups[key]
         t = tbl[fc.time][rows]
         issorted(t) || (rows = rows[sortperm(t)])
-        sub = rowsubset(tbl, rows)
+        sub = row_subset(tbl, rows)
         user_rows = base[rows]
         _in_series(fc, key) do
             validate_time_column(sub[fc.time], fc.time, fc.freq, user_rows)
@@ -193,7 +193,7 @@ function _forecast_panel(f::FittedForecaster, hs::Vector{Int}, new_data)
     grids = [future_grid(st.t_start, spec.freq, st.n_train, hs[k])
              for (k, st) in enumerate(states)]
 
-    exogcols = exogenouscolumns(spec.features)
+    exogcols = exogenous_columns(spec.features)
     exog_rows = nothing
     if !isempty(exogcols)
         new_data === nothing && throw(ArgumentError(
@@ -336,7 +336,7 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
         "no complete backtest folds: the panel spans $ngrid distinct timestamps, " *
         "but the first fold needs initial + horizon = $(initial + horizon). " *
         "Provide more history or reduce initial/horizon."))
-    exogcols = exogenouscolumns(fc.features)
+    exogcols = exogenous_columns(fc.features)
 
     # actuals indexed by (id, timestamp) so ragged series line up
     actual = Dict{Tuple{Any,Any},Float64}()
@@ -354,12 +354,12 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
     for (k, o) in enumerate(origins)
         t_origin = grid[o]
         train_rows = findall(<=(t_origin), t_all)
-        fitted = _fit_panel(fc, rowsubset(tbl, train_rows), train_rows)
+        fitted = _fit_panel(fc, row_subset(tbl, train_rows), train_rows)
         fcast = if isempty(exogcols)
             forecast(fitted, horizon)
         else
-            nd = rowsubset(tbl[Tuple([fc.id; fc.time; exogcols])],
-                           findall(>(t_origin), t_all))
+            nd = row_subset(tbl[Tuple([fc.id; fc.time; exogcols])],
+                            findall(>(t_origin), t_all))
             # Steps past a series' data have no exogenous row or actual.
             hs = map(fitted.series) do st
                 g = future_grid(st.t_start, fc.freq, st.n_train, horizon)

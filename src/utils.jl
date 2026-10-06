@@ -35,7 +35,7 @@ end
 nrows(tbl::NamedTuple) = isempty(tbl) ? 0 : length(first(tbl))
 
 "Rows `r` of a columntable, as a columntable (columns are copied slices)."
-rowsubset(tbl::NamedTuple, r) = map(v -> v[r], tbl)
+row_subset(tbl::NamedTuple, r) = map(v -> v[r], tbl)
 
 function require_column(tbl::NamedTuple, col::Symbol, what::AbstractString)
     haskey(tbl, col) || throw(ArgumentError(

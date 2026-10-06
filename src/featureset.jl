@@ -80,7 +80,7 @@ function targetcolumnmask(fs::FeatureSet)
 end
 
 "The exogenous columns required by the set (empty if none)."
-function exogenouscolumns(fs::FeatureSet)
+function exogenous_columns(fs::FeatureSet)
     cols = Symbol[]
     for f in fs.features
         f isa ExogenousFeature || continue
