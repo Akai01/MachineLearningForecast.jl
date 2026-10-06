@@ -147,4 +147,35 @@ end
                       metrics=((a, b) -> mae(a, b),))
         @test r3.metrics.value == r2.metrics.value
     end
+
+    @testset "edge cases: horizon 1 and bad data" begin
+        r1 = backtest(fc, df; horizon=1, initial=95, metrics=(mae,))
+        @test r1.folds.step == ones(Int, 5)
+        @test r1.folds.y_hat == y[95:99] && r1.folds.y == y[96:100]
+        @test all(==(1.0), r1.metrics.value)
+        @test_throws TypeError backtest(fc, df; horizon=1.5, initial=95)
+        ym = Vector{Union{Missing,Float64}}(y); ym[55] = missing
+        yn = copy(y); yn[55] = NaN
+        gapped = (ds=[t[1:30]; t[32:end]], y=y[1:99])
+        bad = [(ds=Date[], y=Float64[]) => "time column :ds is empty",
+               (ds=t[1:3], y=y[1:3]) => "no complete backtest folds: data has 3 rows",
+               (ds=t, y=ym) => "contains missing values (first at row 55)",
+               (ds=t, y=yn) => "the non-finite value NaN at row 55",
+               gapped => "time column :ds has 1 gap for freq=1 day",
+               (ds=t, y=string.(y)) => "target column :y has element type String",
+               (ds=string.(t), y=y) => "has element type String, which does not support",
+               42 => "expected a Tables.jl-compatible table"]
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+            fcm = Forecaster(m; features=FeatureSet(Lag(1), Lag(2)), freq=Day(1))
+            r = backtest(fcm, df; horizon=1, initial=95)
+            want = [only(forecast(fit(fcm, (ds=t[1:o], y=y[1:o])), 1).y_hat)
+                    for o in 95:99]
+            @test r.folds.y_hat == want
+            for (data, msg) in bad
+                @test_throws ArgumentError backtest(fcm, data; horizon=1, initial=5)
+                @test_throws msg backtest(fcm, data; horizon=1, initial=5)
+            end
+        end
+    end
 end

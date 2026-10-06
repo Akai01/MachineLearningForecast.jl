@@ -196,6 +196,31 @@
         end
     end
 
+    @testset "edge cases: horizon 1 and too little history" begin
+        fc = Forecaster(TestModels.LinAR(0.8, 2.0); features=FeatureSet(Lag(1)),
+                        freq=Day(1))
+        h1 = forecast(fit(fc, df), 1)
+        @test h1.y_hat == [0.8 * y[end] + 2.0] && h1.ds == [t[end] + Day(1)]
+        @test_throws MethodError forecast(fit(fc, df), 1.5)
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+            fs = FeatureSet(Lag(1), Lag(7))
+            f = fit(Forecaster(m; features=fs, freq=Day(1)), df)
+            @test forecast(f, 1).y_hat == forecast(f, 3).y_hat[1:1]
+            # Direct's step-1 model trains on Recursive's rows.
+            fd = fit(Forecaster(m; features=fs, strategy=Direct(1), freq=Day(1)), df)
+            @test forecast(fd, 1).y_hat == forecast(f, 1).y_hat
+            deep = Forecaster(m; features=FeatureSet(Lag(5)), freq=Day(1))
+            for k in (3, 5)
+                @test_throws ArgumentError fit(deep, (ds=t[1:k], y=y[1:k]))
+                @test_throws "needs 5 history rows before the first usable training " *
+                             "row, but the data has only $k rows. Provide at least 6 " *
+                             "rows" fit(deep, (ds=t[1:k], y=y[1:k]))
+            end
+            @test fit(deep, (ds=t[1:6], y=y[1:6])).n_train == 6
+        end
+    end
+
     @testset "table genericity: columntable and rowtable agree" begin
         fc = Forecaster(TestModels.LinAR(0.9, 1.0);
                         features=FeatureSet(Lag(1), RollingMean(3), Calendar(:dayofweek)),

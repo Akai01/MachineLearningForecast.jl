@@ -272,4 +272,38 @@ end # module
         @test_logs (:warn, r"560 model fits") match_mode=:any tune(
             base, df; grid=big, max_evals=20, horizon=14, initial=90)
     end
+
+    @testset "edge cases: horizon 1 and bad data" begin
+        grid = (model=[DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
+                       EvoTreeRegressor(nrounds=5)],)
+        r = tune(base, df; grid=grid, horizon=1, initial=110, metric=mae)
+        @test ncand(r) == 2 && all(!ismissing, r.table.mean_score)
+        for (k, m) in enumerate(grid.model)
+            bt = backtest(Forecaster(m; features=base.features, freq=Day(1)), df;
+                          horizon=1, initial=110, metrics=(mae,))
+            @test r.table.mean_score[k] == only(bt.metrics.value[bt.metrics.fold .== 0])
+        end
+        @test length(forecast(r.best_fitted, 1).y_hat) == 1
+        @test_throws TypeError tune(base, df; grid=grid, horizon=1.5, initial=110)
+        @test_throws MethodError RandomSearch(1.5)
+        @test_throws ArgumentError tune(base, 42; grid=grid, horizon=1, initial=5)
+        @test_throws "expected a Tables.jl-compatible table" tune(base, 42; grid=grid,
+                                                                  horizon=1, initial=5)
+        ym = Vector{Union{Missing,Float64}}(y); ym[55] = missing
+        yn = copy(y); yn[55] = NaN
+        bad = [(ds=Date[], y=Float64[]) => "time column :ds is empty",
+               (ds=t[1:3], y=y[1:3]) => "no complete backtest folds: data has 3 rows",
+               (ds=t, y=ym) => "contains missing values (first at row 55)",
+               (ds=t, y=yn) => "the non-finite value NaN at row 55",
+               (ds=[t[1:30]; t[32:end]], y=y[1:119]) => "has 1 gap for freq=1 day",
+               (ds=t, y=string.(y)) => "target column :y has element type String",
+               (ds=string.(t), y=y) => "has element type String, which does not support"]
+        # Each candidate fails on the data, so tune raises.
+        for (data, msg) in bad
+            run() = tune(base, data; grid=grid, horizon=1, initial=8)
+            @test_throws ErrorException run()
+            @test_throws "all 2 tuning candidates failed to evaluate" run()
+            @test_throws msg run()
+        end
+    end
 end

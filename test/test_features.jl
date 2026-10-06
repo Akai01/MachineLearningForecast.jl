@@ -48,6 +48,12 @@
         @test_throws "CustomFeature minhistory must be ≥ 0, got -1. Pass the number of " *
                      "history values f needs, or 0 if it needs none." (
             CustomFeature(:f, identity, -1))
+        # Wrong argument types fail dispatch (current behaviour).
+        for bad in (() -> RollingMean(2.5), () -> Diff(1.5), () -> Fourier(7, 1.5),
+                    () -> CustomFeature(:f, mean, 1.5), () -> Calendar("month"),
+                    () -> Exogenous("promo"))
+            @test_throws MethodError bad()
+        end
     end
 
     @testset "Lag needs a whole number, Fourier a finite period" begin

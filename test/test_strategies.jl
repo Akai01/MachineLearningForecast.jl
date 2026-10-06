@@ -91,4 +91,28 @@
         fut_ds = collect(dw.ds[end] + Day(1):Day(1):dw.ds[end] + Day(4))
         @test forecast(fit(fc_cal, dw), 4).y_hat ≈ Float64.(dayofweek.(fut_ds))
     end
+
+    @testset "Direct(1): one machine and horizon 1" begin
+        @test_throws MethodError Direct(2.5)
+        fc = Forecaster(TestModels.EchoColumn(:y_lag_1); features=FeatureSet(Lag(1)),
+                        strategy=Direct(1), freq=Day(1))
+        @test forecast(fit(fc, df), 1).y_hat == [50.0]
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+            fs = FeatureSet(Lag(1), Lag(7))
+            f1 = fit(Forecaster(m; features=fs, strategy=Direct(1), freq=Day(1)), df)
+            @test length(f1.machines) == 1
+            f3 = fit(Forecaster(m; features=fs, strategy=Direct(3), freq=Day(1)), df)
+            @test forecast(f1, 1).y_hat == forecast(f3, 3).y_hat[1:1]
+            @test_throws ArgumentError forecast(f1, 2)
+            @test_throws "strategy=Direct(1) was fit with max_horizon=1 but " *
+                         "forecast(h=2) was requested" forecast(f1, 2)
+            tiny = (ds=df.ds[1:4], y=df.y[1:4])
+            fct = Forecaster(m; features=FeatureSet(Lag(3)), strategy=Direct(1),
+                             freq=Day(1))
+            @test length(forecast(fit(fct, tiny), 1).y_hat) == 1
+            @test_throws "the data has only 3 rows" fit(fct, (ds=tiny.ds[1:3],
+                                                              y=tiny.y[1:3]))
+        end
+    end
 end
