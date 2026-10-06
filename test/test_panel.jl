@@ -240,6 +240,16 @@
         @test all(!ismissing, res.table.mean_score)
         @test MachineLearningForecast.ispanel(res.best)                 # id survives reconstruct
         @test nseries(res.best_fitted) == 3
+        # a misnamed time column gets backtest's message, not a FieldError
+        renamed = (unique_id=big.unique_id, when=big.ds, y=big.y)
+        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+            grid = (model=[m],)
+            @test_throws ArgumentError tune(mk(m, FeatureSet(Lag(1))), renamed;
+                                            grid=grid, horizon=5, initial=40)
+            @test_throws "time column :ds not found in the data. Available columns: " *
+                         "unique_id, when, y" tune(mk(m, FeatureSet(Lag(1))), renamed;
+                                                   grid=grid, horizon=5, initial=40)
+        end
     end
 
     @testset "fit, backtest and tune leave the model prototype unchanged" begin

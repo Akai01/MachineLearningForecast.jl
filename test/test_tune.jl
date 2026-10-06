@@ -171,8 +171,30 @@ end # module
                                         horizon=14, initial=90, max_evals=0)
     end
 
+    @testset "grid values of the wrong type are rejected before any fit" begin
+        cases = (((strategy=[:recursive, :direct],), "candidate 1 is :recursive"),
+                 ((strategy=[Recursive(), "direct"],), "candidate 2 is \"direct\""),
+                 ((features=[Lag(1)],), "candidate 1 is Lag(1)"))
+        for m in (DecisionTreeRegressor(max_depth=2), EvoTreeRegressor(nrounds=5)),
+            (grid, phrase) in cases, tuner in (GridSearch(), RandomSearch(2))
+            fcm = Forecaster(m; features=FeatureSet(Lag(1)), freq=Day(1))
+            k = only(keys(grid))
+            @test_throws ArgumentError tune(fcm, df; grid=grid, tuner=tuner,
+                                            horizon=14, initial=90)
+            @test_throws "grid key :$k must hold" tune(fcm, df; grid=grid, tuner=tuner,
+                                                       horizon=14, initial=90)
+            @test_throws phrase tune(fcm, df; grid=grid, tuner=tuner, horizon=14,
+                                     initial=90)
+        end
+        @test_throws "such as Recursive() or Direct(28)" tune(
+            base, df; grid=(strategy=[:direct],), horizon=14, initial=90)
+        @test_throws "such as FeatureSet(Lag(1), Lag(7))" tune(
+            base, df; grid=(features=[Lag(1)],), horizon=14, initial=90)
+    end
+
     @testset "metric must be one function, checked before any fit" begin
-        grid = (model=[DecisionTreeRegressor(max_depth=2), EvoTreeRegressor(nrounds=5)],)
+        grid = (model=[DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
+                       EvoTreeRegressor(nrounds=5)],)
         for bad in ((mae, rmse), [mae], :mae, "smape")
             @test_throws ArgumentError tune(base, df; grid=grid, horizon=14, initial=90,
                                             metric=bad)

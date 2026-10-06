@@ -123,6 +123,14 @@ function _validate_grid(grid)
             "grid key :$k must map to a nonempty vector or tuple of candidate " *
             "values, got $(repr(v))."))
     end
+    for (k, T, eg) in ((:features, FeatureSet, "FeatureSet(Lag(1), Lag(7))"),
+                       (:strategy, ForecastStrategy, "Recursive() or Direct(28)"))
+        haskey(grid, k) || continue
+        i = findfirst(v -> !(v isa T), grid[k])
+        i === nothing || throw(ArgumentError(
+            "grid key :$k must hold values such as $eg, but candidate $i is " *
+            "$(repr(grid[k][i]))."))
+    end
     return nothing
 end
 
@@ -374,7 +382,8 @@ end
 # Warn before large batch searches: candidates × folds × machines-per-fit.
 function _warn_fit_count(fc, cands, tbl, horizon, initial, step)
     # Panel folds are cut on distinct timestamps, not on rows.
-    span = ispanel(fc) ? length(unique(tbl[fc.time])) : nrows(tbl)
+    span = ispanel(fc) ? length(unique(require_column(tbl, fc.time, "time"))) :
+           nrows(tbl)
     nfolds = length(initial:step:(span - horizon))
     total = 0
     for c in cands
