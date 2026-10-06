@@ -49,6 +49,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Thursdays). Each series now takes exogenous values from its own rows and is
   forecast only over the steps it has data for, so a fold scores the same
   `(id, time)` rows as it would without the exogenous feature.
+- `Lag(1.5)`, `Lag("a")` and `Lag(missing)` throw an `ArgumentError` with an
+  example instead of an `InexactError` or `MethodError`; a whole float such as
+  `Lag(7.0)` is still accepted. `Fourier` rejects a non-finite period:
+  `Fourier(Inf, 2)` was accepted and produced constant columns.
 
 ## [0.1.0]
 

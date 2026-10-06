@@ -21,6 +21,22 @@
         @test_throws ArgumentError CustomFeature(:f, identity, -1)
     end
 
+    @testset "Lag needs a whole number, Fourier a finite period" begin
+        for bad in (1.5, "a", missing, Inf)
+            @test_throws ArgumentError Lag(bad)
+            @test_throws "lag must be a whole number" Lag(bad)
+        end
+        @test_throws "got Lag(1.5). Use e.g. Lag(7)" Lag(1.5)
+        @test Lag(7.0) == Lag(7)             # a whole float is still accepted
+        @test_throws "lag must be ≥ 1" Lag(0)
+        for bad in (Inf, -Inf, NaN)
+            @test_throws ArgumentError Fourier(bad, 2)
+            @test_throws "Fourier period must be finite and > 0" Fourier(bad, 2)
+        end
+        @test_throws "Fourier(7, 2)" Fourier(Inf, 2)
+        @test Fourier(365.25, 3).period == 365.25
+    end
+
     @testset "equality (features are value objects)" begin
         @test Lag(7) == Lag(7)
         @test Lag(7) != Lag(6)

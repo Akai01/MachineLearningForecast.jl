@@ -52,8 +52,13 @@ Lag(7)   # the target seven steps ago, column :y_lag_7
 """
 struct Lag <: TargetFeature
     k::Int
-    Lag(k) = k ≥ 1 ? new(k) :
-        throw(ArgumentError("lag must be ≥ 1, got Lag($k). Lag(0) would leak the current target."))
+    function Lag(k)
+        k isa Real && isinteger(k) || throw(ArgumentError(
+            "lag must be a whole number of steps, got Lag($(repr(k))). Use e.g. Lag(7)."))
+        k ≥ 1 || throw(ArgumentError(
+            "lag must be ≥ 1, got Lag($k). Lag(0) would leak the current target."))
+        new(k)
+    end
 end
 
 outputnames(f::Lag) = [Symbol("y_lag_", f.k)]
@@ -274,7 +279,9 @@ struct Fourier <: TimeFeature
     period::Float64
     order::Int
     function Fourier(period::Real, order::Integer)
-        period > 0 || throw(ArgumentError("Fourier period must be > 0, got $period."))
+        isfinite(period) && period > 0 || throw(ArgumentError(
+            "Fourier period must be finite and > 0 (in freq steps), got $period. " *
+            "Use e.g. Fourier(7, 2) for weekly seasonality on daily data."))
         order ≥ 1 || throw(ArgumentError("Fourier order must be ≥ 1, got $order."))
         new(Float64(period), Int(order))
     end
