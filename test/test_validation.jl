@@ -194,7 +194,7 @@ end # module
                          strategy=Recursive(), freq=Hour(1), target=:y, time=:ds)
         got = forecast(fit(fch, (ds=hds, y=Float64.(1:50))), 3)
         @test got.y_hat == Float64.(hour.(hds[end] .+ Hour.(1:3)))
-        # the check reads values, so a loosely typed DateTime column works
+        # values are checked, so loosely typed DateTimes work
         for T in (Union{Missing,DateTime}, Any)
             @test forecast(fit(fch, (ds=Vector{T}(hds), y=Float64.(1:50))), 3) == got
             for m in (EvoTreeRegressor(nrounds=5),

@@ -29,38 +29,44 @@ function _group_rows(ids::AbstractVector, id::Symbol)
 end
 
 """
-    panel_groups(fc, tbl) -> Vector{Pair{Any,NamedTuple}}
+    panel_groups(fc, tbl, base=1:nrows(tbl)) -> Vector{Tuple{Any,NamedTuple,Vector{Int}}}
 
-Split a long-format panel table into `id => subtable` pairs in first-appearance
-order, validating each series' time column independently. Rows of a series need
-not be contiguous in the input, but within a series the timestamps must be
-sorted, duplicate-free and gap-free with respect to `fc.freq`.
+Split a long-format panel table into `(id, subtable, rows)` tuples in
+first-appearance order, validating each series' time column independently.
+Rows of a series need not be contiguous in the input, but within a series the
+timestamps must be sorted, duplicate-free and gap-free with respect to
+`fc.freq`. `rows[i]` is the user's row of the subtable's row `i`, where `tbl`'s
+row `j` is the user's row `base[j]`.
 """
-function panel_groups(fc::Forecaster, tbl::NamedTuple)
+function panel_groups(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
     ids = require_column(tbl, fc.id, "id")
     require_column(tbl, fc.time, "time")
     require_column(tbl, fc.target, "target")
     order, groups = _group_rows(ids, fc.id)
     isempty(order) && throw(ArgumentError(
         "the panel is empty: no rows found in the id column :$(fc.id)."))
-    out = Pair{Any,NamedTuple}[]
+    out = Tuple{Any,NamedTuple,Vector{Int}}[]
     for key in order
-        sub = rowsubset(tbl, groups[key])
-        t = sub[fc.time]
-        if !issorted(t)
-            perm = sortperm(t)
-            sub = rowsubset(sub, perm)
-            t = sub[fc.time]
+        rows = groups[key]
+        t = tbl[fc.time][rows]
+        issorted(t) || (rows = rows[sortperm(t)])
+        sub = rowsubset(tbl, rows)
+        user_rows = base[rows]
+        _in_series(fc, key) do
+            validate_time_column(sub[fc.time], fc.time, fc.freq, user_rows)
         end
-        try
-            validate_time_column(t, fc.time, fc.freq)
-        catch err
-            err isa ArgumentError || rethrow()
-            throw(ArgumentError("series $(fc.id)=$(repr(key)): " * err.msg))
-        end
-        push!(out, key => sub)
+        push!(out, (key, sub, user_rows))
     end
     return out
+end
+
+function _in_series(f, fc::Forecaster, key)
+    try
+        return f()
+    catch err
+        err isa ArgumentError || rethrow()
+        throw(ArgumentError("series $(fc.id)=$(repr(key)): " * err.msg))
+    end
 end
 
 # Build each series' one-step design matrix, reporting which series are too
@@ -69,13 +75,15 @@ function _panel_frames(fc::Forecaster, groups)
     mh = minhistory(fc.features)
     frames = Tuple{Any,NamedTuple,Vector{Float64},NamedTuple}[]
     short = Tuple{Any,Int}[]
-    for (key, sub) in groups
+    for (key, sub, rows) in groups
         n = nrows(sub)
         if n <= mh
             push!(short, (key, n))
             continue
         end
-        X, y, _ = build_training_frame(fc.features, sub, fc.target, fc.time)
+        X, y, _ = _in_series(fc, key) do
+            build_training_frame(fc.features, sub, fc.target, fc.time, rows)
+        end
         push!(frames, (key, X, y, sub))
     end
     if isempty(frames)
@@ -103,8 +111,8 @@ function _vcat_frames(Xs::Vector{<:NamedTuple})
                                     length(names)))
 end
 
-function _fit_panel(fc::Forecaster, tbl::NamedTuple)
-    groups = panel_groups(fc, tbl)
+function _fit_panel(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
+    groups = panel_groups(fc, tbl, base)
     frames = _panel_frames(fc, groups)
     machines = _panel_machines(fc, fc.strategy, frames)
     states = [SeriesState(key, target_vector(sub, fc.target),
@@ -307,7 +315,9 @@ end
 # Each fold trains on every row at or before the origin timestamp and scores by
 # joining forecasts to actuals on (id, time), which handles ragged series.
 function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step, metrics)
-    groups = panel_groups(fc, tbl)                       # validates each series
+    for (key, sub, rows) in panel_groups(fc, tbl)        # validates each series
+        _in_series(() -> target_vector(sub, fc.target, rows), fc, key)
+    end
     ids = tbl[fc.id]
     t_all = tbl[fc.time]
     y_all = target_vector(tbl, fc.target)
@@ -341,7 +351,7 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
     for (k, o) in enumerate(origins)
         t_origin = grid[o]
         train_rows = findall(<=(t_origin), t_all)
-        fitted = fit(fc, rowsubset(tbl, train_rows))
+        fitted = _fit_panel(fc, rowsubset(tbl, train_rows), train_rows)
         fcast = if isempty(exogcols)
             forecast(fitted, horizon)
         else

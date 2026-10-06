@@ -165,7 +165,7 @@
         @test_throws ArgumentError fv(short, y[1:2], t[3])
         @test_throws "at time 2021-03-03, where f sees 2 history values" fv(
             short, y[1:2], t[3])
-        # an error that is not about history length passes through unchanged
+        # other errors from f pass through unchanged
         @test_throws DomainError materialize(CustomFeature(:d, h -> sqrt(-1.0), 0))
         for (ret, shown) in (("x", "\"x\""), (missing, "missing"), ([1.0], "[1.0]"))
             bad = CustomFeature(:r, h -> ret, 0)
@@ -174,7 +174,7 @@
             @test_throws msg materialize(bad)
             @test_throws "f must return one real number" fv(bad, y, t[1])
         end
-        # valid features are unchanged, and so is every value they produce
+        # valid features give the same values as before
         ok = CustomFeature(:s, h -> h[end - 2], 3)
         @test collect(skipmissing(materialize(ok).s)) == y[1:7]
         @test fv(ok, y, t[1]) == (y[8],)

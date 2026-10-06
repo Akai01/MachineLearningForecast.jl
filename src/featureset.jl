@@ -95,17 +95,19 @@ function exogenouscolumns(fs::FeatureSet)
 end
 
 """
-    build_training_frame(fs, tbl, target, time) -> (X, y, keep)
+    build_training_frame(fs, tbl, target, time, rows=1:nrows(tbl)) -> (X, y, keep)
 
 Materialize every feature over the training columntable `tbl` and assemble the
 design matrix. Returns `X` (a columntable of the feature columns only, all
 `Float64`, in stable order), `y::Vector{Float64}` (the target for the kept
 rows), and `keep::BitVector` (the kept-row mask over the original rows). The
 first `minhistory(fs)` rows are dropped because at least one target feature is
-undefined there.
+undefined there. Errors report row `i` of `tbl` as row `rows[i]` of the user's
+table.
 """
-function build_training_frame(fs::FeatureSet, tbl::NamedTuple, target::Symbol, time::Symbol)
-    y = target_vector(tbl, target)
+function build_training_frame(fs::FeatureSet, tbl::NamedTuple, target::Symbol,
+                              time::Symbol, rows=1:nrows(tbl))
+    y = target_vector(tbl, target, rows)
     t = require_column(tbl, time, "time")
     out = ColumnAccumulator()
     for f in fs
@@ -124,9 +126,9 @@ function build_training_frame(fs::FeatureSet, tbl::NamedTuple, target::Symbol, t
     for (name, col) in out
         for i in (mh + 1):n
             ismissing(col[i]) && throw(ArgumentError(
-                "feature column :$name has a missing value at row $i (time $(t[i])). " *
-                "Missing values in exogenous columns are not supported; impute or " *
-                "drop them before fitting."))
+                "feature column :$name has a missing value at row $(rows[i]) " *
+                "(time $(t[i])). Missing values in exogenous columns are not " *
+                "supported; impute or drop them before fitting."))
         end
     end
     X = NamedTuple{Tuple(first.(out))}(

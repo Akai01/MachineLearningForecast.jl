@@ -114,6 +114,43 @@
         @test err2 isa ArgumentError && occursin("missing value", err2.msg)
     end
 
+    @testset "per-series data errors name the series and the user's row" begin
+        # s2 holds rows 61:110, so its 5th row is the user's row 65.
+        big = merge(makepanel(lens=(60, 50, 55)), (promo=Float64.(1:165),))
+        cases = ((:y, missing,
+                  "target column :y contains missing values (first at row 65)"),
+                 (:y, NaN, "target column :y contains the non-finite value NaN at row 65"),
+                 (:promo, missing,
+                  "feature column :promo has a missing value at row 65 (time 2022-01-05)"))
+        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+            for (col, val, phrase) in cases
+                fc = mk(m, FeatureSet(Lag(1), Exogenous(:promo)))
+                v = Vector{Union{Missing,Float64}}(big[col])
+                v[65] = val
+                data = merge(big, NamedTuple{(col,)}((v,)))
+                msg = "series unique_id=\"s2\": " * phrase
+                @test_throws ArgumentError fit(fc, data)
+                @test_throws msg fit(fc, data)
+                @test_throws msg backtest(fc, data; horizon=5, initial=40, step=10)
+            end
+            # a missing timestamp sorts last within its series
+            tm = merge(big, (ds=Vector{Union{Missing,Date}}(big.ds),))
+            tm.ds[5] = missing
+            msg = "series unique_id=\"s1\": time column :ds contains missing values " *
+                  "(first at row 5)"
+            @test_throws msg fit(mk(m, FeatureSet(Lag(1))), tm)
+            @test_throws msg backtest(mk(m, FeatureSet(Lag(1))), tm; horizon=5, initial=40)
+            # interleaved weekly: b's 5th week is the user's row 10
+            mondays = collect(Date(2024, 1, 1):Week(1):Date(2024, 3, 4))
+            wk = (unique_id=repeat(["a", "b"], 10), ds=repeat(mondays, inner=2),
+                  y=Float64.(1:20))
+            wk.ds[10] += Day(1)
+            fcw = Forecaster(m; features=FeatureSet(Lag(1)), freq=Week(1), id=:unique_id)
+            @test_throws "series unique_id=\"b\": time column :ds has the timestamp " *
+                         "2024-01-30 at row 10" fit(fcw, wk)
+        end
+    end
+
     @testset "series too short to train are skipped, not fatal" begin
         short = makepanel(lens=(40, 3, 35))
         f = @test_logs (:warn, r"skipping 1 series") match_mode=:any fit(
@@ -268,7 +305,7 @@
         @test all(!ismissing, res.table.mean_score)
         @test MachineLearningForecast.ispanel(res.best)                 # id survives reconstruct
         @test nseries(res.best_fitted) == 3
-        # a misnamed time column gets backtest's message, not a FieldError
+        # a misnamed time column gets backtest's message
         renamed = (unique_id=big.unique_id, when=big.ds, y=big.y)
         for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
             grid = (model=[m],)

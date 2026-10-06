@@ -104,7 +104,7 @@ end
                     fcm, df; horizon=5, initial=80, metrics=bad)
             end
         end
-        # a vector, a named tuple and an anonymous function keep working
+        # a vector, named tuple and closure still work
         r = backtest(fc, df; horizon=5, initial=80, step=10, metrics=[mae, rmse])
         @test r.metrics.metric == [:mae, :rmse, :mae, :rmse, :mae, :rmse]
         r2 = backtest(fc, df; horizon=5, initial=80, step=10, metrics=(a=mae,))

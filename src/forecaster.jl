@@ -329,7 +329,6 @@ function _exogenous_rows(spec::Forecaster, exogcols::Vector{Symbol}, grid, new_d
     return rows
 end
 
-# Check row i of new_data's time column against the training type T.
 function _new_time(v, T::Type, time::Symbol, i::Integer)
     ismissing(v) && throw(ArgumentError(
         "new_data's time column :$time has a missing value at row $i. Every " *

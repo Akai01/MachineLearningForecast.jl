@@ -49,6 +49,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ArgumentError` at `forecast` and `backtest` saying it must store its input
   columns in `cols::Vector{Symbol}`, instead of a `FieldError`. `CONTRIBUTING.md`
   now documents that requirement.
+- Panel errors about one series' data name the series and give the row of the
+  table passed to `fit` or `backtest`. A missing or non-finite target and a
+  missing exogenous value were reported without the series and at a row
+  counted within it, and a missing or off-grid timestamp at a row of the
+  series after sorting it by time.
 
 ### Fixed
 

@@ -45,20 +45,21 @@ function require_column(tbl::NamedTuple, col::Symbol, what::AbstractString)
 end
 
 """
-    validate_time_column(t, time, freq)
+    validate_time_column(t, time, freq, rows=eachindex(t))
 
 Validate that the time column `t` (named `time`, for error messages) is sorted,
 free of duplicates, and gap-free with respect to the step `freq`. Throws an
-`ArgumentError` describing the first offending timestamp otherwise.
+`ArgumentError` describing the first offending timestamp otherwise, reporting
+element `i` of `t` as row `rows[i]` of the user's table.
 """
-function validate_time_column(t::AbstractVector, time::Symbol, freq)
+function validate_time_column(t::AbstractVector, time::Symbol, freq, rows=eachindex(t))
     n = length(t)
     n ≥ 1 || throw(ArgumentError("time column :$time is empty. Provide at least one row."))
     if any(ismissing, t)
         i = findfirst(ismissing, t)
         throw(ArgumentError(
-            "time column :$time contains missing values (first at row $i). Every row " *
-            "must carry a timestamp; drop or fill those rows before fitting."))
+            "time column :$time contains missing values (first at row $(rows[i])). " *
+            "Every row must carry a timestamp; drop or fill those rows before fitting."))
     end
     applicable(+, t[1], freq) || throw(ArgumentError(
         "time column :$time has element type $(eltype(t)), which does not support " *
@@ -71,8 +72,8 @@ function validate_time_column(t::AbstractVector, time::Symbol, freq)
     issorted(t) || begin
         i = findfirst(i -> t[i] < t[i-1], 2:n) + 1
         throw(ArgumentError(
-            "time column :$time is not sorted; row $i ($(t[i])) comes after $(t[i-1]). " *
-            "Sort your data by :$time before fitting."))
+            "time column :$time is not sorted; row $(rows[i]) ($(t[i])) comes after " *
+            "$(t[i-1]). Sort your data by :$time before fitting."))
     end
     ndup = 0
     firstdup = nothing
@@ -99,9 +100,9 @@ function validate_time_column(t::AbstractVector, time::Symbol, freq)
             g += 1
         end
         t[1] + g * freq == t[i] || throw(ArgumentError(
-            "time column :$time has the timestamp $(t[i]) at row $i, which does not " *
-            "lie on the freq=$freq grid starting at $(t[1]). Resample your data onto " *
-            "a regular grid, or pass the freq the data actually uses."))
+            "time column :$time has the timestamp $(t[i]) at row $(rows[i]), which " *
+            "does not lie on the freq=$freq grid starting at $(t[1]). Resample your " *
+            "data onto a regular grid, or pass the freq the data actually uses."))
         if g > gprev + 1
             ngap += 1
             firstgap === nothing && (firstgap = t[i-1])
@@ -132,17 +133,18 @@ future_grid(t_start, freq, n_train::Integer, h::Integer) =
     [t_start + (n_train - 1 + s) * freq for s in 1:h]
 
 """
-    target_vector(tbl, target) -> Vector{Float64}
+    target_vector(tbl, target, rows=1:nrows(tbl)) -> Vector{Float64}
 
 Extract and validate the target column: must exist, contain no `missing`
-values, and be convertible to `Float64`.
+values, and be convertible to `Float64`. Row `i` of `tbl` is reported as row
+`rows[i]` of the user's table.
 """
-function target_vector(tbl::NamedTuple, target::Symbol)
+function target_vector(tbl::NamedTuple, target::Symbol, rows=1:nrows(tbl))
     col = require_column(tbl, target, "target")
     if any(ismissing, col)
         i = findfirst(ismissing, col)
         throw(ArgumentError(
-            "target column :$target contains missing values (first at row $i). " *
+            "target column :$target contains missing values (first at row $(rows[i])). " *
             "Impute or drop missing targets before fitting."))
     end
     eltype(col) <: Union{Real,Missing} || throw(ArgumentError(
@@ -151,8 +153,8 @@ function target_vector(tbl::NamedTuple, target::Symbol)
     vals = Float64.(col)
     j = findfirst(!isfinite, vals)
     j === nothing || throw(ArgumentError(
-        "target column :$target contains the non-finite value $(vals[j]) at row $j. " *
-        "Impute, drop, or clip non-finite targets before fitting — they propagate " *
-        "silently through lag features into every forecast."))
+        "target column :$target contains the non-finite value $(vals[j]) at row " *
+        "$(rows[j]). Impute, drop, or clip non-finite targets before fitting — they " *
+        "propagate silently through lag features into every forecast."))
     return vals
 end
