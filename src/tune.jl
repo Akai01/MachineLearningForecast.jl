@@ -268,7 +268,8 @@ better).
 - Candidate failures never abort the search: the error is caught, the score
   recorded as `missing` (and reported to the strategy via [`tell!`](@ref)),
   the message stored in the result table's `:error` column, and the candidate
-  excluded from ranking.
+  excluded from ranking. A non-finite mean score (`NaN` or `Inf`) counts as a
+  failure.
 
 Returns a [`TuneResult`](@ref) with the score table, the best spec, and the
 best spec refit on all of `data`. Ties are broken by first-seen order.
@@ -343,8 +344,13 @@ function _evaluate_candidate(fc, cand, tbl, horizon, initial, step, metric)
         res = backtest(cfc, tbl; horizon, initial, step, metrics=(metric,))
         vals = [res.metrics.value[i] for i in eachindex(res.metrics.fold)
                 if res.metrics.fold[i] > 0]
+        m = Float64(Statistics.mean(vals))
+        isfinite(m) || return missing, missing,
+            "the metric returned a non-finite mean score ($m) over the backtest " *
+            "folds, so this candidate cannot be ranked. The model likely predicts " *
+            "NaN or Inf; check its hyperparameters and the training data."
         sd = length(vals) > 1 ? Statistics.std(vals) : missing
-        return Float64(Statistics.mean(vals)), sd, missing
+        return m, sd, missing
     catch e
         e isa InterruptException && rethrow()
         return missing, missing, sprint(showerror, e)

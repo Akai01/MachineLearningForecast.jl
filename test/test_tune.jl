@@ -75,6 +75,24 @@ end # module
         @test err isa ErrorException && occursin("all 2 tuning candidates failed", err.msg)
     end
 
+    @testset "a non-finite score fails the candidate, never wins" begin
+        for good in (DecisionTreeRegressor(max_depth=3), EvoTreeRegressor(nrounds=10))
+            r = tune(base, df; grid=(model=[TestModels.NaNModel(), good],),
+                     horizon=14, initial=90, metric=mae)
+            @test ismissing(r.table.mean_score[1]) && ismissing(r.table.std_score[1])
+            @test occursin("non-finite mean score (NaN)", r.table.error[1])
+            @test r.best.model == good
+            @test all(isfinite, forecast(r.best_fitted, 7).y_hat)
+            s = sprint(show, MIME"text/plain"(), r)
+            @test occursin("(1 failed)", s) && occursin("Top 1", s)
+        end
+        # the strategy is told `missing`, and all failing still raises
+        tuner = ThirdPartyTuning.Midpoint([(model=TestModels.NaNModel(),)])
+        @test_throws "all 3 tuning candidates failed" tune(base, df; tuner=tuner,
+                                                           horizon=14, initial=90)
+        @test length(tuner.told) == 3 && all(ismissing(sc) for (_, sc) in tuner.told)
+    end
+
     @testset "third-party sequential strategy drives the ask/tell loop" begin
         space = [(model=DecisionTreeRegressor(max_depth=d),) for d in 1:5]
         tuner = ThirdPartyTuning.Midpoint(space)

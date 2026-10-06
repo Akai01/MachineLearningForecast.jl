@@ -35,6 +35,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Displaying a forecaster fitted on a panel (REPL echo, `show`, `repr`) no
   longer throws; it reads "trained on N series". A panel `Forecaster` now shows
   its `id` column.
+- `tune` no longer picks a candidate whose mean score is `NaN` as the best (for
+  example a model that predicts `NaN`). A non-finite mean score now marks the
+  candidate as failed, with the reason in the `:error` column, and excludes it
+  from ranking.
 
 ## [0.1.0]
 

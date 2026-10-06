@@ -62,4 +62,11 @@ MMI.target_scitype(::Type{PairLookup}) = AbstractVector{MMI.Continuous}
 mutable struct DummyProb <: MMI.Probabilistic end
 MMI.fit(::DummyProb, verbosity, X, y) = (nothing, nothing, NamedTuple())
 
+"Always predicts `NaN`, standing in for a learner that diverged."
+mutable struct NaNModel <: MMI.Deterministic end
+MMI.fit(::NaNModel, verbosity, X, y) = (nothing, nothing, NamedTuple())
+MMI.predict(::NaNModel, fitresult, Xnew) = fill(NaN, length(Tables.rows(Xnew)))
+MMI.input_scitype(::Type{NaNModel}) = MMI.Table(MMI.Continuous)
+MMI.target_scitype(::Type{NaNModel}) = AbstractVector{MMI.Continuous}
+
 end # module
