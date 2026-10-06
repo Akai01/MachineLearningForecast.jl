@@ -158,26 +158,31 @@ end
 # One future row per series, assembled into a single design matrix so the model
 # is called once per horizon step rather than once per series per step.
 function _panel_batch(f::FittedForecaster, states, histories, step::Integer,
-                      grids, exog_rows)
+                      grids, exog_rows, active)
     spec = f.spec
     names = f.feature_names
-    cols = [Vector{Float64}(undef, length(states)) for _ in names]
+    cols = [Vector{Float64}(undef, length(active)) for _ in names]
     scratch = [Vector{Float64}(undef, 1) for _ in names]
-    for (k, st) in enumerate(states)
-        n_next = st.n_train - 1 + step
+    for (r, k) in enumerate(active)
+        n_next = states[k].n_train - 1 + step
         ex = exog_rows === nothing ? nothing : exog_rows[k][step]
         _fill_row!(scratch, spec.features, histories[k], grids[k][step], n_next, ex)
         for j in eachindex(cols)
-            cols[j][k] = scratch[j][1]
+            cols[j][r] = scratch[j][1]
         end
     end
     return NamedTuple{Tuple(names)}(Tuple(cols))
 end
 
-function _forecast_panel(f::FittedForecaster, h::Integer, new_data)
+_forecast_panel(f::FittedForecaster, h::Integer, new_data) =
+    _forecast_panel(f, fill(Int(h), nseries(f)), new_data)
+
+# hs[k] is series k's horizon, which backtest may shorten.
+function _forecast_panel(f::FittedForecaster, hs::Vector{Int}, new_data)
     spec = f.spec
     states = getfield(f, :series)
-    grids = [future_grid(st.t_start, spec.freq, st.n_train, h) for st in states]
+    grids = [future_grid(st.t_start, spec.freq, st.n_train, hs[k])
+             for (k, st) in enumerate(states)]
 
     exogcols = exogenouscolumns(spec.features)
     exog_rows = nothing
@@ -186,23 +191,24 @@ function _forecast_panel(f::FittedForecaster, h::Integer, new_data)
             "features contain Exogenous($(join(":" .* string.(exogcols), ", "))) but " *
             "forecast() was called without new_data. Pass a table with columns " *
             "(:$(spec.id), :$(spec.time), $(join(":" .* string.(exogcols), ", "))) " *
-            "covering all $(length(states)) series over their $h forecast steps."))
+            "covering all $(length(states)) series over their $(maximum(hs)) " *
+            "forecast steps."))
         exog_rows = _panel_exogenous_rows(spec, exogcols, states, grids, new_data)
     elseif new_data !== nothing
         @warn "new_data was passed but the feature set has no Exogenous features; " *
               "it will be ignored."
     end
 
-    preds = [Vector{Float64}(undef, h) for _ in states]
+    preds = [Vector{Float64}(undef, hs[k]) for k in eachindex(states)]
     histories = [copy(st.y_history) for st in states]
-    _panel_predict!(preds, f, spec.strategy, states, histories, grids, exog_rows, h)
+    _panel_predict!(preds, f, spec.strategy, states, histories, grids, exog_rows, hs)
 
-    nser = length(states)
-    idcol = Vector{Any}(undef, nser * h)
-    tcol = Vector{eltype(first(grids))}(undef, nser * h)
-    ycol = Vector{Float64}(undef, nser * h)
+    n = sum(hs)
+    idcol = Vector{Any}(undef, n)
+    tcol = Vector{eltype(first(grids))}(undef, n)
+    ycol = Vector{Float64}(undef, n)
     r = 1
-    for k in 1:nser, s in 1:h
+    for k in eachindex(states), s in 1:hs[k]
         idcol[r] = states[k].id
         tcol[r] = grids[k][s]
         ycol[r] = preds[k][s]
@@ -214,13 +220,14 @@ end
 
 # Recursive: predict every series for step s in one call, then feed each
 # prediction back into that series' own history.
-function _panel_predict!(preds, f, ::Recursive, states, histories, grids, exog_rows, h)
+function _panel_predict!(preds, f, ::Recursive, states, histories, grids, exog_rows, hs)
     mach = only(f.machines)
-    for s in 1:h
-        row = _panel_batch(f, states, histories, s, grids, exog_rows)
+    for s in 1:maximum(hs)
+        active = findall(>=(s), hs)
+        row = _panel_batch(f, states, histories, s, grids, exog_rows, active)
         ŷ = MLJBase.predict(mach, row)
-        for k in eachindex(states)
-            v = Float64(ŷ[k])
+        for (r, k) in enumerate(active)
+            v = Float64(ŷ[r])
             preds[k][s] = v
             push!(histories[k], v)
         end
@@ -230,16 +237,18 @@ end
 
 # Direct: step s uses machine s, with every series' target features conditioned
 # on its own training-end history.
-function _panel_predict!(preds, f, strat::Direct, states, histories, grids, exog_rows, h)
+function _panel_predict!(preds, f, strat::Direct, states, histories, grids, exog_rows, hs)
+    h = maximum(hs)
     h <= strat.max_horizon || throw(ArgumentError(
         "strategy=Direct($(strat.max_horizon)) was fit with max_horizon=" *
         "$(strat.max_horizon) but forecast(h=$h) was requested. Refit with " *
         "Direct($h) or use Recursive()."))
     for s in 1:h
-        row = _panel_batch(f, states, histories, s, grids, exog_rows)
+        active = findall(>=(s), hs)
+        row = _panel_batch(f, states, histories, s, grids, exog_rows, active)
         ŷ = MLJBase.predict(f.machines[s], row)
-        for k in eachindex(states)
-            preds[k][s] = Float64(ŷ[k])
+        for (r, k) in enumerate(active)
+            preds[k][s] = Float64(ŷ[r])
         end
     end
     return preds
@@ -336,11 +345,19 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
     for (k, o) in enumerate(origins)
         t_origin = grid[o]
         train_rows = findall(<=(t_origin), t_all)
-        future_rows = findall(t -> t_origin < t <= grid[min(o + horizon, ngrid)], t_all)
         fitted = fit(fc, rowsubset(tbl, train_rows))
-        nd = isempty(exogcols) ? nothing :
-             rowsubset(tbl[Tuple([fc.id; fc.time; exogcols])], future_rows)
-        fcast = forecast(fitted, horizon; new_data=nd)
+        fcast = if isempty(exogcols)
+            forecast(fitted, horizon)
+        else
+            nd = rowsubset(tbl[Tuple([fc.id; fc.time; exogcols])],
+                           findall(>(t_origin), t_all))
+            # Steps past a series' data have no exogenous row or actual.
+            hs = map(fitted.series) do st
+                g = future_grid(st.t_start, fc.freq, st.n_train, horizon)
+                something(findfirst(t -> !haskey(actual, (st.id, t)), g), horizon + 1) - 1
+            end
+            _forecast_panel(fitted, hs, nd)
+        end
 
         # keep only forecasts that have a matching actual
         fid, ft, fy = fcast[fc.id], fcast[fc.time], fcast.y_hat

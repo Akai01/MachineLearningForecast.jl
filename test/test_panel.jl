@@ -188,6 +188,43 @@
                                             horizon=5, initial=20, step=10)
     end
 
+    @testset "backtest with Exogenous on ragged and phase-offset panels" begin
+        rng = StableRNG(11)
+        # s1 ends before the last origins, s3 inside a window.
+        daily = makepanel(lens=(50, 60, 56))
+        daily = merge(daily, (y=daily.y .+ randn(rng, length(daily.y)),
+                              promo=Float64.(eachindex(daily.y))))
+        mondays = collect(Date(2024, 1, 1):Week(1):Date(2024, 7, 22))
+        weekly = (unique_id=repeat(["a", "b"], inner=30),
+                  ds=vcat(mondays, mondays .+ Day(3)),
+                  y=repeat([10.0, 20.0], inner=30) .+ randn(rng, 60),
+                  promo=Float64.(1:60))
+        cases = ((daily, Day(1), 5, 30, 4), (weekly, Week(1), 2, 20, 3))
+        for (data, freq, h, init, stp) in cases,
+            m in (EvoTreeRegressor(nrounds=10), DecisionTreeRegressor(max_depth=3)),
+            s in (Recursive(), Direct(h))
+            bt(fs) = backtest(Forecaster(m; features=fs, strategy=s, freq=freq,
+                                         id=:unique_id),
+                              data; horizon=h, initial=init, step=stp)
+            plain = bt(FeatureSet(Lag(1)))
+            exog = bt(FeatureSet(Lag(1), Exogenous(:promo)))
+            @test exog.folds.origin == plain.folds.origin
+            @test exog.folds.step == plain.folds.step
+            @test exog.folds.unique_id == plain.folds.unique_id
+            @test exog.folds.ds == plain.folds.ds
+        end
+        # EchoColumn shows each step reads its own (id, time) row.
+        for (data, freq, h, init, stp) in cases
+            fc = Forecaster(TestModels.EchoColumn(:promo); freq=freq, id=:unique_id,
+                            features=FeatureSet(Lag(1), Exogenous(:promo)))
+            r = backtest(fc, data; horizon=h, initial=init, step=stp)
+            promo = Dict((data.unique_id[i], data.ds[i]) => data.promo[i]
+                         for i in eachindex(data.promo))
+            @test r.folds.y_hat == [promo[(r.folds.unique_id[j], r.folds.ds[j])]
+                                    for j in eachindex(r.folds.ds)]
+        end
+    end
+
     @testset "tune drives a panel through backtest" begin
         big = makepanel(lens=(60, 50, 55))
         base = mk(TestModels.MeanModel(), FeatureSet(Lag(1)))

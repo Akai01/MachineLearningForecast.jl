@@ -43,6 +43,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in. Mutating that vector after construction could get around their checks,
   including the `Forecaster` guard against a feature that emits the target
   column.
+- A panel `backtest` with an `Exogenous` feature no longer throws when a
+  series' rows end before or inside a fold's forecast window, or when series
+  sit on different phases of the `freq` grid (e.g. weekly on Mondays and on
+  Thursdays). Each series now takes exogenous values from its own rows and is
+  forecast only over the steps it has data for, so a fold scores the same
+  `(id, time)` rows as it would without the exogenous feature.
 
 ## [0.1.0]
 
