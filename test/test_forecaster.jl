@@ -7,7 +7,23 @@
     @testset "construction validation" begin
         @test_throws ArgumentError Forecaster("not a model";
             features=FeatureSet(Lag(1)), freq=Day(1))
+        @test_throws "got String. Pass e.g. EvoTreeRegressor()" Forecaster("not a model";
+            features=FeatureSet(Lag(1)), freq=Day(1))
+        # a model type without parentheses is named, with the instance to pass
+        for M in (EvoTreeRegressor, DecisionTreeRegressor)
+            @test_throws ArgumentError Forecaster(M; features=FeatureSet(Lag(1)),
+                                                  freq=Day(1))
+            @test_throws "got the type $(nameof(M)). Pass an instance instead, e.g. " *
+                         "$(nameof(M))()." Forecaster(M; features=FeatureSet(Lag(1)),
+                                                      freq=Day(1))
+        end
+        @test_throws "got DataType" Forecaster(Int; features=FeatureSet(Lag(1)),
+                                               freq=Day(1))
         @test_throws ArgumentError Forecaster(TestModels.LinAR(1.0, 0.0);
+            features=FeatureSet(Lag(1)), freq=Day(1), target=:y, time=:y)
+        @test_throws "target and time must be different columns, both were :y. Pass " *
+                     "the names of your target and time columns, e.g. target=:y, " *
+                     "time=:ds." Forecaster(TestModels.LinAR(1.0, 0.0);
             features=FeatureSet(Lag(1)), freq=Day(1), target=:y, time=:y)
         # non-Deterministic model and unknown target scitype both warn, not error
         fc = @test_logs (:warn, r"not an MLJModelInterface.Deterministic") (:warn, r"target_scitype") Forecaster(
@@ -96,6 +112,9 @@
         # missing values inside new_data → error
         holed = (ds=t[end] .+ Day.(1:3), promo=[1.0, missing, 0.0])
         @test_throws ArgumentError forecast(fitted, 3; new_data=holed)
+        @test_throws "new_data has a missing value in exogenous column :promo at time " *
+                     "$(t[end] + Day(2)). Provide complete exogenous values for every " *
+                     "future step." forecast(fitted, 3; new_data=holed)
 
         # correct join alignment: rows out of order and with extras still align by time
         future = (ds=[t[end] + Day(3), t[end] + Day(1), t[end] + Day(2), t[end] + Day(9)],
@@ -167,7 +186,10 @@
         fc = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)), freq=Day(1))
         fitted = fit(fc, df)
         @test_throws ArgumentError forecast(fitted, 0)
+        @test_throws "forecast horizon h must be ≥ 1, got 0. Pass the number of steps " *
+                     "to forecast, e.g. forecast(fitted, 28)." forecast(fitted, 0)
         @test_throws ArgumentError forecast(fitted, -2)
+        @test_throws "h must be ≥ 1, got -2" forecast(fitted, -2)
         # user data is not mutated by fit
         df2 = deepcopy(df)
         fit(fc, df2)

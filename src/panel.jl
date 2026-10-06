@@ -16,7 +16,7 @@ function _group_rows(ids::AbstractVector, id::Symbol)
     for (i, v) in enumerate(ids)
         ismissing(v) && throw(ArgumentError(
             "id column :$id has a missing value at row $i. Every row must belong " *
-            "to a series."))
+            "to a series; drop or fill the rows with a missing id before fitting."))
         rows = get(groups, v, nothing)
         if rows === nothing
             groups[v] = Int[i]
@@ -44,7 +44,8 @@ function panel_groups(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
     require_column(tbl, fc.target, "target")
     order, groups = _group_rows(ids, fc.id)
     isempty(order) && throw(ArgumentError(
-        "the panel is empty: no rows found in the id column :$(fc.id)."))
+        "the panel is empty: no rows found in the id column :$(fc.id). Pass a " *
+        "table with at least one row."))
     out = Tuple{Any,NamedTuple,Vector{Int}}[]
     for key in order
         rows = groups[key]
@@ -297,7 +298,8 @@ function _panel_exogenous_rows(spec::Forecaster, exogcols, states, grids, new_da
             for c in exogcols
                 ismissing(row[c]) && throw(ArgumentError(
                     "new_data has a missing value in exogenous column :$c for " *
-                    "$(spec.id)=$(repr(st.id)) at $t."))
+                    "$(spec.id)=$(repr(st.id)) at $t. Provide complete exogenous " *
+                    "values for every series at every forecast step."))
             end
             rows[s] = row
         end

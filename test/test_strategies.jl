@@ -7,7 +7,10 @@
         @test occursin("max_horizon", err.msg)
         @test occursin("one model per horizon step", err.msg)
         @test_throws ArgumentError Direct(0)
+        @test_throws "Direct max_horizon must be ≥ 1, got 0. Pass the number of steps " *
+                     "to forecast, e.g. Direct(28)." Direct(0)
         @test_throws ArgumentError Direct(-5)
+        @test_throws "max_horizon must be ≥ 1, got -5" Direct(-5)
         @test Direct(3).max_horizon == 3
     end
 
@@ -44,6 +47,9 @@
         fc_big = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(2)),
                             strategy=Direct(4), freq=Day(1))
         @test_throws ArgumentError fit(fc_big, tiny)
+        @test_throws "not enough data for Direct(4): after dropping the feature set's 2 " *
+                     "history rows, only 2 training rows remain" fit(fc_big, tiny)
+        @test_throws "Provide at least 6 rows, reduce max_horizon" fit(fc_big, tiny)
 
         # ---- which TARGET does machine i actually see? -----------------------
         # MeanModel predicts the mean of its own training target, so the shift

@@ -47,6 +47,8 @@ end # module
         # a custom feature named after the target is caught too
         @test_throws ArgumentError mk(features=FeatureSet(Lag(1),
                                         CustomFeature(:y, length, 0)))
+        @test_throws "the feature set produces a column named :y, which is the target " *
+                     "column" mk(features=FeatureSet(Lag(1), CustomFeature(:y, length, 0)))
         # ...and naming the time column is refused with its own advice
         err2 = try mk(features=FeatureSet(Lag(1), Exogenous(:ds))) catch e; e end
         @test err2 isa ArgumentError
@@ -70,6 +72,9 @@ end # module
             @test occursin("reserved", err.msg)
         end
         @test_throws ArgumentError mk(target=:v, time=:y)   # collides with folds.y
+        @test_throws "time=:y collides with a column name reserved by forecast()/" *
+                     "backtest() results (:origin, :step, :y, :y_hat). Rename the time " *
+                     "column" mk(target=:v, time=:y)
     end
 
     @testset "ragged tables are rejected by name and length" begin

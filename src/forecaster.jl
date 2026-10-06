@@ -56,6 +56,9 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
     function Forecaster(model::M, features::FeatureSet, strategy::S, freq::Period,
                         target::Symbol, time::Symbol,
                         id::I=nothing) where {M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
+        model isa Type && model <: MLJModelInterface.Model && throw(ArgumentError(
+            "model must be an MLJ model instance, got the type $(nameof(model)). Pass " *
+            "an instance instead, e.g. $(nameof(model))()."))
         model isa MLJModelInterface.Model || throw(ArgumentError(
             "model must be an MLJ model instance (subtype of MLJModelInterface.Model), " *
             "got $(typeof(model)). Pass e.g. EvoTreeRegressor(), " *
@@ -71,7 +74,8 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
                   "target may fail or behave unexpectedly."
         end
         target == time && throw(ArgumentError(
-            "target and time must be different columns, both were :$target."))
+            "target and time must be different columns, both were :$target. Pass the " *
+            "names of your target and time columns, e.g. target=:y, time=:ds."))
         # A feature that emits the target column would feed the target straight
         # into the design matrix — a silent, total leak that backtests as a
         # perfect score. Reject it at construction.
@@ -94,9 +98,11 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
         end
         if id !== nothing
             id == target && throw(ArgumentError(
-                "id and target must be different columns, both were :$id."))
+                "id and target must be different columns, both were :$id. Pass the " *
+                "name of your series-id column, e.g. id=:unique_id."))
             id == time && throw(ArgumentError(
-                "id and time must be different columns, both were :$id."))
+                "id and time must be different columns, both were :$id. Pass the " *
+                "name of your series-id column, e.g. id=:unique_id."))
             id in outs && throw(ArgumentError(
                 "the feature set produces a column named :$id, which is the series id " *
                 "column. Rename the feature's output column, or the id column."))
@@ -262,7 +268,9 @@ fcast.y_hat                                          # the point forecasts
 ```
 """
 function forecast(f::FittedForecaster, h::Integer; new_data=nothing)
-    h ≥ 1 || throw(ArgumentError("forecast horizon h must be ≥ 1, got $h."))
+    h ≥ 1 || throw(ArgumentError(
+        "forecast horizon h must be ≥ 1, got $h. Pass the number of steps to " *
+        "forecast, e.g. forecast(fitted, 28)."))
     return _forecast_spec(f, f.spec, h, new_data)
 end
 

@@ -21,10 +21,21 @@
         f = FeatureSet(Lag(1))
         @test_throws ArgumentError Forecaster(TestModels.LinAR(1.0, 0.0); features=f,
                                               freq=Day(1), target=:y, time=:ds, id=:y)
+        @test_throws "id and target must be different columns, both were :y. Pass the " *
+                     "name of your series-id column, e.g. id=:unique_id." Forecaster(
+            TestModels.LinAR(1.0, 0.0); features=f, freq=Day(1), target=:y, time=:ds,
+            id=:y)
         @test_throws ArgumentError Forecaster(TestModels.LinAR(1.0, 0.0); features=f,
                                               freq=Day(1), target=:y, time=:ds, id=:ds)
+        @test_throws "id and time must be different columns, both were :ds. Pass the " *
+                     "name of your series-id column, e.g. id=:unique_id." Forecaster(
+            TestModels.LinAR(1.0, 0.0); features=f, freq=Day(1), target=:y, time=:ds,
+            id=:ds)
         @test_throws ArgumentError Forecaster(TestModels.LinAR(1.0, 0.0); features=f,
                                               freq=Day(1), target=:y, time=:ds, id=:y_hat)
+        @test_throws "id=:y_hat collides with a column name reserved by forecast()/" *
+                     "backtest() results" Forecaster(TestModels.LinAR(1.0, 0.0);
+            features=f, freq=Day(1), target=:y, time=:ds, id=:y_hat)
         err = try Forecaster(TestModels.LinAR(1.0, 0.0);
                              features=FeatureSet(Lag(1), Exogenous(:sid)),
                              freq=Day(1), target=:y, time=:ds, id=:sid) catch e; e end
@@ -112,6 +123,25 @@
         miss.unique_id[3] = missing
         err2 = try fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), miss) catch e; e end
         @test err2 isa ArgumentError && occursin("missing value", err2.msg)
+        @test occursin("id column :unique_id has a missing value at row 3. Every row " *
+                       "must belong to a series; drop or fill the rows with a missing " *
+                       "id before fitting.", err2.msg)
+    end
+
+    @testset "an empty panel, and Direct steps no series can reach" begin
+        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+            empty = (unique_id=String[], ds=Date[], y=Float64[])
+            @test_throws ArgumentError fit(mk(m, FeatureSet(Lag(1))), empty)
+            @test_throws "the panel is empty: no rows found in the id column " *
+                         ":unique_id. Pass a table with at least one row." fit(
+                mk(m, FeatureSet(Lag(1))), empty)
+            # 3 rows per series leave 2 training rows, so no step-3 model
+            fc = mk(m, FeatureSet(Lag(1)); strat=Direct(5))
+            tiny = makepanel(lens=(3, 3, 3))
+            @test_throws ArgumentError fit(fc, tiny)
+            @test_throws "not enough data for Direct(5): no series has enough rows to " *
+                         "train the step-3 model. Shorten max_horizon" fit(fc, tiny)
+        end
     end
 
     @testset "per-series data errors name the series and the user's row" begin
@@ -177,6 +207,10 @@
         @test forecast(f, 2; new_data=shuf).y_hat == [11.0, 12.0, 21.0, 22.0, 31.0, 32.0]
 
         @test_throws ArgumentError forecast(f, 2)                    # new_data required
+        @test_throws "features contain Exogenous(:promo) but forecast() was called " *
+                     "without new_data. Pass a table with columns (:unique_id, :ds, " *
+                     ":promo) covering all 3 series over their 2 forecast steps." (
+            forecast(f, 2))
         missing_row = (unique_id=nd.unique_id[1:5], ds=nd.ds[1:5], promo=nd.promo[1:5])
         err = try forecast(f, 2; new_data=missing_row) catch e; e end
         @test err isa ArgumentError && occursin("no row for", err.msg)
@@ -210,6 +244,18 @@
             @test_throws "has element type DateTime at row 1, but the training time " *
                          "column is Date" forecast(f, 2; new_data=merge(
                              nd, (ds=DateTime.(nd.ds),)))
+            dup = (unique_id=[nd.unique_id; "s2"], ds=[nd.ds; nd.ds[3]],
+                   promo=[nd.promo; 0.0])
+            @test_throws ArgumentError forecast(f, 2; new_data=dup)
+            @test_throws "new_data has duplicate rows for unique_id=\"s2\" at " *
+                         "$(nd.ds[3]). Deduplicate new_data" forecast(f, 2; new_data=dup)
+            gap = merge(nd, (promo=Union{Missing,Float64}[nd.promo...],))
+            gap.promo[4] = missing
+            @test_throws ArgumentError forecast(f, 2; new_data=gap)
+            @test_throws "new_data has a missing value in exogenous column :promo for " *
+                         "unique_id=\"s2\" at $(nd.ds[4]). Provide complete exogenous " *
+                         "values for every series at every forecast step." forecast(
+                f, 2; new_data=gap)
         end
     end
 
@@ -219,6 +265,9 @@
         out = forecast(f, 4)
         @test length(out.y_hat) == 3 * 4
         @test_throws ArgumentError forecast(f, 5)
+        @test_throws "strategy=Direct(4) was fit with max_horizon=4 but forecast(h=5) " *
+                     "was requested. Refit with Direct(5) or use Recursive()." (
+            forecast(f, 5))
 
         # each step-model must see the target shifted WITHIN its series: MeanModel
         # exposes which targets machine i was trained on.
