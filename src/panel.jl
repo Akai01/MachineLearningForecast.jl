@@ -117,7 +117,7 @@ end
 function _panel_machines(fc::Forecaster, ::Recursive, frames)
     X = _vcat_frames([f[2] for f in frames])
     y = reduce(vcat, (f[3] for f in frames))
-    mach = MLJBase.machine(fc.model, X, y)
+    mach = MLJBase.machine(deepcopy(fc.model), X, y)
     MLJBase.fit!(mach; verbosity=0)
     return MLJBase.Machine[mach]
 end

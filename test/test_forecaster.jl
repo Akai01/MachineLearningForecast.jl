@@ -176,4 +176,27 @@
         fh = forecast(fit(fch, dfh), 3)
         @test fh.ds == [th[end] + Hour(s) for s in 1:3]
     end
+
+    @testset "fit, backtest and tune leave the model prototype unchanged" begin
+        dfr = (ds=t, y=10 .+ sin.(2π .* (1:n) ./ 7) .+ randn(StableRNG(4), n))
+        fs = FeatureSet(Lag(1), Lag(2), Lag(7), RollingMean(3))
+        # MLJ's == ignores RNG state, so compare every field.
+        same(a, b) = all(k -> isequal(getfield(a, k), getfield(b, k)),
+                         fieldnames(typeof(a)))
+        for m in (DecisionTreeRegressor(n_subfeatures=2, rng=StableRNG(1)),
+                  EvoTreeRegressor(nrounds=10, rowsample=0.5, colsample=0.5)),
+            s in (Recursive(), Direct(3))
+            before = deepcopy(m)
+            fc = Forecaster(m; features=fs, strategy=s, freq=Day(1))
+            first_fit = forecast(fit(fc, dfr), 3).y_hat
+            @test same(m, before)
+            @test forecast(fit(fc, dfr), 3).y_hat == first_fit
+            backtest(fc, dfr; horizon=3, initial=50, step=5)
+            @test same(m, before)
+            r = tune(fc, dfr; grid=(features=[fs, fs, fs],), horizon=3, initial=50,
+                     step=5)
+            @test same(m, before)
+            @test allequal(r.table.mean_score)
+        end
+    end
 end

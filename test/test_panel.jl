@@ -199,6 +199,30 @@
         @test nseries(res.best_fitted) == 3
     end
 
+    @testset "fit, backtest and tune leave the model prototype unchanged" begin
+        big = makepanel(lens=(60, 50, 55))
+        noisy = merge(big, (y=big.y .+ randn(StableRNG(5), length(big.y)),))
+        fs = FeatureSet(Lag(1), Lag(2), Lag(7), RollingMean(3))
+        # MLJ's == ignores RNG state, so compare every field.
+        same(a, b) = all(k -> isequal(getfield(a, k), getfield(b, k)),
+                         fieldnames(typeof(a)))
+        for m in (DecisionTreeRegressor(n_subfeatures=2, rng=StableRNG(1)),
+                  EvoTreeRegressor(nrounds=10, rowsample=0.5, colsample=0.5)),
+            s in (Recursive(), Direct(3))
+            before = deepcopy(m)
+            fc = mk(m, fs; strat=s)
+            first_fit = forecast(fit(fc, noisy), 3).y_hat
+            @test same(m, before)
+            @test forecast(fit(fc, noisy), 3).y_hat == first_fit
+            backtest(fc, noisy; horizon=3, initial=40, step=10)
+            @test same(m, before)
+            r = tune(fc, noisy; grid=(features=[fs, fs, fs],), horizon=3, initial=40,
+                     step=10)
+            @test same(m, before)
+            @test allequal(r.table.mean_score)
+        end
+    end
+
     @testset "single-series behaviour is unchanged" begin
         df = (ds=collect(Date(2022, 1, 1):Day(1):Date(2022, 2, 19)), y=Float64.(1:50))
         fc = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),

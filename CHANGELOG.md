@@ -26,6 +26,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `f.y_history`, `f.t_last`, `f.t_start` and `f.n_train` still work; on a panel
   they raise an error pointing at `f.series`.
 
+### Fixed
+
+- `Recursive` fits, single-series and panel, now copy the model prototype
+  before training, as `Direct` already did. A model holding an RNG object (e.g.
+  `DecisionTreeRegressor(rng=StableRNG(1))`) no longer has its RNG advanced by
+  `fit`, so refits, `backtest` folds and `tune` candidates are reproducible.
+
 ## [0.1.0]
 
 Initial release.

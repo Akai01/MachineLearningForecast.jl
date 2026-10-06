@@ -3,7 +3,7 @@
 
 function _fit(fc::Forecaster, ::Recursive, tbl::NamedTuple)
     X, y, _ = _training_frame(fc, tbl)
-    mach = MLJBase.machine(fc.model, X, y)
+    mach = MLJBase.machine(deepcopy(fc.model), X, y)
     MLJBase.fit!(mach; verbosity=0)
     return _fitted(fc, tbl, MLJBase.Machine[mach])
 end
