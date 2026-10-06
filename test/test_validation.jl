@@ -2,6 +2,34 @@
 # reserved column names, and the exact-value coverage of the single-row
 # (forecast-time) paths that batch materialization alone cannot pin.
 
+# Third-party exogenous features that double one covariate.
+module ThirdPartyExog
+
+using MachineLearningForecast: ExogenousFeature, ColumnAccumulator
+import MachineLearningForecast: outputnames, materialize!, featurevalues
+
+"Stores its input as `col`, not in the `cols` field forecast reads."
+struct NoCols <: ExogenousFeature
+    col::Symbol
+end
+
+"Stores its input in the required `cols::Vector{Symbol}` field."
+struct Doubled <: ExogenousFeature
+    cols::Vector{Symbol}
+end
+
+_col(f::NoCols) = f.col
+_col(f::Doubled) = only(f.cols)
+outputnames(f::Union{NoCols,Doubled}) = [Symbol(_col(f), :_x2)]
+function materialize!(out::ColumnAccumulator, f::Union{NoCols,Doubled}, y, t, data)
+    push!(out, only(outputnames(f)) => Vector{Union{Missing,Float64}}(2 .* data[_col(f)]))
+    return out
+end
+featurevalues(f::Union{NoCols,Doubled}, y_hist, t_next, exog_row) =
+    (2.0 * exog_row[_col(f)],)
+
+end # module
+
 @testset "validation and guards" begin
     df = (ds=collect(Date(2022, 1, 1):Day(1):Date(2022, 2, 19)), y=Float64.(1:50))
     fs = FeatureSet(Lag(1))
@@ -240,5 +268,32 @@
         # the trait is what routes it; user metrics can opt in the same way
         @test MachineLearningForecast.needs_ytrain(mase)
         @test !MachineLearningForecast.needs_ytrain(mae)
+    end
+
+    @testset "a third-party ExogenousFeature must store its columns in cols" begin
+        dfe = (ds=df.ds, y=df.y, promo=Float64.(1:50))
+        future = (ds=collect(df.ds[end] + Day(1):Day(1):df.ds[end] + Day(3)),
+                  promo=[1.0, 2.0, 3.0])
+        for m in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2))
+            bad = Forecaster(m; features=FeatureSet(Lag(1), ThirdPartyExog.NoCols(:promo)),
+                             freq=Day(1))
+            f = fit(bad, dfe)                     # fitting never reads cols
+            for run in (() -> forecast(f, 3; new_data=future),
+                        () -> backtest(bad, dfe; horizon=3, initial=40))
+                @test_throws ArgumentError run()
+                @test_throws "NoCols is an ExogenousFeature without a cols field" run()
+                @test_throws "in a field cols::Vector{Symbol}" run()
+            end
+            good = Forecaster(m; freq=Day(1),
+                              features=FeatureSet(Lag(1), ThirdPartyExog.Doubled([:promo])))
+            @test all(isfinite, forecast(fit(good, dfe), 3; new_data=future).y_hat)
+            @test length(backtest(good, dfe; horizon=3, initial=40).folds.y_hat) == 9
+        end
+        echo = Forecaster(TestModels.EchoColumn(:promo_x2); freq=Day(1),
+                          features=FeatureSet(Lag(1), ThirdPartyExog.Doubled([:promo])))
+        @test forecast(fit(echo, dfe), 3; new_data=future).y_hat == [2.0, 4.0, 6.0]
+        fs3 = FeatureSet(Lag(1), Exogenous(:a, :b), ThirdPartyExog.Doubled([:c]))
+        @test (@inferred MachineLearningForecast.exogenouscolumns(fs3)) == [:a, :b, :c]
+        @test MachineLearningForecast.exogenouscolumns(FeatureSet(Lag(1))) == Symbol[]
     end
 end

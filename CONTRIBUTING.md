@@ -71,7 +71,7 @@ These are load-bearing; please follow them:
 ## Adding a new feature type
 
 A feature is a subtype of `TargetFeature`, `TimeFeature` or `ExogenousFeature`,
-and must implement four methods — this is the whole contract:
+and must implement four methods:
 
 ```julia
 outputnames(f)                          # Vector{Symbol}: the columns it produces
@@ -79,6 +79,11 @@ minhistory(f)                           # Int: rows needed before it is defined
 materialize!(out, f, y, t, tbl)         # batch/training path, vectorised
 featurevalues(f, y_hist, t_next, exog)  # single-row path, used when forecasting
 ```
+
+An `ExogenousFeature` must also store its input columns in a field
+`cols::Vector{Symbol}`. `forecast` and `backtest` read that field to pick the
+columns from `new_data` (or from the held-out rows), and throw an
+`ArgumentError` for an `ExogenousFeature` without it.
 
 The two paths **must compute the same function**. A mismatch between them is a
 silent accuracy bug: training sees one thing, forecasting another. Add a test

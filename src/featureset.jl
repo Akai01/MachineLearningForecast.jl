@@ -80,8 +80,19 @@ function targetcolumnmask(fs::FeatureSet)
 end
 
 "The exogenous columns required by the set (empty if none)."
-exogenouscolumns(fs::FeatureSet) =
-    reduce(vcat, [f.cols for f in fs.features if f isa ExogenousFeature]; init=Symbol[])
+function exogenouscolumns(fs::FeatureSet)
+    cols = Symbol[]
+    for f in fs.features
+        f isa ExogenousFeature || continue
+        hasfield(typeof(f), :cols) || throw(ArgumentError(
+            "$(typeof(f)) is an ExogenousFeature without a cols field. An " *
+            "ExogenousFeature must store its input columns in a field " *
+            "cols::Vector{Symbol}, which forecast and backtest read to pick them " *
+            "from new_data. Add that field to $(nameof(typeof(f)))."))
+        append!(cols, f.cols)
+    end
+    return cols
+end
 
 """
     build_training_frame(fs, tbl, target, time) -> (X, y, keep)
