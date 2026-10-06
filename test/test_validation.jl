@@ -291,6 +291,10 @@ end # module
         cal = Calendar(:dayofweek, :month, :weekofyear)
         @test collect(MachineLearningForecast.featurevalues(cal, y, t[7], nothing)) ==
               Float64[dayofweek(t[7]), month(t[7]), week(t[7])]
+        acc = MachineLearningForecast.ColumnAccumulator()
+        MachineLearningForecast.materialize!(acc, cal, y, t, (ds=t, y=y))
+        @test collect(MachineLearningForecast.featurevalues(cal, y[1:6], t[7], nothing)) ==
+              [col[7] for (_, col) in acc]
         # Diff: y_{t-lag} - y_{t-lag-k} continuing the history
         @test only(MachineLearningForecast.featurevalues(Diff(3; lag=2), y, t[1], nothing)) ==
               y[10 + 1 - 2] - y[10 + 1 - 2 - 3]
