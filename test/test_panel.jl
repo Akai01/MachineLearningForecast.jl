@@ -417,6 +417,32 @@
         end
     end
 
+    @testset "real learners fit, forecast and backtest a panel" begin
+        big = makepanel(lens=(60, 50, 55))
+        noisy = merge(big, (y=big.y .+ randn(StableRNG(6), length(big.y)),))
+        fs = FeatureSet(Lag(1), Lag(7), RollingMean(3), Calendar(:dayofweek))
+        for m in (EvoTreeRegressor(nrounds=20, seed=123),
+                  DecisionTreeRegressor(max_depth=4, rng=StableRNG(2))),
+            s in (Recursive(), Direct(4))
+            fc = mk(m, fs; strat=s)
+            f = fit(fc, noisy)
+            @test nseries(f) == 3 && length(f.machines) == (s isa Direct ? 4 : 1)
+            out = forecast(f, 4)
+            @test out.unique_id == repeat(["s1", "s2", "s3"], inner=4)
+            @test out.ds == reduce(vcat, [st.t_last .+ Day.(1:4) for st in f.series])
+            @test all(isfinite, out.y_hat)
+            @test forecast(fit(fc, noisy), 4) == out
+            # s1 ends near 160, s3 near 105, s2 near 60.
+            @test all(out.y_hat[1:4] .> out.y_hat[9:12] .> out.y_hat[5:8])
+            r = backtest(fc, noisy; horizon=4, initial=40, step=10)
+            ref = backtest(mk(TestModels.LinAR(1.0, 0.0), fs; strat=s), noisy;
+                           horizon=4, initial=40, step=10)
+            @test r.folds.origin == ref.folds.origin && r.folds.ds == ref.folds.ds
+            @test r.folds.unique_id == ref.folds.unique_id && r.folds.y == ref.folds.y
+            @test all(isfinite, r.folds.y_hat) && all(isfinite, r.metrics.value)
+        end
+    end
+
     @testset "fit, backtest and tune leave the model prototype unchanged" begin
         big = makepanel(lens=(60, 50, 55))
         noisy = merge(big, (y=big.y .+ randn(StableRNG(5), length(big.y)),))
