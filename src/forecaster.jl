@@ -366,7 +366,7 @@ function _fill_row!(colvecs::Vector{Vector{Float64}}, features::FeatureSet,
     return nothing
 end
 
-# A function barrier: features is abstractly typed, this is not.
+# Barrier: the loop below compiles per feature type.
 function _fill_feature!(colvecs::Vector{Vector{Float64}}, j::Int, feat::AbstractFeature,
                         y_hist, t_next, n_next, exog_row)
     targ = _uses_step_index(feat) ? n_next : t_next
