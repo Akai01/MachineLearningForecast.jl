@@ -132,7 +132,7 @@ end
 function seasonal_index(x)
     isseasonal(x) || return ones(12)
     t = 7:(length(x) - 6)
-    # Centred 2x12 moving average: half weight at both ends.
+    # An even window needs half weights to stay centred.
     ma = [(x[i - 6] / 2 + sum(x[(i - 5):(i + 5)]) + x[i + 6] / 2) / 12 for i in t]
     ratio = x[t] ./ ma
     s = [mean(ratio[mod1.(t, 12) .== p]) for p in 1:12]
@@ -206,7 +206,7 @@ shown in percent. MLJLinearModels also exports a `fit`, so the code calls
 `MachineLearningForecast.fit`.
 
 There are two baselines. The seasonal naive forecast repeats each series' last
-12 training months. Naive2, the benchmark of the M3 competition, repeats the
+12 training months. Naive2, one of the M3 competition's benchmarks, repeats the
 last seasonally adjusted value and puts the season back, with the seasonal
 indices of the transform.
 
@@ -313,17 +313,17 @@ are above it. The four tree ensembles score 13.66 to 13.85, the
 nearest-neighbour model 14.32 and the linear model 14.58. The random forest
 took the longest to fit and forecast. Differences of a few hundredths between
 learners mean little here: step 1 of the transform cancels in step 3, so
-leaving it out changes ``z`` only by rounding, yet it moves the sMAPE of
-EvoTrees, the random forest and LightGBM by 0.03 to 0.05.
+leaving it out changes ``z`` only by rounding, yet in a separate run it moved
+the sMAPE of EvoTrees, the random forest and LightGBM from 13.67, 13.66 and
+13.71 to 13.64, 13.62 and 13.74.
 
-For calibration, the table below lists published sMAPE on the M3 monthly
-series from Oreshkin, B. N., Carpov, D., Chapados, N. and Bengio, Y. (2020),
+For calibration, the table below lists every method with a monthly result in
+Table 14 of Oreshkin, B. N., Carpov, D., Chapados, N. and Bengio, Y. (2020),
 "N-BEATS: Neural basis expansion analysis for interpretable time series
 forecasting", *International Conference on Learning Representations (ICLR
-2020)*, Table 14. Those numbers are on all 1428 series and this page uses
-1399, so the comparison is approximate. Naive2 scores 16.93 here against the
-published 16.91, so the scoring and the subset are close to the published
-setting.
+2020)*. Those numbers are on all 1428 series and this page uses 1399, so the
+comparison is approximate. Naive2 scores 16.93 here against the published
+16.91, so the scoring and the subset are close to the published setting.
 
 | Method | sMAPE % |
 |---|---|
@@ -332,24 +332,31 @@ setting.
 | Comb S-H-D | 14.48 |
 | ForecastPro | 13.86 |
 | Theta | 13.85 |
+| DOTM | 13.74 |
+| BaggedETS.BC | 13.74 |
+| EXP | 13.43 |
 | N-BEATS-G | 13.19 |
 | N-BEATS-I | 13.15 |
+| N-BEATS-I+G | 13.11 |
 
-The four tree ensembles land level with Theta, the winner of M3, and
-ForecastPro, and about 0.5 to 0.7 behind N-BEATS. That does not show that they
-beat Theta: the margin over Theta is at most 0.19, there is no significance
-test, and the series differ. The nearest-neighbour and linear models are close
-to Comb S-H-D and ahead of ARIMA.
+The four tree ensembles land level with Theta, the winner of M3, ForecastPro,
+DOTM and bagged ETS. EXP, a later statistical method, is 0.2 to 0.4 ahead of
+them, and N-BEATS about 0.5 to 0.7. That does not show that the trees beat
+Theta: the margin over Theta is at most 0.19, there is no significance test,
+and the series differ. The nearest-neighbour and linear models are close to
+Comb S-H-D and ahead of ARIMA.
 
-Tuning added little. In a separate experiment, each learner was given 30
-hyperparameter configurations under this setup, its defaults among them, and
-the one with the lowest sMAPE on the validation window was scored on the
-holdout. Against the defaults, that changed holdout sMAPE by -0.60 for
-`KNNRegressor`, -0.22 for `XGBoostRegressor`, -0.03 for `EvoTreeRegressor`,
-0.00 for `LinearRegressor`, +0.02 for `LGBMRegressor` and +0.04 for
-`RandomForestRegressor`. These numbers come from one holdout, one transform
-and one feature set, so they describe this setup and not the learners in
-general.
+Tuning added little for four of the six learners. In a separate experiment,
+each learner was given 30 hyperparameter configurations under this setup, its
+defaults among them, and the one with the lowest sMAPE on the validation
+window was scored on the holdout. Against the defaults, that changed holdout
+sMAPE by -0.60 for `KNNRegressor`, whose default of 5 neighbours is small (the
+pick used 75), -0.22 for `XGBoostRegressor`, -0.03 for `EvoTreeRegressor`,
++0.02 for `LGBMRegressor`, +0.04 for `RandomForestRegressor`, and 0.00 for the
+linear learner, whose search covered least squares, ridge and lasso and picked
+a lasso with ``\lambda = 10^{-5}``. These numbers come from one holdout, one
+transform and one feature set, so they describe this setup and not the
+learners in general.
 
 **Tested with** Julia 1.12.5 and 1.10.12, each started with `--threads=auto`
 (20 threads), which gave the same scores; the times above are from Julia
