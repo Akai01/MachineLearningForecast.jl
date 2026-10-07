@@ -293,6 +293,14 @@
             short, y[1:2], t[3])
         # other errors from f pass through unchanged
         @test_throws DomainError materialize(CustomFeature(:d, h -> sqrt(-1.0), 0))
+        lookup = [1.0, 2.0]
+        @test_throws BoundsError materialize(CustomFeature(:c, h -> lookup[5], 1))
+        @test_throws "access 2-element Vector{Float64} at index [5]" materialize(
+            CustomFeature(:c, h -> lookup[5], 1))
+        @test_throws BoundsError materialize(
+            CustomFeature(:c, h -> throw(BoundsError()), 1))
+        @test_throws BoundsError fv(CustomFeature(:c, h -> collect(h)[end - 2], 0),
+                                    y[1:2], t[3])
         for (ret, shown) in (("x", "\"x\""), (missing, "missing"), ([1.0], "[1.0]"))
             bad = CustomFeature(:r, h -> ret, 0)
             @test_throws ArgumentError materialize(bad)
@@ -310,6 +318,11 @@
             @test_throws "CustomFeature(:s) indexed past its history" fit(bad_fc, df)
             fc = Forecaster(m; features=FeatureSet(Lag(1), ok), freq=Day(1))
             @test all(isfinite, forecast(fit(fc, df), 3).y_hat)
+            # Reads past the captured vector at the second forecast step.
+            past = CustomFeature(:p, h -> y[length(h)], 1)
+            fp = fit(Forecaster(m; features=FeatureSet(Lag(1), past), freq=Day(1)), df)
+            @test_throws BoundsError forecast(fp, 3)
+            @test_throws "access 10-element Vector{Float64} at index [11]" forecast(fp, 3)
         end
     end
 

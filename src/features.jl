@@ -429,7 +429,7 @@ function _custom_value(f::CustomFeature, h::AbstractVector, t)
     v = try
         f.f(h)
     catch err
-        err isa BoundsError || rethrow()
+        err isa BoundsError && isdefined(err, :a) && err.a === h || rethrow()
         throw(ArgumentError(
             "CustomFeature(:$(f.name)) indexed past its history at time $t, where f " *
             "sees $(_nvalues(h)): $(sprint(showerror, err)). If f needs more values, " *

@@ -48,8 +48,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A `CustomFeature` whose function indexes past its history (its `minhistory`
   is too small) or returns something that is not a number throws an
   `ArgumentError` naming the feature, the timestamp, the history length and
-  the fix, instead of a bare `BoundsError` or `MethodError`. Valid custom
-  features produce the same values as before.
+  the fix, instead of a bare `BoundsError` or `MethodError`. Any other error
+  from the function, such as a `BoundsError` on a vector it captured, passes
+  through unchanged. Valid custom features produce the same values as before.
 - A third-party `ExogenousFeature` without a `cols` field or property throws
   an `ArgumentError` at `forecast` and `backtest` saying it must store its
   input columns in `cols::Vector{Symbol}`, instead of a `FieldError` (an
