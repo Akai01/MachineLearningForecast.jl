@@ -296,7 +296,8 @@ better).
   recorded as `missing` (and reported to the strategy via [`tell!`](@ref)),
   the message stored in the result table's `:error` column, and the candidate
   excluded from ranking. A non-finite mean score (`NaN` or `Inf`) counts as a
-  failure.
+  failure. If every candidate fails, `tune` throws an `ErrorException` listing
+  the distinct error messages.
 
 Returns a [`TuneResult`](@ref) with the score table, the best spec, and the
 best spec refit on all of `data`. Ties are broken by first-seen order.

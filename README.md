@@ -171,7 +171,9 @@ result.best_fitted   # the winner refit on all data, ready to forecast
 `tuner=GridSearch()` (default) takes the Cartesian product;
 `tuner=RandomSearch(n; rng=...)` draws `n` candidates. Candidate failures are
 caught, recorded in the table's `:error` column, and excluded from ranking —
-they never abort the search.
+they never abort the search. A non-finite mean score (`NaN` or `Inf`) counts as
+a failure. If every candidate fails, `tune` throws an `ErrorException` listing
+the distinct error messages.
 
 **Bring your own strategy.** The search loop is a documented ask/tell
 protocol: subtype `TuningStrategy`, implement `ask(s)` (return the next

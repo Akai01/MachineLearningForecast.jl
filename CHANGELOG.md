@@ -121,6 +121,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   0.1002, and the examples load what they use (`Statistics` for `mean`,
   `Random` for `Xoshiro` in place of the test-only `StableRNG`, `Dates` for
   `Day`, `EvoTrees` for `EvoTreeRegressor`).
+- The `tune` docstring and the README say that `tune` throws an
+  `ErrorException` listing the errors when every candidate fails, and the
+  README that a non-finite mean score counts as a failure.
 
 ## [0.1.0]
 
