@@ -205,6 +205,16 @@ series' training values. Both are averaged over the 1399 series, and sMAPE is
 shown in percent. MLJLinearModels also exports a `fit`, so the code calls
 `MachineLearningForecast.fit`.
 
+!!! note "Why sMAPE"
+    This page reports sMAPE only because the M3 competition did, so the
+    results can be compared with published ones; it does not recommend it.
+    Hyndman, R. J. and Koehler, A. B. (2006), "Another look at measures of
+    forecast accuracy", *International Journal of Forecasting* 22(4),
+    679–688, found the measures used in the M3 competition inadequate in
+    commonly occurring situations, such as values close to zero, and proposed
+    MASE as the standard for comparing accuracy across series. MASE is
+    reported alongside for that reason.
+
 There are two baselines. The seasonal naive forecast repeats each series' last
 12 training months. Naive2, one of the M3 competition's benchmarks, repeats the
 last seasonally adjusted value and puts the season back, with the seasonal
