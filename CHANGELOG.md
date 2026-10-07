@@ -50,10 +50,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ArgumentError` naming the feature, the timestamp, the history length and
   the fix, instead of a bare `BoundsError` or `MethodError`. Valid custom
   features produce the same values as before.
-- A third-party `ExogenousFeature` without a `cols` field throws an
-  `ArgumentError` at `forecast` and `backtest` saying it must store its input
-  columns in `cols::Vector{Symbol}`, instead of a `FieldError`. `CONTRIBUTING.md`
-  now documents that requirement.
+- A third-party `ExogenousFeature` without a `cols` field or property throws
+  an `ArgumentError` at `forecast` and `backtest` saying it must store its
+  input columns in `cols::Vector{Symbol}`, instead of a `FieldError` (an
+  `ErrorException` on Julia 1.10). A `cols` property defined through
+  `getproperty` still works. `CONTRIBUTING.md` now documents that requirement.
 - Panel errors about one series' data name the series and give the row of the
   table passed to `fit` or `backtest`. A missing or non-finite target and a
   missing exogenous value were reported without the series and at a row

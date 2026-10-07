@@ -14,15 +14,22 @@ struct Doubled <: ExogenousFeature
     cols::Vector{Symbol}
 end
 
-_col(f::NoCols) = f.col
+"Exposes its input as a `cols` property, not a field."
+struct PropCols <: ExogenousFeature
+    col::Symbol
+end
+Base.getproperty(f::PropCols, s::Symbol) =
+    s === :cols ? [getfield(f, :col)] : getfield(f, s)
+
+const Ours = Union{NoCols,Doubled,PropCols}
+_col(f::Union{NoCols,PropCols}) = f.col
 _col(f::Doubled) = only(f.cols)
-outputnames(f::Union{NoCols,Doubled}) = [Symbol(_col(f), :_x2)]
-function materialize!(out::ColumnAccumulator, f::Union{NoCols,Doubled}, y, t, data)
+outputnames(f::Ours) = [Symbol(_col(f), :_x2)]
+function materialize!(out::ColumnAccumulator, f::Ours, y, t, data)
     push!(out, only(outputnames(f)) => Vector{Union{Missing,Float64}}(2 .* data[_col(f)]))
     return out
 end
-featurevalues(f::Union{NoCols,Doubled}, y_hist, t_next, exog_row) =
-    (2.0 * exog_row[_col(f)],)
+featurevalues(f::Ours, y_hist, t_next, exog_row) = (2.0 * exog_row[_col(f)],)
 
 end
 
@@ -354,6 +361,14 @@ end
                               features=FeatureSet(Lag(1), ThirdPartyExog.Doubled([:promo])))
             @test all(isfinite, forecast(fit(good, dfe), 3; new_data=future).y_hat)
             @test length(backtest(good, dfe; horizon=3, initial=40).folds.y_hat) == 9
+            # A cols property is enough, as in 0.1.0.
+            prop = Forecaster(m; freq=Day(1),
+                              features=FeatureSet(Lag(1), ThirdPartyExog.PropCols(:promo)))
+            @test forecast(fit(prop, dfe), 3; new_data=future) ==
+                  forecast(fit(good, dfe), 3; new_data=future)
+            bp = backtest(prop, dfe; horizon=3, initial=40)
+            bg = backtest(good, dfe; horizon=3, initial=40)
+            @test isequal(bp.folds, bg.folds) && isequal(bp.metrics, bg.metrics)
         end
         echo = Forecaster(TestModels.EchoColumn(:promo_x2); freq=Day(1),
                           features=FeatureSet(Lag(1), ThirdPartyExog.Doubled([:promo])))
@@ -361,5 +376,7 @@ end
         fs3 = FeatureSet(Lag(1), Exogenous(:a, :b), ThirdPartyExog.Doubled([:c]))
         @test (@inferred MachineLearningForecast.exogenous_columns(fs3)) == [:a, :b, :c]
         @test MachineLearningForecast.exogenous_columns(FeatureSet(Lag(1))) == Symbol[]
+        fsp = FeatureSet(Lag(1), ThirdPartyExog.PropCols(:c))
+        @test MachineLearningForecast.exogenous_columns(fsp) == [:c]
     end
 end

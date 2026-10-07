@@ -81,12 +81,17 @@ function exogenous_columns(fs::FeatureSet)
     cols = Symbol[]
     for f in fs.features
         f isa ExogenousFeature || continue
-        hasfield(typeof(f), :cols) || throw(ArgumentError(
-            "$(typeof(f)) is an ExogenousFeature without a cols field. An " *
-            "ExogenousFeature must store its input columns in a field " *
-            "cols::Vector{Symbol}, which forecast and backtest read to pick them " *
-            "from new_data. Add that field to $(nameof(typeof(f)))."))
-        append!(cols, f.cols)
+        # A getproperty-based cols worked in 0.1.0, so read it.
+        c = try
+            f.cols
+        catch
+            throw(ArgumentError(
+                "$(typeof(f)) is an ExogenousFeature without a cols field or " *
+                "property. An ExogenousFeature must store its input columns in a field " *
+                "cols::Vector{Symbol}, which forecast and backtest read to pick them " *
+                "from new_data. Add that field to $(nameof(typeof(f)))."))
+        end
+        append!(cols, c)
     end
     return cols
 end
