@@ -19,8 +19,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `.series`.
 - The documentation site shows the package logo: the hex logo in the sidebar
   and the wide logo with its tagline on the home page, each in a light and a
-  dark variant. The README shows the wide logo too, following GitHub's light
-  or dark theme. The logo files live in `docs/src/assets/`.
+  dark variant. The README shows the hex logo, which reads on both light and
+  dark pages. The logo files live in `docs/src/assets/`.
 
 ### Changed
 
