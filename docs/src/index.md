@@ -1,5 +1,14 @@
 # MachineLearningForecast.jl
 
+```@raw html
+<p style="text-align: center;">
+  <img class="docs-light-only" src="assets/logo-wide-tagline.svg"
+       alt="MachineLearningForecast.jl logo" width="520"/>
+  <img class="docs-dark-only" src="assets/logo-wide-tagline-dark.svg"
+       alt="MachineLearningForecast.jl logo" width="520"/>
+</p>
+```
+
 Generic, composable time-series forecasting built on the MLJ model interface:
 any MLJ `Deterministic` regressor is a valid base model.
 

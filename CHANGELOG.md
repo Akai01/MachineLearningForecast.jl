@@ -17,6 +17,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   joining on `(id, time)`; `tune` works on panels unchanged. Adds `nseries` and
   `SeriesState`, and `FittedForecaster` now exposes per-series state as
   `.series`.
+- The documentation site shows the package logo: the hex logo in the sidebar
+  and the wide logo with its tagline on the home page, each in a light and a
+  dark variant. The logo files live in `docs/src/assets/`.
 
 ### Changed
 
