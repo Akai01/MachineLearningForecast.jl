@@ -84,7 +84,8 @@ function exogenous_columns(fs::FeatureSet)
         # A getproperty-based cols worked in 0.1.0, so read it.
         c = try
             f.cols
-        catch
+        catch err
+            _is_missing_field(err) || rethrow()
             throw(ArgumentError(
                 "$(typeof(f)) is an ExogenousFeature without a cols field or " *
                 "property. An ExogenousFeature must store its input columns in a field " *
@@ -95,6 +96,10 @@ function exogenous_columns(fs::FeatureSet)
     end
     return cols
 end
+
+# Julia 1.12 throws FieldError; 1.10 an ErrorException.
+_is_missing_field(err) = nameof(typeof(err)) === :FieldError ||
+    (err isa ErrorException && occursin("has no field", err.msg))
 
 """
     build_training_frame(fs, tbl, target, time, rows=1:nrows(tbl)) -> (X, y, keep)

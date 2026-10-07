@@ -20,8 +20,15 @@ end
 Base.getproperty(f::PropCols, s::Symbol) =
     s === :cols ? [getfield(f, :col)] : getfield(f, s)
 
-const Ours = Union{NoCols,Doubled,PropCols}
-_col(f::Union{NoCols,PropCols}) = f.col
+"Has a `cols` property whose getter fails for its own reason."
+struct BrokenCols <: ExogenousFeature
+    col::Symbol
+end
+Base.getproperty(f::BrokenCols, s::Symbol) =
+    s === :cols ? error("boom in getproperty") : getfield(f, s)
+
+const Ours = Union{NoCols,Doubled,PropCols,BrokenCols}
+_col(f::Union{NoCols,PropCols,BrokenCols}) = f.col
 _col(f::Doubled) = only(f.cols)
 outputnames(f::Ours) = [Symbol(_col(f), :_x2)]
 function materialize!(out::ColumnAccumulator, f::Ours, y, t, data)
@@ -377,5 +384,8 @@ end
         @test MachineLearningForecast.exogenous_columns(FeatureSet(Lag(1))) == Symbol[]
         fsp = FeatureSet(Lag(1), ThirdPartyExog.PropCols(:c))
         @test MachineLearningForecast.exogenous_columns(fsp) == [:c]
+        exogcols = MachineLearningForecast.exogenous_columns
+        fsb = FeatureSet(Lag(1), ThirdPartyExog.BrokenCols(:c))
+        @test_throws ErrorException("boom in getproperty") exogcols(fsb)
     end
 end
