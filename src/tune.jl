@@ -89,6 +89,21 @@ Ask a [`TuningStrategy`](@ref) for its next candidate: a NamedTuple of
 `:strategy`, `:freq`, `:target`, `:time`). Return `nothing` to signal that the
 search is finished. Part of the public tuning-extension API — implement it for
 your own strategy subtypes; see [`TuningStrategy`](@ref) for the full contract.
+
+# Example
+```julia
+mutable struct FirstK <: TuningStrategy
+    candidates::Vector{NamedTuple}
+    i::Int
+end
+MachineLearningForecast.ask(s::FirstK) = s.i > length(s.candidates) ? nothing :
+                                         (c = s.candidates[s.i]; s.i += 1; c)
+
+s = FirstK([(strategy=Recursive(),), (strategy=Direct(28),)], 1)
+ask(s)   # (strategy = Recursive(),)
+ask(s)   # (strategy = Direct(28),)
+ask(s)   # nothing: the search is finished
+```
 """
 function ask end
 
@@ -100,6 +115,21 @@ the NamedTuple previously returned by [`ask`](@ref), and `score` is the
 `Float64` mean backtest metric (lower is better) or `missing` if the candidate
 failed to evaluate. Part of the public tuning-extension API — implement it for
 your own strategy subtypes; see [`TuningStrategy`](@ref) for the full contract.
+
+# Example
+```julia
+mutable struct Logged <: TuningStrategy
+    candidates::Vector{NamedTuple}
+    scores::Vector{Union{Missing,Float64}}
+end
+MachineLearningForecast.ask(s::Logged) = length(s.scores) < length(s.candidates) ?
+                                         s.candidates[length(s.scores) + 1] : nothing
+MachineLearningForecast.tell!(s::Logged, candidate, score) = push!(s.scores, score)
+
+s = Logged([(strategy=Recursive(),), (strategy=Direct(28),)], [])
+tune(fc, df; tuner=s, horizon=28, initial=730)
+s.scores   # each candidate's mean backtest score, or missing if it failed
+```
 """
 function tell! end
 
@@ -192,6 +222,15 @@ Result of [`tune`](@ref):
   candidates are excluded from ranking.
 - `best::Forecaster`: the best candidate spec (NOT fitted).
 - `best_fitted::FittedForecaster`: the best spec refit on ALL of the data.
+
+# Example
+```julia
+result = tune(fc, df; grid=(strategy=[Recursive(), Direct(28)],),
+              horizon=28, initial=730)
+result.table.mean_score             # one score per candidate
+result.best                         # the winning spec
+forecast(result.best_fitted, 28)
+```
 """
 struct TuneResult
     table::NamedTuple

@@ -161,6 +161,20 @@ forecast — the fitted MLJ machine(s) (one for [`Recursive`](@ref),
 `max_horizon` for [`Direct`](@ref)), the training target history (needed to
 compute lag features at forecast time), the first/last training timestamps, and
 the stable feature column order. Use with [`forecast`](@ref).
+
+`fitted.series` holds one [`SeriesState`](@ref) per series. For a single
+series, `fitted.y_history`, `fitted.t_last`, `fitted.t_start` and
+`fitted.n_train` read its one state directly; on a panel they throw an
+`ArgumentError` pointing at `fitted.series`.
+
+# Example
+```julia
+fitted = fit(fc, df)
+fitted.machines      # the trained MLJ machine(s)
+fitted.series        # one SeriesState per series
+fitted.t_last        # single series only: the last training timestamp
+forecast(fitted, 28)
+```
 """
 struct FittedForecaster{F<:Forecaster}
     spec::F

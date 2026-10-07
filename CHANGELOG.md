@@ -107,6 +107,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Calendar(:hour)` and `Calendar(:minute)` check the time values instead of
   the element type, so a `DateTime` column typed `Union{Missing,DateTime}` or
   `Any` is accepted. A `Date` column is still rejected with the same message.
+- The `FittedForecaster`, `BacktestResult`, `ask`, `tell!` and `TuneResult`
+  docstrings have examples. `FittedForecaster`'s describes `fitted.series`,
+  and `BacktestResult`'s lists the id column a panel backtest adds to `folds`.
 
 ## [0.1.0]
 

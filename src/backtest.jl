@@ -6,10 +6,18 @@ vectors, Tables.jl-compatible):
 
 - `folds`: one row per fold × horizon step, with columns `:origin` (the last
   training timestamp of the fold), `:step` (1..horizon), the spec's time
-  column, `:y` (actual), and `:y_hat` (forecast).
+  column, `:y` (actual), and `:y_hat` (forecast). A panel backtest adds the id
+  column after `:step`.
 - `metrics`: one row per fold × metric (columns `:fold`, `:origin`, `:metric`,
   `:value`), plus one overall summary row per metric with `fold=0` (`:value`
   is the mean of the per-fold values, `:origin` is `missing`).
+
+# Example
+```julia
+results = backtest(fc, df; horizon=28, initial=730)
+results.folds.y_hat   # every forecast, fold by fold
+results.metrics       # per-fold and overall scores
+```
 """
 struct BacktestResult
     folds::NamedTuple
