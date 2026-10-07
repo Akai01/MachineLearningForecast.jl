@@ -22,6 +22,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   dark variant. The README opens with a banner, light or dark to match the
   reader's system theme; each has its own background, so it reads on either
   page colour. The logo and banner files live in `docs/src/assets/`.
+- A documentation page, "Using different models", fits six MLJ learners
+  (EvoTrees, a DecisionTree random forest, MLJLinearModels, XGBoost, LightGBM
+  and NearestNeighborModels) to the M3 monthly series, each as one global
+  model with the same features and strategy, and scores them against a
+  seasonal-naive baseline on the M3 holdout.
 
 ### Changed
 

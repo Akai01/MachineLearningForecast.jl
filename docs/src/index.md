@@ -38,6 +38,8 @@ two-level tuning story — including the **leakage warning** about always using
 `TimeSeriesCV` (never MLJ's `CV()`, shuffled or not) when tuning base models
 with MLJ's `TunedModel`.
 
+[Using different models](models.md) compares six MLJ learners on the M3 monthly series.
+
 ## API reference
 
 ```@docs
