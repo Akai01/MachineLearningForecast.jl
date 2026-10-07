@@ -224,10 +224,11 @@ the learners in general.
 
 **Tested with** Julia 1.12.5 and 1.10.12, each started with `--threads=auto`
 (20 threads), which gave the same scores; the times above are from Julia
-1.12.5 and depend on the machine and the thread count. Package versions:
-MachineLearningForecast 0.1.0, EvoTrees 0.19.0, MLJDecisionTreeInterface 0.5.0,
-MLJLinearModels 0.10.4, MLJXGBoostInterface 0.3.13, LightGBM 2.2.2,
-NearestNeighborModels 0.2.3 and ZipArchives 2.6.1.
+1.12.5 and depend on the machine and the thread count. The whole script
+peaked at about 3 GB of memory on Julia 1.12.5 and 6 GB on 1.10.12. Package
+versions: MachineLearningForecast 0.1.0, EvoTrees 0.19.0,
+MLJDecisionTreeInterface 0.5.0, MLJLinearModels 0.10.4, MLJXGBoostInterface
+0.3.13, LightGBM 2.2.2, NearestNeighborModels 0.2.3 and ZipArchives 2.6.1.
 
 ## Next steps
 
