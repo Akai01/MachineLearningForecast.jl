@@ -46,7 +46,7 @@ end # module
         @test occursin("leak", err.msg)
         # a custom feature named after the target is caught too
         @test_throws ArgumentError mk(features=FeatureSet(Lag(1),
-                                        CustomFeature(:y, length, 0)))
+                                                          CustomFeature(:y, length, 0)))
         @test_throws "the feature set produces a column named :y, which is the target " *
                      "column" mk(features=FeatureSet(Lag(1), CustomFeature(:y, length, 0)))
         # ...and naming the time column is refused with its own advice

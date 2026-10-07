@@ -37,7 +37,7 @@ mutable struct FirstK <: TuningStrategy
     i::Int
 end
 MachineLearningForecast.ask(s::FirstK) = s.i > length(s.candidates) ? nothing :
-                             (c = s.candidates[s.i]; s.i += 1; c)
+                                         (c = s.candidates[s.i]; s.i += 1; c)
 MachineLearningForecast.tell!(s::FirstK, candidate, score) = nothing
 ```
 """

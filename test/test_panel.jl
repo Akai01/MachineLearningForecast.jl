@@ -43,7 +43,7 @@
         @test err isa ArgumentError && occursin("series id", err.msg)
         # id=nothing is the single-series default, and dispatch reflects it
         @test !MachineLearningForecast.ispanel(Forecaster(TestModels.LinAR(1.0, 0.0);
-                                              features=f, freq=Day(1)))
+                                                          features=f, freq=Day(1)))
         @test MachineLearningForecast.ispanel(mk(TestModels.LinAR(1.0, 0.0), f))
     end
 
