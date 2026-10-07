@@ -300,6 +300,18 @@ MIT — see [LICENSE](LICENSE).
 
 ## Roadmap (not in v1)
 
-Probabilistic forecasts (conformal residuals from `backtest`), `DirRec`
-strategy, target transforms, per-series encodings for panel models (a series-id
-feature), and continuous search spaces for tuning.
+- **Target transforms** built into `fit`, `backtest` and `tune`: differencing,
+  per-series scaling (such as by the last 12 values), Box-Cox, and
+  deseasonalise-and-ratio. Fitting them inside each fold avoids the leak of
+  scaling a whole panel by hand before `backtest`.
+- **Per-series panel backtests**: cut each series at its own end instead of on
+  one shared timeline.
+- **Static features**: per-series constants given once, not repeated in
+  `new_data`, and per-series encodings (a series-id feature).
+- **More history features**: expanding mean, exponentially weighted mean,
+  seasonal rolling statistics, rolling quantiles, and lags of exogenous columns.
+- **Prediction intervals**: conformal intervals from `backtest` residuals.
+- **Model reuse**: forecast series not seen in training, update a fitted model
+  with new observations without refitting, access the feature matrix, fit
+  several models in one call, and tested save/load.
+- `DirRec` strategy and continuous search spaces for tuning.
