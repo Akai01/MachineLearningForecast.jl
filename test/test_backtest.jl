@@ -110,14 +110,16 @@ end
                      "needs initial + horizon = 120. Provide more data" backtest(
             fc, df; horizon=30, initial=90)
         # initial must exceed minhistory
-        fc_deep = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(30)), freq=Day(1))
+        fc_deep = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(30)),
+                             freq=Day(1))
         @test_throws ArgumentError backtest(fc_deep, df; horizon=5, initial=30)
         @test_throws "backtest initial=30 must exceed the feature set's minimum history " *
                      "(30 rows) so the first training window has at least one usable " *
                      "row. Pass initial=31 or more, or reduce lags/windows." backtest(
             fc_deep, df; horizon=5, initial=30)
         # Direct max_horizon < backtest horizon
-        fc_d = Forecaster(TestModels.LinAR(1.0, 0.0); features=fs, strategy=Direct(3), freq=Day(1))
+        fc_d = Forecaster(TestModels.LinAR(1.0, 0.0); features=fs, strategy=Direct(3),
+                          freq=Day(1))
         @test_throws ArgumentError backtest(fc_d, df; horizon=5, initial=80)
         @test_throws "backtest horizon=5 exceeds the Direct strategy's max_horizon=3. " *
                      "Use Direct(5) or reduce horizon." backtest(fc_d, df; horizon=5,

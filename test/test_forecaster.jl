@@ -26,8 +26,10 @@
                      "time=:ds." Forecaster(TestModels.LinAR(1.0, 0.0);
             features=FeatureSet(Lag(1)), freq=Day(1), target=:y, time=:y)
         # non-Deterministic model and unknown target scitype both warn, not error
-        fc = @test_logs (:warn, r"not an MLJModelInterface.Deterministic") (:warn, r"target_scitype") Forecaster(
-            TestModels.DummyProb(); features=FeatureSet(Lag(1)), freq=Day(1))
+        fc = @test_logs((:warn, r"not an MLJModelInterface.Deterministic"),
+                        (:warn, r"target_scitype"),
+                        Forecaster(TestModels.DummyProb(); features=FeatureSet(Lag(1)),
+                                   freq=Day(1)))
         @test fc isa Forecaster
     end
 
@@ -137,7 +139,8 @@
     end
 
     @testset "new_data without exogenous features warns and is ignored" begin
-        fc = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)), freq=Day(1))
+        fc = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                        freq=Day(1))
         fitted = fit(fc, df)
         extra = (ds=t[end] .+ Day.(1:2), promo=zeros(2))
         fcast = @test_logs (:warn, r"ignored") forecast(fitted, 2; new_data=extra)
@@ -145,7 +148,8 @@
     end
 
     @testset "time column validation" begin
-        fc = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)), freq=Day(1))
+        fc = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                        freq=Day(1))
         gap = (ds=[t[1:10]; t[12:20]], y=Float64.(1:19))
         err = try fit(fc, gap) catch e; e end
         @test err isa ArgumentError && occursin("gap", err.msg)
@@ -157,7 +161,8 @@
         err = try fit(fc, unsorted) catch e; e end
         @test err isa ArgumentError && occursin("not sorted", err.msg)
         # a wrong freq puts rows off the declared grid
-        fc_w = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)), freq=Week(1))
+        fc_w = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                          freq=Week(1))
         @test_throws ArgumentError fit(fc_w, df)
         @test_throws "time column :ds has the timestamp 2022-01-02 at row 2, which does " *
                      "not lie on the freq=1 week grid starting at 2022-01-01" fit(fc_w, df)
@@ -241,7 +246,8 @@
     end
 
     @testset "misc" begin
-        fc = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)), freq=Day(1))
+        fc = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                        freq=Day(1))
         fitted = fit(fc, df)
         @test_throws ArgumentError forecast(fitted, 0)
         @test_throws "forecast horizon h must be ≥ 1, got 0. Pass the number of steps " *
@@ -259,7 +265,8 @@
         # DateTime time column with hourly frequency
         th = collect(DateTime(2022, 1, 1):Hour(1):DateTime(2022, 1, 3, 11))
         dfh = (ds=th, y=Float64.(1:length(th)))
-        fch = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)), freq=Hour(1))
+        fch = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                         freq=Hour(1))
         fh = forecast(fit(fch, dfh), 3)
         @test fh.ds == [th[end] + Hour(s) for s in 1:3]
     end

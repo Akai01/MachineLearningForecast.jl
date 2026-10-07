@@ -1,7 +1,10 @@
 # Forecaster spec (immutable), FittedForecaster (fitted state), fit, and the
 # strategy-agnostic forecast entry point.
 
-"Column names used by `forecast`/`backtest` result tables; the time column may not shadow them."
+"""
+Column names used by `forecast`/`backtest` result tables; the time column may
+not shadow them.
+"""
 const RESERVED_OUTPUT_NAMES = (:origin, :step, :y, :y_hat)
 
 """
@@ -55,7 +58,8 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
     id::I
     function Forecaster(model::M, features::FeatureSet, strategy::S, freq::Period,
                         target::Symbol, time::Symbol,
-                        id::I=nothing) where {M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
+                        id::I=nothing) where {M,S<:ForecastStrategy,
+                                              I<:Union{Nothing,Symbol}}
         model isa Type && model <: MLJModelInterface.Model && throw(ArgumentError(
             "model must be an MLJ model instance, got the type $(nameof(model)). Pass " *
             "an instance instead, e.g. $(nameof(model))()."))
@@ -65,8 +69,8 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
             "DecisionTreeRegressor(), or any other MLJ regressor."))
         model isa MLJModelInterface.Deterministic || @warn(
             "model $(typeof(model)) is not an MLJModelInterface.Deterministic " *
-            "regressor; MachineLearningForecast expects point predictions and may fail at " *
-            "predict time.")
+            "regressor; MachineLearningForecast expects point predictions and may " *
+            "fail at predict time.")
         ts = MLJModelInterface.target_scitype(model)
         if !(AbstractVector{MLJModelInterface.Continuous} <: ts)
             @warn "model $(typeof(model)) declares target_scitype $ts, which does " *
@@ -93,7 +97,8 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
         if time in RESERVED_OUTPUT_NAMES
             throw(ArgumentError(
                 "time=:$time collides with a column name reserved by forecast()/" *
-                "backtest() results ($(join(":" .* string.(RESERVED_OUTPUT_NAMES), ", "))). " *
+                "backtest() results " *
+                "($(join(":" .* string.(RESERVED_OUTPUT_NAMES), ", "))). " *
                 "Rename the time column in your data."))
         end
         if id !== nothing

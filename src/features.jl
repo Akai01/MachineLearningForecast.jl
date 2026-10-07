@@ -84,10 +84,14 @@ featurevalues(f::Lag, y_hist::AbstractVector, t_next, exog_row) =
 # ---------------------------------------------------------------------------
 
 for (T, stem, fun, minw, example) in (
-        (:RollingMean, "rollmean", :(Statistics.mean), 1, "RollingMean(7)        # mean of the 7 values before the current row"),
-        (:RollingStd,  "rollstd",  :(Statistics.std),  2, "RollingStd(28)        # std of the 28 values before the current row"),
-        (:RollingMin,  "rollmin",  :(minimum),         1, "RollingMin(14)        # min of the 14 values before the current row"),
-        (:RollingMax,  "rollmax",  :(maximum),         1, "RollingMax(14)        # max of the 14 values before the current row"))
+        (:RollingMean, "rollmean", :(Statistics.mean), 1,
+         "RollingMean(7)        # mean of the 7 values before the current row"),
+        (:RollingStd,  "rollstd",  :(Statistics.std),  2,
+         "RollingStd(28)        # std of the 28 values before the current row"),
+        (:RollingMin,  "rollmin",  :(minimum),         1,
+         "RollingMin(14)        # min of the 14 values before the current row"),
+        (:RollingMax,  "rollmax",  :(maximum),         1,
+         "RollingMax(14)        # max of the 14 values before the current row"))
     docstr = """
         $T(window; lag=1)
 
@@ -231,7 +235,8 @@ struct Calendar <: TimeFeature
             "Calendar needs at least one part, e.g. Calendar(:dayofweek)."))
         bad = setdiff(parts, keys(CALENDAR_PARTS))
         isempty(bad) || throw(ArgumentError(
-            "unknown Calendar part$(length(bad) == 1 ? "" : "s") $(join(repr.(bad), ", ")); " *
+            "unknown Calendar part$(length(bad) == 1 ? "" : "s") " *
+            "$(join(repr.(bad), ", ")); " *
             "valid parts are $(join(repr.(sort!(collect(keys(CALENDAR_PARTS)))), ", "))."))
         new(copy(parts))
     end
@@ -312,7 +317,8 @@ function materialize!(out::ColumnAccumulator, f::Fourier, y::AbstractVector{Floa
     names = outputnames(f)
     sincols = [names[k] => Vector{Union{Missing,Float64}}(sin.(2π .* k .* idx ./ f.period))
                for k in 1:f.order]
-    coscols = [names[f.order + k] => Vector{Union{Missing,Float64}}(cos.(2π .* k .* idx ./ f.period))
+    coscols = [names[f.order + k] =>
+                   Vector{Union{Missing,Float64}}(cos.(2π .* k .* idx ./ f.period))
                for k in 1:f.order]
     append!(out, sincols)
     append!(out, coscols)

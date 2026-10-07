@@ -22,7 +22,8 @@ struct FeatureSet
         if !allunique(names)
             dups = unique([n for n in names if count(==(n), names) > 1])
             throw(ArgumentError(
-                "FeatureSet produces duplicate column name$(length(dups) == 1 ? "" : "s") " *
+                "FeatureSet produces duplicate column " *
+                "name$(length(dups) == 1 ? "" : "s") " *
                 "$(join(repr.(dups), ", ")). Remove the duplicated feature(s) or rename " *
                 "exogenous/custom columns."))
         end

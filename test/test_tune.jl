@@ -73,7 +73,8 @@ end # module
         @test ncand(result) == 2
         @test ismissing(result.table.error[1])
         @test !ismissing(result.table.error[2])
-        @test occursin("history", result.table.error[2])   # the underlying ArgumentError text
+        # the underlying ArgumentError text
+        @test occursin("history", result.table.error[2])
         @test ismissing(result.table.mean_score[2])
         # failed candidate excluded from ranking
         @test result.best.features == FeatureSet(Lag(1))
@@ -174,17 +175,21 @@ end # module
     end
 
     @testset "grid validation" begin
-        @test_throws ArgumentError tune(base, df; horizon=14, initial=90)  # GridSearch needs grid
+        # GridSearch needs grid
+        @test_throws ArgumentError tune(base, df; horizon=14, initial=90)
         @test_throws "GridSearch() requires the grid keyword: pass grid=(model=[...], " *
                      "features=[...], ...) to tune." tune(base, df; horizon=14, initial=90)
-        @test_throws ArgumentError tune(base, df; grid=(bogus=[1, 2],), horizon=14, initial=90)
+        @test_throws ArgumentError tune(base, df; grid=(bogus=[1, 2],), horizon=14,
+                                        initial=90)
         @test_throws "grid has unknown key :bogus; valid keys are :model, :features" tune(
             base, df; grid=(bogus=[1, 2],), horizon=14, initial=90)
-        @test_throws ArgumentError tune(base, df; grid=(model=Int[],), horizon=14, initial=90)
+        @test_throws ArgumentError tune(base, df; grid=(model=Int[],), horizon=14,
+                                        initial=90)
         @test_throws "grid key :model must map to a nonempty vector or tuple of " *
                      "candidate values, got Int64[]." tune(base, df; grid=(model=Int[],),
                                                            horizon=14, initial=90)
-        @test_throws ArgumentError tune(base, df; grid="not a namedtuple", horizon=14, initial=90)
+        @test_throws ArgumentError tune(base, df; grid="not a namedtuple", horizon=14,
+                                        initial=90)
         @test_throws "candidate value lists, got String. Use e.g. grid=(model=[m1, m2]" (
             tune(base, df; grid="not a namedtuple", horizon=14, initial=90))
         @test_throws "got Vector{FeatureSet}" tune(base, df; grid=[FeatureSet(Lag(1))],

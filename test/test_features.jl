@@ -85,20 +85,24 @@
     @testset "outputnames" begin
         @test MachineLearningForecast.outputnames(Lag(7)) == [:y_lag_7]
         @test MachineLearningForecast.outputnames(RollingMean(7)) == [:y_rollmean_7_lag_1]
-        @test MachineLearningForecast.outputnames(RollingStd(28; lag=2)) == [:y_rollstd_28_lag_2]
+        @test MachineLearningForecast.outputnames(RollingStd(28; lag=2)) ==
+              [:y_rollstd_28_lag_2]
         @test MachineLearningForecast.outputnames(Diff(7)) == [:y_diff_7_lag_1]
-        @test MachineLearningForecast.outputnames(Calendar(:dayofweek, :month)) == [:dayofweek, :month]
+        @test MachineLearningForecast.outputnames(Calendar(:dayofweek, :month)) ==
+              [:dayofweek, :month]
         @test MachineLearningForecast.outputnames(Fourier(7, 2)) ==
-              [:fourier_7_0_sin_1, :fourier_7_0_sin_2, :fourier_7_0_cos_1, :fourier_7_0_cos_2]
-        @test MachineLearningForecast.outputnames(Exogenous(:promo, :price)) == [:promo, :price]
+              [:fourier_7_0_sin_1, :fourier_7_0_sin_2,
+               :fourier_7_0_cos_1, :fourier_7_0_cos_2]
+        @test MachineLearningForecast.outputnames(Exogenous(:promo, :price)) ==
+              [:promo, :price]
         @test MachineLearningForecast.outputnames(CustomFeature(:hm, mean, 1)) == [:hm]
     end
 
     @testset "minhistory" begin
         @test MachineLearningForecast.minhistory(Lag(7)) == 7
-        @test MachineLearningForecast.minhistory(RollingMean(7)) == 7            # window + lag - 1
+        @test MachineLearningForecast.minhistory(RollingMean(7)) == 7  # window + lag - 1
         @test MachineLearningForecast.minhistory(RollingMean(7; lag=3)) == 9
-        @test MachineLearningForecast.minhistory(Diff(7)) == 8                   # k + lag
+        @test MachineLearningForecast.minhistory(Diff(7)) == 8         # k + lag
         @test MachineLearningForecast.minhistory(Calendar(:month)) == 0
         @test MachineLearningForecast.minhistory(Fourier(7, 2)) == 0
         @test MachineLearningForecast.minhistory(Exogenous(:promo)) == 0
@@ -226,11 +230,13 @@
         @test_throws "exogenous column :label has non-numeric value \"a\" (type String)" (
             materialize(Exogenous(:label), y, dfs))
         # featurevalues: missing column in the exogenous row errors clearly
-        @test_throws ArgumentError MachineLearningForecast.featurevalues(Exogenous(:promo), y, t[1], (other=1.0,))
+        @test_throws ArgumentError MachineLearningForecast.featurevalues(
+            Exogenous(:promo), y, t[1], (other=1.0,))
         @test_throws "new_data is missing exogenous column :promo required by Exogenous. " *
                      "Provide it for every forecast timestamp." (
             MachineLearningForecast.featurevalues(Exogenous(:promo), y, t[1], (other=1.0,)))
-        @test MachineLearningForecast.featurevalues(Exogenous(:promo), y, t[1], (promo=true,)) == (1.0,)
+        @test MachineLearningForecast.featurevalues(Exogenous(:promo), y, t[1],
+                                                    (promo=true,)) == (1.0,)
     end
 
     @testset "forecast-row and Exogenous hot paths are type-stable" begin
@@ -344,7 +350,8 @@
         @test X.y_lag_2 == y[1:8]
         # too-short data errors with row counts in the message
         short = (ds=t[1:3], y=y[1:3])
-        @test_throws ArgumentError MachineLearningForecast.build_training_frame(FeatureSet(Lag(5)), short, :y, :ds)
+        @test_throws ArgumentError MachineLearningForecast.build_training_frame(
+            FeatureSet(Lag(5)), short, :y, :ds)
         @test_throws "needs 5 history rows before the first usable training row, but " *
                      "the data has only 3 rows. Provide at least 6 rows" (
             MachineLearningForecast.build_training_frame(FeatureSet(Lag(5)), short, :y,

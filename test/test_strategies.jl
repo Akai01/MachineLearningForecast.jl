@@ -16,9 +16,11 @@
 
     @testset "machine counts" begin
         fs = FeatureSet(Lag(1))
-        fc_r = Forecaster(TestModels.LinAR(1.0, 0.0); features=fs, strategy=Recursive(), freq=Day(1))
+        fc_r = Forecaster(TestModels.LinAR(1.0, 0.0); features=fs, strategy=Recursive(),
+                          freq=Day(1))
         @test length(fit(fc_r, df).machines) == 1
-        fc_d = Forecaster(TestModels.LinAR(1.0, 0.0); features=fs, strategy=Direct(3), freq=Day(1))
+        fc_d = Forecaster(TestModels.LinAR(1.0, 0.0); features=fs, strategy=Direct(3),
+                          freq=Day(1))
         @test length(fit(fc_d, df).machines) == 3
     end
 

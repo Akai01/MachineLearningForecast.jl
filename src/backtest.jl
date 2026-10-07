@@ -77,7 +77,8 @@ function backtest(fc::Forecaster, data; horizon::Integer, initial::Integer,
 end
 
 # Panel: folds are cut on the global timestamp grid (see panel.jl).
-_backtest_spec(fc::Forecaster{M,S,Symbol}, tbl, horizon, initial, step, metrics) where {M,S} =
+_backtest_spec(fc::Forecaster{M,S,Symbol}, tbl, horizon, initial, step,
+               metrics) where {M,S} =
     _backtest_panel(fc, tbl, horizon, initial, step, metrics)
 
 function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, initial,
@@ -130,7 +131,8 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, initial,
     # Overall summary: mean of the per-fold values, one row per metric, fold=0.
     for m in metrics
         name = _metric_name(m)
-        vals = [m_value[i] for i in eachindex(m_value) if m_metric[i] == name && m_fold[i] > 0]
+        vals = [m_value[i] for i in eachindex(m_value)
+                if m_metric[i] == name && m_fold[i] > 0]
         push!(m_fold, 0)
         push!(m_origin, missing)
         push!(m_metric, name)

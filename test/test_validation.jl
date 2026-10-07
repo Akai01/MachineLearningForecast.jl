@@ -136,7 +136,8 @@ end # module
         @test out.ds == [Date(2022, 1, 31), Date(2022, 2, 28), Date(2022, 3, 31)]
         # a genuine gap is still caught
         gapped = vcat(me[1:5], me[7:end])
-        @test_throws ArgumentError MachineLearningForecast.validate_time_column(gapped, :ds, Month(1))
+        @test_throws ArgumentError MachineLearningForecast.validate_time_column(
+            gapped, :ds, Month(1))
         @test_throws "time column :ds has 1 gap for freq=1 month; first gap after " *
                      "2020-05-31. Reindex your data or resample before fitting." (
             MachineLearningForecast.validate_time_column(gapped, :ds, Month(1)))
@@ -148,36 +149,38 @@ end # module
         # is also the message quality the README advertises.
         full = collect(Date(2020, 1, 1):Day(1):Date(2020, 1, 1) + Day(999))
         one = vcat(full[1:100], full[102:end])
-        err = try MachineLearningForecast.validate_time_column(one, :ds, Day(1)) catch e; e end
+        validate = MachineLearningForecast.validate_time_column
+        err = try validate(one, :ds, Day(1)) catch e; e end
         @test err isa ArgumentError
         @test occursin("has 1 gap for", err.msg)          # singular, and exactly one
         @test occursin(string(full[100]), err.msg)        # "first gap after <ts>"
 
         three = vcat(full[1:100], full[102:200], full[202:300], full[302:end])
-        err3 = try MachineLearningForecast.validate_time_column(three, :ds, Day(1)) catch e; e end
+        err3 = try validate(three, :ds, Day(1)) catch e; e end
         @test occursin("has 3 gaps for", err3.msg)
 
         # a contiguous run of missing days is still ONE discontinuity
         run5 = vcat(full[1:100], full[106:end])
-        err5 = try MachineLearningForecast.validate_time_column(run5, :ds, Day(1)) catch e; e end
+        err5 = try validate(run5, :ds, Day(1)) catch e; e end
         @test occursin("has 1 gap for", err5.msg)
     end
 
     @testset "missing, off-grid and non-advancing time columns" begin
         days = collect(Date(2020, 1, 1):Day(1):Date(2020, 1, 20))
         withmissing = Vector{Union{Missing,Date}}(days); withmissing[5] = missing
-        err = try MachineLearningForecast.validate_time_column(withmissing, :ds, Day(1)) catch e; e end
+        validate = MachineLearningForecast.validate_time_column
+        err = try validate(withmissing, :ds, Day(1)) catch e; e end
         @test err isa ArgumentError                       # not a bare TypeError
         @test occursin("missing values", err.msg) && occursin("row 5", err.msg)
 
         # a timestamp that is not on the declared grid gets its own diagnosis
         offgrid = collect(DateTime(2020, 1, 1):Hour(1):DateTime(2020, 1, 1) + Hour(9))
         offgrid[6] += Minute(30)
-        err2 = try MachineLearningForecast.validate_time_column(offgrid, :ds, Hour(1)) catch e; e end
+        err2 = try validate(offgrid, :ds, Hour(1)) catch e; e end
         @test err2 isa ArgumentError
         @test occursin("does not", err2.msg) && occursin("grid", err2.msg)
 
-        err3 = try MachineLearningForecast.validate_time_column(days, :ds, Day(0)) catch e; e end
+        err3 = try validate(days, :ds, Day(0)) catch e; e end
         @test err3 isa ArgumentError && occursin("does not advance", err3.msg)
     end
 
@@ -318,7 +321,8 @@ end # module
         @test collect(MachineLearningForecast.featurevalues(cal, y[1:6], t[7], nothing)) ==
               [col[7] for (_, col) in acc]
         # Diff: y_{t-lag} - y_{t-lag-k} continuing the history
-        @test only(MachineLearningForecast.featurevalues(Diff(3; lag=2), y, t[1], nothing)) ==
+        @test only(MachineLearningForecast.featurevalues(
+                       Diff(3; lag=2), y, t[1], nothing)) ==
               y[10 + 1 - 2] - y[10 + 1 - 2 - 3]
 
         # ...and end-to-end through forecast(), which is what actually matters

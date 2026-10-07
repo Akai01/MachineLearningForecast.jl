@@ -106,7 +106,8 @@ function mase(y::AbstractVector, ŷ::AbstractVector; y_train::AbstractVector, m:
     length(y_train) > m || throw(ArgumentError(
         "mase needs length(y_train) > m; got length(y_train)=$(length(y_train)) " *
         "with m=$m. Pass a longer y_train or a smaller m."))
-    denom = Statistics.mean(abs(y_train[i] - y_train[i - m]) for i in (m + 1):length(y_train))
+    denom = Statistics.mean(abs(y_train[i] - y_train[i - m])
+                            for i in (m + 1):length(y_train))
     if iszero(denom)
         @warn "mase is undefined for a constant training series (naive error is " *
               "zero); returning Inf."

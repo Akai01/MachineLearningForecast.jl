@@ -141,7 +141,8 @@ end
 function candidates(::GridSearch, grid::NamedTuple)
     _validate_grid(grid)
     ks = keys(grid)
-    return [NamedTuple{ks}(combo) for combo in vec(collect(Iterators.product(values(grid)...)))]
+    combos = vec(collect(Iterators.product(values(grid)...)))
+    return [NamedTuple{ks}(combo) for combo in combos]
 end
 
 function candidates(t::RandomSearch, grid::NamedTuple)
@@ -349,7 +350,8 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
     if isempty(ok)
         msgs = join(unique(skipmissing(errors)), "\n  - ")
         throw(ErrorException(
-            "all $(length(cands)) tuning candidates failed to evaluate. Errors:\n  - $msgs"))
+            "all $(length(cands)) tuning candidates failed to evaluate. " *
+            "Errors:\n  - $msgs"))
     end
     best_idx = ok[argmin([means[i] for i in ok])]   # ties: first-seen wins (argmin)
     best = reconstruct(fc; cands[best_idx]...)

@@ -273,7 +273,8 @@ function _panel_exogenous_rows(spec::Forecaster, exogcols, states, grids, new_da
         "new_data is missing column$(length(absent) == 1 ? "" : "s") " *
         "$(join(":" .* string.(absent), ", ")); a panel forecast needs the id " *
         "column :$(spec.id), the time column :$(spec.time) and the exogenous " *
-        "column$(length(exogcols) == 1 ? "" : "s") $(join(":" .* string.(exogcols), ", "))."))
+        "column$(length(exogcols) == 1 ? "" : "s") " *
+        "$(join(":" .* string.(exogcols), ", "))."))
     idv, tv = nd[spec.id], nd[spec.time]
     lookup = Dict{Tuple{Any,Any},Int}()
     for i in eachindex(tv)
@@ -405,7 +406,8 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
     end
     for m in metrics
         name = _metric_name(m)
-        vals = [m_value[i] for i in eachindex(m_value) if m_metric[i] == name && m_fold[i] > 0]
+        vals = [m_value[i] for i in eachindex(m_value)
+                if m_metric[i] == name && m_fold[i] > 0]
         push!(m_fold, 0)
         push!(m_origin, missing)
         push!(m_metric, name)

@@ -125,14 +125,15 @@
         @test drop !== nothing                      # the fixture really has that row
         keep = setdiff(eachindex(bad.y), drop)
         gapped = (unique_id=bad.unique_id[keep], ds=bad.ds[keep], y=bad.y[keep])
-        err = try fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), gapped) catch e; e end
+        spec = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
+        err = try fit(spec, gapped) catch e; e end
         @test err isa ArgumentError
         @test occursin("series unique_id=\"s2\"", err.msg) && occursin("gap", err.msg)
 
         miss = (unique_id=Vector{Union{Missing,String}}(bad.unique_id),
                 ds=bad.ds, y=bad.y)
         miss.unique_id[3] = missing
-        err2 = try fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), miss) catch e; e end
+        err2 = try fit(spec, miss) catch e; e end
         @test err2 isa ArgumentError && occursin("missing value", err2.msg)
         @test occursin("id column :unique_id has a missing value at row 3. Every row " *
                        "must belong to a series; drop or fill the rows with a missing " *
@@ -435,11 +436,12 @@
     @testset "tune drives a panel through backtest" begin
         big = makepanel(lens=(60, 50, 55))
         base = mk(TestModels.MeanModel(), FeatureSet(Lag(1)))
-        res = tune(base, big; grid=(features=[FeatureSet(Lag(1)), FeatureSet(Lag(1), Lag(7))],),
+        res = tune(base, big; grid=(features=[FeatureSet(Lag(1)),
+                                              FeatureSet(Lag(1), Lag(7))],),
                    horizon=5, initial=40, step=10, metric=mae)
         @test length(res.table.mean_score) == 2
         @test all(!ismissing, res.table.mean_score)
-        @test MachineLearningForecast.ispanel(res.best)                 # id survives reconstruct
+        @test MachineLearningForecast.ispanel(res.best)  # id survives reconstruct
         @test nseries(res.best_fitted) == 3
         # a misnamed time column gets backtest's message
         renamed = (unique_id=big.unique_id, when=big.ds, y=big.y)
