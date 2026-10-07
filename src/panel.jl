@@ -78,7 +78,7 @@ function _panel_frames(fc::Forecaster, groups)
     short = Tuple{Any,Int}[]
     for (key, sub, rows) in groups
         n = nrows(sub)
-        if n <= mh
+        if n ≤ mh
             push!(short, (key, n))
             continue
         end
@@ -143,7 +143,7 @@ function _panel_machines(fc::Forecaster, s::Direct, frames)
         ys = Vector{Float64}[]
         for (_, X, y, _) in frames
             nX = length(y)
-            nX >= i || continue          # this series cannot reach step i
+            nX ≥ i || continue           # this series cannot reach step i
             push!(Xs, NamedTuple{colnames}(ntuple(
                 c -> istarget[c] ? values(X)[c][1:(nX - i + 1)] : values(X)[c][i:nX],
                 length(colnames))))
@@ -232,7 +232,7 @@ end
 function _panel_predict!(preds, f, ::Recursive, states, histories, grids, exog_rows, hs)
     mach = only(f.machines)
     for s in 1:maximum(hs)
-        active = findall(>=(s), hs)
+        active = findall(≥(s), hs)
         row = _panel_batch(f, states, histories, s, grids, exog_rows, active)
         ŷ = MLJBase.predict(mach, row)
         for (r, k) in enumerate(active)
@@ -248,12 +248,12 @@ end
 # on its own training-end history.
 function _panel_predict!(preds, f, strat::Direct, states, histories, grids, exog_rows, hs)
     h = maximum(hs)
-    h <= strat.max_horizon || throw(ArgumentError(
+    h ≤ strat.max_horizon || throw(ArgumentError(
         "strategy=Direct($(strat.max_horizon)) was fit with max_horizon=" *
         "$(strat.max_horizon) but forecast(h=$h) was requested. Refit with " *
         "Direct($h) or use Recursive()."))
     for s in 1:h
-        active = findall(>=(s), hs)
+        active = findall(≥(s), hs)
         row = _panel_batch(f, states, histories, s, grids, exog_rows, active)
         ŷ = MLJBase.predict(f.machines[s], row)
         for (r, k) in enumerate(active)
@@ -346,14 +346,20 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
 
     T = eltype(t_all)
     I = eltype(ids)
-    origin_col = T[]; step_col = Int[]; id_col = I[]
-    time_col = T[]; y_col = Float64[]; yhat_col = Float64[]
-    m_fold = Int[]; m_origin = Union{Missing,T}[]
-    m_metric = Symbol[]; m_value = Float64[]
+    origin_col = T[]
+    step_col = Int[]
+    id_col = I[]
+    time_col = T[]
+    y_col = Float64[]
+    yhat_col = Float64[]
+    m_fold = Int[]
+    m_origin = Union{Missing,T}[]
+    m_metric = Symbol[]
+    m_value = Float64[]
 
     for (k, o) in enumerate(origins)
         t_origin = grid[o]
-        train_rows = findall(<=(t_origin), t_all)
+        train_rows = findall(≤(t_origin), t_all)
         fitted = _fit_panel(fc, row_subset(tbl, train_rows), train_rows)
         fcast = if isempty(exogcols)
             forecast(fitted, horizon)
@@ -370,15 +376,19 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
 
         # keep only forecasts that have a matching actual
         fid, ft, fy = fcast[fc.id], fcast[fc.time], fcast.y_hat
-        ytrue = Float64[]; yhat = Float64[]
+        ytrue = Float64[]
+        yhat = Float64[]
         for j in eachindex(fy)
             a = get(actual, (fid[j], ft[j]), nothing)
             a === nothing && continue
-            push!(ytrue, a); push!(yhat, fy[j])
+            push!(ytrue, a)
+            push!(yhat, fy[j])
             push!(origin_col, t_origin)
             push!(step_col, 1 + count(==(fid[j]), @view fid[1:j-1]))
-            push!(id_col, fid[j]); push!(time_col, ft[j])
-            push!(y_col, a); push!(yhat_col, fy[j])
+            push!(id_col, fid[j])
+            push!(time_col, ft[j])
+            push!(y_col, a)
+            push!(yhat_col, fy[j])
         end
         isempty(ytrue) && throw(ArgumentError(
             "backtest fold $k (origin $t_origin) produced no forecast that lines up " *
@@ -387,7 +397,8 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
             "of a series."))
         ytrain = y_all[train_rows]
         for m in metrics
-            push!(m_fold, k); push!(m_origin, t_origin)
+            push!(m_fold, k)
+            push!(m_origin, t_origin)
             push!(m_metric, _metric_name(m))
             push!(m_value, Float64(_apply_metric(m, ytrue, yhat, ytrain)))
         end
@@ -395,8 +406,10 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
     for m in metrics
         name = _metric_name(m)
         vals = [m_value[i] for i in eachindex(m_value) if m_metric[i] == name && m_fold[i] > 0]
-        push!(m_fold, 0); push!(m_origin, missing)
-        push!(m_metric, name); push!(m_value, Statistics.mean(vals))
+        push!(m_fold, 0)
+        push!(m_origin, missing)
+        push!(m_metric, name)
+        push!(m_value, Statistics.mean(vals))
     end
     folds = NamedTuple{(:origin, :step, fc.id, fc.time, :y, :y_hat)}(
         (origin_col, step_col, id_col, time_col, y_col, yhat_col))
