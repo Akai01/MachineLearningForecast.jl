@@ -391,6 +391,7 @@ input as during training.
 
 # Example
 ```julia
+using Statistics
 # mean of the entire history so far (needs at least 1 observation)
 CustomFeature(:hist_mean, mean, 1)
 ```

@@ -209,6 +209,7 @@ input.
 
 # Example
 ```julia
+using Dates
 f = fit(Forecaster(model; features=FeatureSet(Lag(1)), freq=Day(1), id=:unique_id),
         panel)
 nseries(f)                       # e.g. 3

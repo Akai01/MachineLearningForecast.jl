@@ -72,7 +72,7 @@ Symmetric mean absolute percentage error,
 
 # Example
 ```julia
-smape([10.0, 20.0], [11.0, 18.0])   # ≈ 0.1002
+smape([10.0, 20.0], [11.0, 18.0])   # ≈ 0.1003
 ```
 """
 function smape(y::AbstractVector, ŷ::AbstractVector)

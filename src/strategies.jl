@@ -16,6 +16,7 @@ prediction error through the fed-back history.
 
 # Example
 ```julia
+using Dates
 Forecaster(model; features=FeatureSet(Lag(1)), strategy=Recursive(), freq=Day(1))
 ```
 """
@@ -40,6 +41,7 @@ train/serve skew that silently degrades every step after the first.
 
 # Example
 ```julia
+using Dates
 Forecaster(model; features=FeatureSet(Lag(1)), strategy=Direct(28), freq=Day(1))
 ```
 """

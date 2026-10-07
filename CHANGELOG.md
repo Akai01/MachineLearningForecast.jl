@@ -117,6 +117,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The `fit` docstring said the time column must be sorted. That holds for a
   single series; a panel's rows may come in any order, since `fit` sorts each
   series by time.
+- Docstring examples: `smape([10.0, 20.0], [11.0, 18.0])` is ≈ 0.1003, not
+  0.1002, and the examples load what they use (`Statistics` for `mean`,
+  `Random` for `Xoshiro` in place of the test-only `StableRNG`, `Dates` for
+  `Day`, `EvoTrees` for `EvoTreeRegressor`).
 
 ## [0.1.0]
 

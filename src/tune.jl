@@ -64,8 +64,9 @@ duplicates are possible). Pass an explicit `rng` for reproducibility.
 
 # Example
 ```julia
+using Random
 tune(fc, df; grid=(model=models, features=featuresets),
-     tuner=RandomSearch(10; rng=StableRNG(1)), horizon=28, initial=730)
+     tuner=RandomSearch(10; rng=Xoshiro(1)), horizon=28, initial=730)
 ```
 """
 struct RandomSearch{R<:Random.AbstractRNG} <: TuningStrategy
@@ -302,6 +303,7 @@ best spec refit on all of `data`. Ties are broken by first-seen order.
 
 # Example
 ```julia
+using EvoTrees
 result = tune(fc, df;
     grid = (model    = [EvoTreeRegressor(eta=0.05), EvoTreeRegressor(eta=0.1)],
             features = [FeatureSet(Lag(1), Lag(7)),
