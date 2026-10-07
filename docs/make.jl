@@ -1,5 +1,4 @@
-# Make the docs environment resolvable from any clean checkout: MachineLearningForecast is
-# not registered yet, so `docs/Project.toml` cannot resolve it by UUID alone.
+# Unregistered: develop the package so docs resolve.
 using Pkg
 Pkg.develop(PackageSpec(path = dirname(@__DIR__)))
 
@@ -8,10 +7,7 @@ using MachineLearningForecast
 
 const REPO_URL = "https://github.com/Akai01/MachineLearningForecast.jl"
 
-# Documenter can only build "Edit on GitHub" / source links when git can resolve
-# a commit, which requires the repository to have at least one. Fall back
-# gracefully so that `julia --project=docs docs/make.jl` also works in a fresh
-# checkout that has not been committed yet.
+# Source links need a git commit; skip them without one.
 const HAS_COMMIT = try
     success(`git -C $(dirname(@__DIR__)) rev-parse --verify --quiet HEAD`)
 catch
@@ -39,7 +35,7 @@ makedocs(;
     repo_kwargs...,
 )
 
-# Only does anything when running in CI with the deploy key/token configured.
+# Deploys only in CI with a deploy key or token.
 deploydocs(
     repo = "github.com/Akai01/MachineLearningForecast.jl.git",
     devbranch = "main",
