@@ -110,6 +110,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The `FittedForecaster`, `BacktestResult`, `ask`, `tell!` and `TuneResult`
   docstrings have examples. `FittedForecaster`'s describes `fitted.series`,
   and `BacktestResult`'s lists the id column a panel backtest adds to `folds`.
+- The `forecast` docstring describes a panel forecast: the id column in the
+  result, and the id column and per-series timestamps `new_data` needs. The
+  `Forecaster` signature shows `id=nothing`, and the `TuningStrategy` and `ask`
+  docstrings list `:id` among the candidate keys.
 
 ## [0.1.0]
 

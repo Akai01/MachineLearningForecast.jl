@@ -5,7 +5,7 @@ not shadow them.
 const RESERVED_OUTPUT_NAMES = (:origin, :step, :y, :y_hat)
 
 """
-    Forecaster(model; features, strategy=Recursive(), freq, target=:y, time=:ds)
+    Forecaster(model; features, strategy=Recursive(), freq, target=:y, time=:ds, id=nothing)
 
 Immutable forecasting specification.
 
@@ -268,6 +268,11 @@ If the feature set contains any [`Exogenous`](@ref) feature, `new_data` is
 required: a table with the time column and every exogenous column, covering
 all `h` future timestamps (extra rows are ignored). Without exogenous
 features, `new_data` must be omitted (it is ignored with a warning otherwise).
+
+For a panel forecaster (one with `id` set), the result also has the id column,
+before the time column: `h` rows per series, each series forecast from its own
+last training timestamp. `new_data` must then carry the id column too and cover
+every series at each of its `h` future timestamps.
 
 # Example
 ```julia
