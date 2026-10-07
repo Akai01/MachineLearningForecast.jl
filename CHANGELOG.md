@@ -26,8 +26,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `f.y_history`, `f.t_last`, `f.t_start` and `f.n_train` still work; on a panel
   they raise an error pointing at `f.series`.
 - `Lag(1.5)`, `Lag("a")` and `Lag(missing)` throw an `ArgumentError` with an
-  example instead of an `InexactError` or `MethodError`; a whole float such as
-  `Lag(7.0)` is still accepted.
+  example instead of an `InexactError`, `MethodError` or `TypeError`
+  respectively; a whole float such as `Lag(7.0)` is still accepted.
 - `backtest` checks `metrics`, and `tune` checks `metric`, before fitting
   anything. A bare function (`metrics=mae`), symbols or strings throw an
   `ArgumentError` with an example (`metrics=(mae, rmse)`, `metric=smape`)
@@ -115,6 +115,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The `FittedForecaster`, `BacktestResult`, `ask`, `tell!` and `TuneResult`
   docstrings have examples. `FittedForecaster`'s describes `fitted.series`,
   and `BacktestResult`'s lists the id column a panel backtest adds to `folds`.
+- The `AbstractFeature`, `Direct` and `TuningStrategy` docstrings now state the
+  four-method feature contract, `Direct`'s column anchoring and the ask/tell
+  loop.
 - The `forecast` docstring describes a panel forecast: the id column in the
   result, and the id column and per-series timestamps `new_data` needs. The
   `Forecaster` signature shows `id=nothing`, and the `TuningStrategy` and `ask`
