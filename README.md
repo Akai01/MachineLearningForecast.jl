@@ -1,5 +1,14 @@
 # MachineLearningForecast.jl
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)"
+            srcset="docs/src/assets/logo-wide-tagline-dark.svg">
+    <img src="docs/src/assets/logo-wide-tagline.svg"
+         alt="MachineLearningForecast.jl logo" width="520">
+  </picture>
+</p>
+
 **Generic, composable time-series forecasting for Julia, built on the MLJ model
 interface.** Any MLJ `Deterministic` regressor is a valid base model — random
 forests, [EvoTrees](https://github.com/Evovest/EvoTrees.jl) gradient boosting,
