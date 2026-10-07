@@ -150,14 +150,6 @@ function _validate_grid(grid)
             "grid key :$k must map to a nonempty vector or tuple of candidate " *
             "values, got $(repr(v))."))
     end
-    for (k, T, eg) in ((:features, FeatureSet, "FeatureSet(Lag(1), Lag(7))"),
-                       (:strategy, ForecastStrategy, "Recursive() or Direct(28)"))
-        haskey(grid, k) || continue
-        i = findfirst(v -> !(v isa T), grid[k])
-        i === nothing || throw(ArgumentError(
-            "grid key :$k must hold values such as $eg, but candidate $i is " *
-            "$(repr(grid[k][i]))."))
-    end
     return nothing
 end
 
@@ -201,8 +193,13 @@ function reconstruct(fc::Forecaster; kwargs...)
         "cannot reconstruct Forecaster with unknown field$(length(bad) == 1 ? "" : "s") " *
         "$(join(":" .* string.(bad), ", ")); valid fields are " *
         "$(join(":" .* string.(fieldnames(Forecaster)), ", "))."))
+    fs = get(kwargs, :features, fc.features)
+    fs isa FeatureSet || throw(ArgumentError(
+        "tune candidate key :features must be a FeatureSet such as " *
+        "FeatureSet(Lag(1), Lag(7)), got $(repr(fs)). Wrap the features in " *
+        "FeatureSet(...)."))
     return Forecaster(get(kwargs, :model, fc.model),
-                      get(kwargs, :features, fc.features),
+                      fs,
                       get(kwargs, :strategy, fc.strategy),
                       get(kwargs, :freq, fc.freq),
                       get(kwargs, :target, fc.target),
@@ -290,6 +287,8 @@ better).
   Required for the batch strategies ([`GridSearch`](@ref), the Cartesian
   product; [`RandomSearch`](@ref), `n` uniform draws). A sequential
   user-defined [`TuningStrategy`](@ref) owns its own space and may ignore it.
+  Before any fit, `tune` throws an `ArgumentError` if a batch candidate it
+  will evaluate has a `:strategy` that is not a strategy, such as `:recursive`.
 - `max_evals`: optional evaluation budget; the loop stops after this many
   candidates even if the strategy proposes more.
 - Candidate failures never abort the search: the error is caught, the score
@@ -412,8 +411,12 @@ function _warn_fit_count(fc, cands, tbl, horizon, initial, step)
            nrows(tbl)
     nfolds = length(initial:step:(span - horizon))
     total = 0
-    for c in cands
-        total += nfolds * nmachines(get(c, :strategy, fc.strategy))
+    for (i, c) in enumerate(cands)
+        s = get(c, :strategy, fc.strategy)
+        s isa ForecastStrategy || throw(ArgumentError(
+            "grid key :strategy must hold values such as Recursive() or Direct(28), " *
+            "but candidate $i is $(repr(s))."))
+        total += nfolds * nmachines(s)
     end
     total > 500 && @warn(
         "tune is about to run $total model fits ($(length(cands)) candidates × " *

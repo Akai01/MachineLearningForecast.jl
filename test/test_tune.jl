@@ -205,24 +205,69 @@ end
         end
     end
 
-    @testset "grid values of the wrong type are rejected before any fit" begin
-        cases = (((strategy=[:recursive, :direct],), "candidate 1 is :recursive"),
-                 ((strategy=[Recursive(), "direct"],), "candidate 2 is \"direct\""),
-                 ((features=[Lag(1)],), "candidate 1 is Lag(1)"))
+    @testset "a planned strategy of the wrong type is rejected before any fit" begin
+        # StableRNG(1) draws the second grid value, then the first.
+        cases = (((strategy=[:recursive, :direct],), "candidate 1 is :recursive",
+                  "candidate 1 is :direct"),
+                 ((strategy=[Recursive(), "direct"],), "candidate 2 is \"direct\"",
+                  "candidate 1 is \"direct\""))
         for m in (DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
                   EvoTreeRegressor(nrounds=5)),
-            (grid, phrase) in cases, tuner in (GridSearch(), RandomSearch(2))
+            (grid, gphrase, rphrase) in cases
             fcm = Forecaster(m; features=FeatureSet(Lag(1)), freq=Day(1))
-            k = only(keys(grid))
-            @test_throws ArgumentError tune(fcm, df; grid=grid, tuner=tuner,
-                                            horizon=14, initial=90)
-            @test_throws "grid key :$k must hold" tune(fcm, df; grid=grid, tuner=tuner,
-                                                       horizon=14, initial=90)
-            @test_throws phrase tune(fcm, df; grid=grid, tuner=tuner, horizon=14,
-                                     initial=90)
+            for (tuner, phrase) in ((GridSearch, gphrase),
+                                    (() -> RandomSearch(2; rng=StableRNG(1)), rphrase))
+                run() = tune(fcm, df; grid=grid, tuner=tuner(), horizon=14, initial=90)
+                @test_throws ArgumentError run()
+                @test_throws "grid key :strategy must hold values such as Recursive() " *
+                             "or Direct(28), but $phrase." run()
+            end
         end
         @test_throws "such as Recursive() or Direct(28)" tune(
             base, df; grid=(strategy=[:direct],), horizon=14, initial=90)
+    end
+
+    @testset "only the planned candidates' strategies are checked" begin
+        for m in (DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
+                  EvoTreeRegressor(nrounds=5))
+            fcm = Forecaster(m; features=FeatureSet(Lag(1)), freq=Day(1))
+            run(grid; kw...) = tune(fcm, df; grid=grid, horizon=14, initial=90,
+                                    metric=mae, kw...)
+            ref = run((strategy=[Recursive()],))
+            mixed = (strategy=[Recursive(), :direct],)
+            # StableRNG(3) draws only the first grid value.
+            for r in (run(mixed; max_evals=1),
+                      run(mixed; tuner=RandomSearch(1; rng=StableRNG(3))))
+                @test ncand(r) == 1 && all(ismissing, r.table.error)
+                @test r.table.strategy == [Recursive()]
+                @test r.table.mean_score == ref.table.mean_score
+            end
+        end
+    end
+
+    @testset "a features value that is not a FeatureSet fails only its candidate" begin
+        msg = "ArgumentError: tune candidate key :features must be a FeatureSet such as " *
+              "FeatureSet(Lag(1), Lag(7)), got Lag(1). Wrap the features in " *
+              "FeatureSet(...)."
+        for m in (DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
+                  EvoTreeRegressor(nrounds=5))
+            fcm = Forecaster(m; features=FeatureSet(Lag(7)), freq=Day(1))
+            run(grid; kw...) = tune(fcm, df; grid=grid, horizon=14, initial=90,
+                                    metric=mae, kw...)
+            ref = run((features=[FeatureSet(Lag(1))],))
+            r = run((features=[Lag(1), FeatureSet(Lag(1))],))
+            @test r isa TuneResult && ncand(r) == 2
+            @test ismissing(r.table.mean_score[1]) && r.table.error[1] == msg
+            @test ismissing(r.table.error[2])
+            @test r.table.mean_score[2] == only(ref.table.mean_score)
+            @test r.best.features == FeatureSet(Lag(1))
+            # StableRNG(3) draws only the first grid value.
+            rs = run((features=[FeatureSet(Lag(1)), Lag(1)],);
+                     tuner=RandomSearch(1; rng=StableRNG(3)))
+            @test rs.table.mean_score == ref.table.mean_score
+            @test_throws ErrorException run((features=[Lag(1)],))
+            @test_throws msg run((features=[Lag(1)],))
+        end
         @test_throws "such as FeatureSet(Lag(1), Lag(7))" tune(
             base, df; grid=(features=[Lag(1)],), horizon=14, initial=90)
     end

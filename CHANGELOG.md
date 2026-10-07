@@ -34,10 +34,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   instead of a `MethodError` after the first fold's fit, or in `tune` an "all
   candidates failed" error. `metrics` still accepts any iterable of metric
   functions: a tuple, vector, `NamedTuple`, `Set` or generator.
-- `tune` checks the `grid` values for `:strategy` and `:features` before any
-  fit. A value that is not a strategy (`strategy=[:recursive]`) or not a
-  `FeatureSet` (`features=[Lag(1)]`) throws an `ArgumentError` naming the
-  candidate, instead of a `MethodError` or an "all candidates failed" error.
+- `tune` checks the `:strategy` of each candidate it will evaluate (every grid
+  candidate, the first `max_evals`, or the `RandomSearch` draws) before any
+  fit. A value that is not a strategy (`strategy=[:recursive]`) throws an
+  `ArgumentError` naming the candidate instead of a `MethodError`. A
+  `:features` value that is not a `FeatureSet` (`features=[Lag(1)]`) still
+  fails only its own candidate, but its `:error` entry is now an
+  `ArgumentError` saying to wrap it in `FeatureSet(...)` instead of a
+  `MethodError`.
 - `tune` on a panel whose data lacks the time column throws the same
   `ArgumentError` as `backtest` instead of a `FieldError` (an `ErrorException`
   on Julia 1.10).
