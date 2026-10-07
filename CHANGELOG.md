@@ -33,7 +33,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ArgumentError` with an example (`metrics=(mae, rmse)`, `metric=smape`)
   instead of a `MethodError` after the first fold's fit, or in `tune` an "all
   candidates failed" error. `metrics` still accepts any iterable of metric
-  functions: a tuple, vector, `NamedTuple`, `Set` or generator.
+  functions: a tuple, vector, `NamedTuple`, `Set` or generator. A one-shot
+  iterator such as `Iterators.Stateful` is collected once, so every fold is
+  scored; it used to score only the first fold.
 - `tune` checks the `:strategy` of each candidate it will evaluate (every grid
   candidate, the first `max_evals`, or the `RandomSearch` draws) before any
   fit. A value that is not a strategy (`strategy=[:recursive]`) throws an

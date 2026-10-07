@@ -133,6 +133,8 @@ end
                               ((f for f in (mae, rmse)), (mae, rmse)))
                 @test isequal(bt(it), bt(ref))
             end
+            # A one-shot iterator must still score every fold.
+            @test isequal(bt(Iterators.Stateful((mae, rmse))), bt((mae, rmse)))
         end
         r = backtest(fc, df; horizon=5, initial=80, step=10, metrics=[mae, rmse])
         @test r.metrics.metric == [:mae, :rmse, :mae, :rmse, :mae, :rmse]

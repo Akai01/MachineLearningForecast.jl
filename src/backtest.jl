@@ -73,13 +73,17 @@ function backtest(fc::Forecaster, data; horizon::Integer, initial::Integer,
             "backtest horizon=$horizon exceeds the Direct strategy's max_horizon=" *
             "$(fc.strategy.max_horizon). Use Direct($horizon) or reduce horizon."))
     end
-    applicable(iterate, metrics) && all(_iscallable, metrics) ||
+    iterable = applicable(iterate, metrics)
+    # A one-shot iterator must survive validation and every fold.
+    ms = iterable && !(metrics isa Union{Tuple,NamedTuple,AbstractVector}) ?
+         collect(metrics) : metrics
+    iterable && all(_iscallable, ms) ||
         throw(ArgumentError(
             "backtest metrics must be a tuple or vector of metric functions, got " *
             "$(repr(metrics)). Pass e.g. metrics=(mae, rmse), or metrics=(mae,) " *
             "for one metric."))
     tbl = normalize_table(data)
-    return _backtest_spec(fc, tbl, horizon, initial, step, metrics)
+    return _backtest_spec(fc, tbl, horizon, initial, step, ms)
 end
 
 _backtest_spec(fc::Forecaster{M,S,Symbol}, tbl, horizon, initial, step,
