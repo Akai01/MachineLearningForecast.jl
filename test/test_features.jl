@@ -37,7 +37,7 @@
         @test_throws ArgumentError Calendar()
         @test_throws "Calendar needs at least one part, e.g. Calendar(:dayofweek)." (
             Calendar())
-        @test_throws ArgumentError Calendar(:weekday)      # unknown part
+        @test_throws ArgumentError Calendar(:weekday)
         @test_throws "unknown Calendar part :weekday; valid parts are :dayofmonth" (
             Calendar(:weekday))
         @test_throws ArgumentError Exogenous()
@@ -334,7 +334,7 @@
         @test_throws ArgumentError FeatureSet()
         @test_throws "FeatureSet needs at least one feature, e.g. FeatureSet(Lag(1))." (
             FeatureSet())
-        @test_throws ArgumentError FeatureSet(Lag(1), Lag(1))          # duplicate columns
+        @test_throws ArgumentError FeatureSet(Lag(1), Lag(1))
         @test_throws "FeatureSet produces duplicate column name :y_lag_1. Remove the " *
                      "duplicated feature(s)" FeatureSet(Lag(1), Lag(1))
         @test_throws ArgumentError FeatureSet(Calendar(:month), Exogenous(:month))

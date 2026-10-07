@@ -1,4 +1,3 @@
-# Third-party exogenous features that double one covariate.
 module ThirdPartyExog
 
 using MachineLearningForecast: ExogenousFeature, ColumnAccumulator

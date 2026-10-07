@@ -376,7 +376,6 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
     return TuneResult(table, best, best_fitted)
 end
 
-# TODO: thread candidates, keeping each one's folds serial.
 function _evaluate_candidate(fc, cand, tbl, horizon, initial, step, metric)
     try
         cfc = reconstruct(fc; cand...)
