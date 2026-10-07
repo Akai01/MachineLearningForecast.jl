@@ -25,8 +25,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A documentation page, "Using different models", fits six MLJ learners
   (EvoTrees, a DecisionTree random forest, MLJLinearModels, XGBoost, LightGBM
   and NearestNeighborModels) to the M3 monthly series, each as one global
-  model with the same features and strategy, and scores them against a
-  seasonal-naive baseline on the M3 holdout.
+  model with the same features, strategy and default hyperparameters. Each
+  series is seasonally adjusted (the M4 seasonality test and classical
+  multiplicative indices) and modelled as the log ratio to its previous 12
+  months. The page scores the learners against seasonal-naive and Naive2
+  baselines on the M3 holdout and compares them with published M3 results.
 
 ### Changed
 
