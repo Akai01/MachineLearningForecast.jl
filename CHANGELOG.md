@@ -124,6 +124,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The `tune` docstring and the README say that `tune` throws an
   `ErrorException` listing the errors when every candidate fails, and the
   README that a non-finite mean score counts as a failure.
+- The docs site's leakage warning now says never to use `CV()`, shuffled or
+  not, as the README does, and links the README. The README's `SeriesState`
+  link is fixed, and it calls Tables.jl the only table dependency rather than
+  the only dependency.
 
 ## [0.1.0]
 

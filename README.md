@@ -23,8 +23,8 @@ learner.
   for plugging in your own search strategy (e.g. a Bayesian optimizer).
 - **Tables.jl-native**: accepts *any* Tables.jl-compatible source (a NamedTuple
   of vectors, `CSV.File`, a `DataFrame`, ...) and returns plain columntables
-  (NamedTuples of vectors) that any table sink understands. MachineLearningForecast itself
-  depends only on Tables.jl — bring whatever table type you like.
+  (NamedTuples of vectors) that any table sink understands. MachineLearningForecast's
+  only table dependency is Tables.jl — bring whatever table type you like.
 
 ## Quick start
 
@@ -225,7 +225,7 @@ Notes:
   and `horizon` count distinct timestamps, not rows — and scores by joining
   forecasts to actuals on `(id, time)`. `tune` works on panels unchanged.
 - Per-series state is available as `fitted.series`, a vector of
-  [`SeriesState`]; for a single series the familiar `fitted.y_history`,
+  `SeriesState`; for a single series the familiar `fitted.y_history`,
   `fitted.t_last` and `fitted.n_train` still work.
 
 ## Metrics

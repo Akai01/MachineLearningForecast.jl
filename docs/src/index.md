@@ -23,10 +23,11 @@ MachineLearningForecast is Tables.jl-native: any Tables.jl-compatible source is 
 (NamedTuple of vectors, `DataFrame`, `CSV.File`, ...), and all tabular results
 are columntables (NamedTuples of vectors).
 
-See the README for the full tour:
-feature catalogue, strategies, backtesting, and the two-level tuning story —
-including the **leakage warning** about always using `TimeSeriesCV` (never
-shuffled `CV()`) when tuning base models with MLJ's `TunedModel`.
+See the [README](https://github.com/Akai01/MachineLearningForecast.jl#readme)
+for the full tour: feature catalogue, strategies, backtesting, and the
+two-level tuning story — including the **leakage warning** about always using
+`TimeSeriesCV` (never MLJ's `CV()`, shuffled or not) when tuning base models
+with MLJ's `TunedModel`.
 
 ## API reference
 
