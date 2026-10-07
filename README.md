@@ -1,8 +1,13 @@
 # MachineLearningForecast.jl
 
 <p align="center">
-  <img src="docs/src/assets/logo-dark.svg" alt="MachineLearningForecast.jl logo"
-       width="200">
+  <picture>
+    <source media="(prefers-color-scheme: dark)"
+            srcset="docs/src/assets/readme-banner-dark.svg">
+    <img src="docs/src/assets/readme-banner.svg"
+         alt="MachineLearningForecast.jl: time-series forecasting with any MLJ model"
+         width="640">
+  </picture>
 </p>
 
 **Generic, composable time-series forecasting for Julia, built on the MLJ model
