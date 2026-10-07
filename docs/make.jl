@@ -18,14 +18,14 @@ catch
     false
 end
 
-format = HAS_COMMIT ?
+const format = HAS_COMMIT ?
     Documenter.HTML(prettyurls = get(ENV, "CI", nothing) == "true",
                     canonical = "https://Akai01.github.io/MachineLearningForecast.jl",
                     repolink = REPO_URL) :
     Documenter.HTML(prettyurls = get(ENV, "CI", nothing) == "true",
                     edit_link = nothing, repolink = nothing)
 
-repo_kwargs = HAS_COMMIT ?
+const repo_kwargs = HAS_COMMIT ?
     (repo = "$(REPO_URL)/blob/{commit}{path}#{line}",) :
     (remotes = nothing,)
 
