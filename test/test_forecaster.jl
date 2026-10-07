@@ -9,7 +9,6 @@
             features=FeatureSet(Lag(1)), freq=Day(1))
         @test_throws "got String. Pass e.g. EvoTreeRegressor()" Forecaster("not a model";
             features=FeatureSet(Lag(1)), freq=Day(1))
-        # a model type without parentheses is named, with the instance to pass
         for M in (EvoTreeRegressor, DecisionTreeRegressor)
             @test_throws ArgumentError Forecaster(M; features=FeatureSet(Lag(1)),
                                                   freq=Day(1))
@@ -25,7 +24,6 @@
                      "the names of your target and time columns, e.g. target=:y, " *
                      "time=:ds." Forecaster(TestModels.LinAR(1.0, 0.0);
             features=FeatureSet(Lag(1)), freq=Day(1), target=:y, time=:y)
-        # non-Deterministic model and unknown target scitype both warn, not error
         fc = @test_logs((:warn, r"not an MLJModelInterface.Deterministic"),
                         (:warn, r"target_scitype"),
                         Forecaster(TestModels.DummyProb(); features=FeatureSet(Lag(1)),
@@ -60,8 +58,7 @@
     end
 
     @testset "recursive feedback reaches rolling windows" begin
-        # EchoColumn(:y_rollmean_2_lag_1) forecasts the mean of the last two
-        # history values, which after step 1 includes a prediction.
+        # Each step's rolling mean includes earlier predictions.
         fc = Forecaster(TestModels.EchoColumn(:y_rollmean_2_lag_1);
                         features=FeatureSet(Lag(1), RollingMean(2)),
                         strategy=Recursive(), freq=Day(1))
@@ -78,7 +75,7 @@
         fc = Forecaster(TestModels.EchoColumn(name);
                         features=FeatureSet(Lag(1), f), strategy=Recursive(), freq=Day(1))
         fcast = forecast(fit(fc, df), 14)
-        # training rows have index 0..n-1, so forecast step s has index n-1+s
+        # Training index is 0..n-1, so step s has index n-1+s.
         expected = [sin(2π * (n - 1 + s) / 7) for s in 1:14]
         @test fcast.y_hat ≈ expected
         # the series y_t = sin(2πt/7) continues with no phase jump:
@@ -93,7 +90,6 @@
                         strategy=Recursive(), freq=Day(1))
         fitted = fit(fc, dfe)
 
-        # missing new_data → error naming the column and the needed range
         err = try forecast(fitted, 3) catch e; e end
         @test err isa ArgumentError
         @test occursin("Exogenous(:promo)", err.msg)
@@ -101,30 +97,25 @@
         @test occursin(string(t[end] + Day(1)), err.msg)
         @test occursin(string(t[end] + Day(3)), err.msg)
 
-        # missing column → error naming it
         bad_cols = (ds=t[end] .+ Day.(1:3), other=zeros(3))
         err = try forecast(fitted, 3; new_data=bad_cols) catch e; e end
         @test err isa ArgumentError && occursin(":promo", err.msg)
 
-        # missing timestamps → error listing the first missing one
         short = (ds=t[end] .+ Day.(1:2), promo=zeros(2))
         err = try forecast(fitted, 3; new_data=short) catch e; e end
         @test err isa ArgumentError && occursin(string(t[end] + Day(3)), err.msg)
 
-        # missing values inside new_data → error
         holed = (ds=t[end] .+ Day.(1:3), promo=[1.0, missing, 0.0])
         @test_throws ArgumentError forecast(fitted, 3; new_data=holed)
         @test_throws "new_data has a missing value in exogenous column :promo at time " *
                      "$(t[end] + Day(2)). Provide complete exogenous values for every " *
                      "future step." forecast(fitted, 3; new_data=holed)
 
-        # correct join alignment: rows out of order and with extras still align by time
         future = (ds=[t[end] + Day(3), t[end] + Day(1), t[end] + Day(2), t[end] + Day(9)],
                   promo=[30.0, 10.0, 20.0, 99.0])
         fcast = forecast(fitted, 3; new_data=future)
         @test fcast.y_hat == [10.0, 20.0, 30.0]   # EchoColumn(:promo)
 
-        # exogenous in training must be present
         fc2 = Forecaster(TestModels.LinAR(1.0, 0.0);
                          features=FeatureSet(Lag(1), Exogenous(:absent)), freq=Day(1))
         @test_throws ArgumentError fit(fc2, dfe)
@@ -166,7 +157,6 @@
         @test_throws ArgumentError fit(fc_w, df)
         @test_throws "time column :ds has the timestamp 2022-01-02 at row 2, which does " *
                      "not lie on the freq=1 week grid starting at 2022-01-01" fit(fc_w, df)
-        # missing time column
         @test_throws ArgumentError fit(fc, (when=t, y=y))
         @test_throws "time column :ds not found in the data. Available columns: when, " *
                      "y. Pass time= with the name of your time column, or rename it to " *
@@ -176,7 +166,6 @@
             fc, (ds=t, value=y))
         @test_throws "Available columns: none, the table has no columns." fit(
             fc, NamedTuple())
-        # missing target values
         ym = Vector{Union{Missing,Float64}}(y)
         ym[7] = missing
         @test_throws ArgumentError fit(fc, (ds=t, y=ym))
@@ -231,16 +220,15 @@
                         features=FeatureSet(Lag(1), RollingMean(3), Calendar(:dayofweek)),
                         strategy=Recursive(), freq=Day(1))
         ref = forecast(fit(fc, df), 5)
-        rt = Tables.rowtable(df)               # Vector of NamedTuples
+        rt = Tables.rowtable(df)
         @test rt isa Vector{<:NamedTuple}
         @test forecast(fit(fc, rt), 5).y_hat == ref.y_hat
-        dt = Tables.dictcolumntable(df)        # yet another table flavor
+        dt = Tables.dictcolumntable(df)
         @test forecast(fit(fc, dt), 5).y_hat == ref.y_hat
-        @test_throws ArgumentError fit(fc, 42)   # not a table
+        @test_throws ArgumentError fit(fc, 42)
         @test_throws "expected a Tables.jl-compatible table (NamedTuple of vectors, " *
                      "DataFrame, CSV.File, ...), got Int64. Convert your data to a " *
                      "table first." fit(fc, 42)
-        # the forecast output is itself a Tables.jl table
         @test Tables.istable(ref)
         @test Tables.columntable(ref) == ref
     end
@@ -254,15 +242,12 @@
                      "to forecast, e.g. forecast(fitted, 28)." forecast(fitted, 0)
         @test_throws ArgumentError forecast(fitted, -2)
         @test_throws "h must be ≥ 1, got -2" forecast(fitted, -2)
-        # user data is not mutated by fit
         df2 = deepcopy(df)
         fit(fc, df2)
         @test df2 == df
-        # pretty one-liners
         @test occursin("LinAR", sprint(show, fc))
         @test occursin("Recursive()", sprint(show, fc))
         @test occursin("trained on 60 rows", sprint(show, fitted))
-        # DateTime time column with hourly frequency
         th = collect(DateTime(2022, 1, 1):Hour(1):DateTime(2022, 1, 3, 11))
         dfh = (ds=th, y=Float64.(1:length(th)))
         fch = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),

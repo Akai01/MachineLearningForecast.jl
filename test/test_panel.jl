@@ -1,8 +1,5 @@
-# Panel (multi-series) forecasting: one global model over many series.
-
 @testset "panel" begin
-    # three ragged series with very different levels, so any cross-series bleed
-    # shows up as an obviously wrong number rather than a subtle one
+    # Distinct levels make any cross-series bleed obvious.
     function makepanel(; lens=(40, 30, 35), levels=(100.0, 10.0, 50.0),
                        starts=fill(Date(2022, 1, 1), 3))
         ids = String[]; ds = Date[]; y = Float64[]
@@ -41,7 +38,6 @@
                              features=FeatureSet(Lag(1), Exogenous(:sid)),
                              freq=Day(1), target=:y, time=:ds, id=:sid) catch e; e end
         @test err isa ArgumentError && occursin("series id", err.msg)
-        # id=nothing is the single-series default, and dispatch reflects it
         @test !MachineLearningForecast.ispanel(Forecaster(TestModels.LinAR(1.0, 0.0);
                                                           features=f, freq=Day(1)))
         @test MachineLearningForecast.ispanel(mk(TestModels.LinAR(1.0, 0.0), f))
@@ -50,21 +46,17 @@
     @testset "fit covers every series and keeps their state apart" begin
         f = fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), panel)
         @test nseries(f) == 3
-        @test length(f.machines) == 1                    # ONE global model
+        @test length(f.machines) == 1
         @test [s.id for s in f.series] == ["s1", "s2", "s3"]
         @test [s.n_train for s in f.series] == [40, 30, 35]
         @test [s.t_last for s in f.series] ==
               [Date(2022, 2, 9), Date(2022, 1, 30), Date(2022, 2, 4)]
-        # single-series accessors are meaningless here and say so
         err = try f.y_history catch e; e end
         @test err isa ArgumentError && occursin("3 series", err.msg)
     end
 
     @testset "features never reach across a series boundary" begin
-        # MeanModel predicts the mean of its own training target, so the pooled
-        # target set is directly observable. Lag(1) drops exactly one row per
-        # series; a lag bleeding across the boundary would add rows (and change
-        # the mean), so this pins per-series materialisation.
+        # MeanModel exposes the pooled targets; bleed adds rows.
         f = fit(mk(TestModels.MeanModel(), FeatureSet(Lag(1))), panel)
         expected = Float64[]
         for (n, lv) in zip((40, 30, 35), (100.0, 10.0, 50.0))
@@ -72,7 +64,7 @@
         end
         @test only(unique(forecast(f, 1).y_hat)) ≈ mean(expected)
 
-        # ...and with Lag(7) each series loses exactly 7 rows, not 7 overall
+        # With Lag(7) each series loses 7 rows, not 7 overall.
         f7 = fit(mk(TestModels.MeanModel(), FeatureSet(Lag(7))), panel)
         exp7 = Float64[]
         for (n, lv) in zip((40, 30, 35), (100.0, 10.0, 50.0))
@@ -80,7 +72,7 @@
         end
         @test only(unique(forecast(f7, 1).y_hat)) ≈ mean(exp7)
 
-        # every target feature type drops its minhistory rows per series
+        # Each target feature drops minhistory rows per series.
         for g in (RollingMean(3; lag=2), RollingStd(2), RollingMin(2; lag=4),
                   RollingMax(6), Diff(2), CustomFeature(:hm, mean, 7))
             mh = MachineLearningForecast.minhistory(g)
@@ -92,7 +84,7 @@
     end
 
     @testset "each series forecasts from its own history and timestamp" begin
-        # LinAR(1, 0) echoes y_lag_1, so every step returns that series' own last value
+        # LinAR(1, 0) echoes y_lag_1: each series' last value.
         f = fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), panel)
         out = forecast(f, 3)
         @test keys(out) == (:unique_id, :ds, :y_hat)
@@ -100,8 +92,8 @@
         for (k, st) in enumerate(f.series)
             rows = (3k - 2):(3k)
             @test all(out.unique_id[rows] .== st.id)
-            @test out.y_hat[rows] ≈ fill(st.y_history[end], 3)      # own level
-            @test out.ds[rows] == [st.t_last + Day(i) for i in 1:3] # own grid (ragged)
+            @test out.y_hat[rows] ≈ fill(st.y_history[end], 3)
+            @test out.ds[rows] == [st.t_last + Day(i) for i in 1:3]
         end
     end
 
@@ -111,8 +103,7 @@
         shuffled = (unique_id=panel.unique_id[perm], ds=panel.ds[perm], y=panel.y[perm])
         a = forecast(fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), panel), 2)
         b = forecast(fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), shuffled), 2)
-        # series order follows first appearance, so shuffling reorders the rows
-        # but must not change any series' forecast
+        # Shuffling reorders rows but not any series' forecast.
         keyed(o) = Dict((o.unique_id[i], o.ds[i]) => o.y_hat[i] for i in eachindex(o.y_hat))
         @test Set(keys(keyed(a))) == Set(keys(keyed(b)))
         @test all(keyed(a)[k] ≈ keyed(b)[k] for k in keys(keyed(a)))
@@ -200,7 +191,6 @@
         f = @test_logs (:warn, r"skipping 1 series") match_mode=:any fit(
             mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(7))), short)
         @test nseries(f) == 2 && [s.id for s in f.series] == ["s1", "s3"]
-        # but if none is usable that is an error, not an empty model
         err = try fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(30))),
                       makepanel(lens=(5, 4, 3))) catch e; e end
         @test err isa ArgumentError && occursin("no series has enough rows", err.msg)
@@ -215,12 +205,11 @@
         nd = (unique_id=repeat(["s1", "s2", "s3"], inner=2),
               ds=vcat(grids...), promo=[11.0, 12.0, 21.0, 22.0, 31.0, 32.0])
         @test forecast(f, 2; new_data=nd).y_hat == [11.0, 12.0, 21.0, 22.0, 31.0, 32.0]
-        # out-of-order new_data joins by key, not by position
         p2 = shuffle(StableRNG(9), 1:6)
         shuf = (unique_id=nd.unique_id[p2], ds=nd.ds[p2], promo=nd.promo[p2])
         @test forecast(f, 2; new_data=shuf).y_hat == [11.0, 12.0, 21.0, 22.0, 31.0, 32.0]
 
-        @test_throws ArgumentError forecast(f, 2)                    # new_data required
+        @test_throws ArgumentError forecast(f, 2)
         @test_throws "features contain Exogenous(:promo) but forecast() was called " *
                      "without new_data. Pass a table with columns (:unique_id, :ds, " *
                      ":promo) covering all 3 series over their 2 forecast steps." (
@@ -290,8 +279,7 @@
                      "was requested. Refit with Direct(5) or use Recursive()." (
             forecast(f, 5))
 
-        # each step-model must see the target shifted WITHIN its series: MeanModel
-        # exposes which targets machine i was trained on.
+        # MeanModel shows machine i's targets, shifted per series.
         fm = fit(mk(TestModels.MeanModel(), FeatureSet(Lag(1)); strat=Direct(3)), panel)
         got = forecast(fm, 3)
         for i in 1:3
@@ -311,7 +299,6 @@
         @test length(unique(r.folds.origin)) == length(40:10:(60 - 5))
         @test extrema(r.folds.step) == (1, 5)
         @test Set(unique(r.folds.unique_id)) ⊆ Set(["s1", "s2", "s3"])
-        # every scored row has a real actual behind it
         actual = Dict((big.unique_id[i], big.ds[i]) => big.y[i] for i in eachindex(big.y))
         @test all(actual[(r.folds.unique_id[j], r.folds.ds[j])] == r.folds.y[j]
                   for j in eachindex(r.folds.y))
@@ -323,7 +310,6 @@
         @test r.metrics.value ≈ repeat([3.0, sqrt(11.0)], 3)
         @test occursin("horizon 5", sprint(show, MIME"text/plain"(), r))
         @test occursin("folds", sprint(show, r))
-        # initial is counted in timestamps, and must clear minhistory
         @test_throws ArgumentError backtest(mk(TestModels.LinAR(1.0, 0.0),
                                                FeatureSet(Lag(30))), big;
                                             horizon=5, initial=20, step=10)
@@ -357,7 +343,7 @@
             fe = fit(mk(TestModels.EchoColumn(:fourier_7_0_sin_1), fourier; strat=s), rag)
             got = forecast(fe, 3).y_hat
             @test got ≈ [sin(2π * (n - 1 + i) / 7) for n in (60, 50, 40) for i in 1:3]
-            @test !(got[1] ≈ got[4]) && !(got[1] ≈ got[7])      # same date, other phase
+            @test !(got[1] ≈ got[4]) && !(got[1] ≈ got[7])
             # s3 starts after the first origin and joins at the second.
             r = backtest(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)); strat=s), rag;
                          horizon=5, initial=15, step=10)
@@ -441,7 +427,7 @@
                    horizon=5, initial=40, step=10, metric=mae)
         @test length(res.table.mean_score) == 2
         @test all(!ismissing, res.table.mean_score)
-        @test MachineLearningForecast.ispanel(res.best)  # id survives reconstruct
+        @test MachineLearningForecast.ispanel(res.best)
         @test nseries(res.best_fitted) == 3
         # a misnamed time column gets backtest's message
         renamed = (unique_id=big.unique_id, when=big.ds, y=big.y)
@@ -527,8 +513,8 @@
                         strategy=Recursive(), freq=Day(1))
         f = fit(fc, df)
         @test nseries(f) == 1
-        @test f.y_history == Float64.(1:50)                 # documented accessors work
+        @test f.y_history == Float64.(1:50)
         @test f.t_last == Date(2022, 2, 19) && f.n_train == 50
-        @test keys(forecast(f, 3)) == (:ds, :y_hat)         # no id column
+        @test keys(forecast(f, 3)) == (:ds, :y_hat)
     end
 end

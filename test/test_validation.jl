@@ -1,7 +1,3 @@
-# Guards added after an end-to-end audit: input validation, leakage refusal,
-# reserved column names, and the exact-value coverage of the single-row
-# (forecast-time) paths that batch materialization alone cannot pin.
-
 # Third-party exogenous features that double one covariate.
 module ThirdPartyExog
 
@@ -28,7 +24,7 @@ end
 featurevalues(f::Union{NoCols,Doubled}, y_hist, t_next, exog_row) =
     (2.0 * exog_row[_col(f)],)
 
-end # module
+end
 
 @testset "validation and guards" begin
     df = (ds=collect(Date(2022, 1, 1):Day(1):Date(2022, 2, 19)), y=Float64.(1:50))
@@ -44,12 +40,10 @@ end # module
         @test err isa ArgumentError
         @test occursin("column named :y", err.msg)
         @test occursin("leak", err.msg)
-        # a custom feature named after the target is caught too
         @test_throws ArgumentError mk(features=FeatureSet(Lag(1),
                                                           CustomFeature(:y, length, 0)))
         @test_throws "the feature set produces a column named :y, which is the target " *
                      "column" mk(features=FeatureSet(Lag(1), CustomFeature(:y, length, 0)))
-        # ...and naming the time column is refused with its own advice
         err2 = try mk(features=FeatureSet(Lag(1), Exogenous(:ds))) catch e; e end
         @test err2 isa ArgumentError
         @test occursin("Calendar", err2.msg)
@@ -127,14 +121,12 @@ end # module
     @testset "month-end series are gap-free (anchored grid)" begin
         me = [Date(2020, 1, 31) + Month(k) for k in 0:23]
         @test me[2] == Date(2020, 2, 29) && me[3] == Date(2020, 3, 31)
-        # stepping from the previous row would see Feb 29 + Month(1) = Mar 29
-        # and report a spurious gap; anchoring at t[1] does not.
+        # Stepping from Feb 29 would give Mar 29, a false gap.
         @test MachineLearningForecast.validate_time_column(me, :ds, Month(1)) === nothing
         fcm = Forecaster(TestModels.LinAR(1.0, 0.0); features=fs, strategy=Recursive(),
                          freq=Month(1), target=:y, time=:ds)
         out = forecast(fit(fcm, (ds=me, y=Float64.(1:24))), 3)
         @test out.ds == [Date(2022, 1, 31), Date(2022, 2, 28), Date(2022, 3, 31)]
-        # a genuine gap is still caught
         gapped = vcat(me[1:5], me[7:end])
         @test_throws ArgumentError MachineLearningForecast.validate_time_column(
             gapped, :ds, Month(1))
@@ -144,22 +136,19 @@ end # module
     end
 
     @testset "gap count reports discontinuities, not off-grid rows" begin
-        # Regression: comparing every row against the anchored grid made one
-        # missing day report as one gap per *subsequent row* (hundreds), which
-        # is also the message quality the README advertises.
+        # One missing day is one gap, not one per later row.
         full = collect(Date(2020, 1, 1):Day(1):Date(2020, 1, 1) + Day(999))
         one = vcat(full[1:100], full[102:end])
         validate = MachineLearningForecast.validate_time_column
         err = try validate(one, :ds, Day(1)) catch e; e end
         @test err isa ArgumentError
-        @test occursin("has 1 gap for", err.msg)          # singular, and exactly one
+        @test occursin("has 1 gap for", err.msg)
         @test occursin(string(full[100]), err.msg)        # "first gap after <ts>"
 
         three = vcat(full[1:100], full[102:200], full[202:300], full[302:end])
         err3 = try validate(three, :ds, Day(1)) catch e; e end
         @test occursin("has 3 gaps for", err3.msg)
 
-        # a contiguous run of missing days is still ONE discontinuity
         run5 = vcat(full[1:100], full[106:end])
         err5 = try validate(run5, :ds, Day(1)) catch e; e end
         @test occursin("has 1 gap for", err5.msg)
@@ -173,7 +162,6 @@ end # module
         @test err isa ArgumentError                       # not a bare TypeError
         @test occursin("missing values", err.msg) && occursin("row 5", err.msg)
 
-        # a timestamp that is not on the declared grid gets its own diagnosis
         offgrid = collect(DateTime(2020, 1, 1):Hour(1):DateTime(2020, 1, 1) + Hour(9))
         offgrid[6] += Minute(30)
         err2 = try validate(offgrid, :ds, Hour(1)) catch e; e end
@@ -222,7 +210,6 @@ end # module
         @test err isa ArgumentError
         @test occursin("sub-daily", err.msg)
         @test occursin("hour", err.msg)
-        # and they work when the column really is a DateTime
         hds = collect(DateTime(2022, 1, 1):Hour(1):DateTime(2022, 1, 1) + Hour(49))
         fch = Forecaster(TestModels.EchoColumn(:hour);
                          features=FeatureSet(Lag(1), Calendar(:hour)),
@@ -240,7 +227,6 @@ end # module
                       forecast(fit(fcm, (ds=hds, y=Float64.(1:50))), 3)
             end
         end
-        # a Date column is still rejected with the same message
         msg = "Calendar(:hour) needs a sub-daily time column, but the time column " *
               "has element type Date. Use a DateTime time column, or drop :hour " *
               "from the Calendar feature."
@@ -266,10 +252,9 @@ end # module
         mism = (ds=DateTime.(grid), promo=[1.0, 2.0, 3.0])
         err2 = try forecast(fitted, 3; new_data=mism) catch e; e end
         @test err2 isa ArgumentError
-        @test occursin("element type", err2.msg)   # not a bogus "missing timestamps"
+        @test occursin("element type", err2.msg)
         @test !occursin("missing", err2.msg)
 
-        # out-of-order new_data joins correctly (join is by timestamp, not position)
         shuffled = (ds=grid[[3, 1, 2]], promo=[30.0, 10.0, 20.0])
         @test forecast(fitted, 3; new_data=shuffled).y_hat == [10.0, 20.0, 30.0]
     end
@@ -312,7 +297,7 @@ end # module
     @testset "single-row (forecast-time) paths: exact values" begin
         y = Float64[3, 1, 4, 1, 5, 9, 2, 6, 5, 3]
         t = collect(Date(2021, 3, 1):Day(1):Date(2021, 3, 10))
-        # Calendar: featurevalues must agree with the batch path at the same row
+        # Calendar single-row values match Dates and the batch row.
         cal = Calendar(:dayofweek, :month, :weekofyear)
         @test collect(MachineLearningForecast.featurevalues(cal, y, t[7], nothing)) ==
               Float64[dayofweek(t[7]), month(t[7]), week(t[7])]
@@ -320,12 +305,10 @@ end # module
         MachineLearningForecast.materialize!(acc, cal, y, t, (ds=t, y=y))
         @test collect(MachineLearningForecast.featurevalues(cal, y[1:6], t[7], nothing)) ==
               [col[7] for (_, col) in acc]
-        # Diff: y_{t-lag} - y_{t-lag-k} continuing the history
         @test only(MachineLearningForecast.featurevalues(
                        Diff(3; lag=2), y, t[1], nothing)) ==
               y[10 + 1 - 2] - y[10 + 1 - 2 - 3]
 
-        # ...and end-to-end through forecast(), which is what actually matters
         ds = collect(Date(2022, 1, 1):Day(1):Date(2022, 2, 19))
         d2 = (ds=ds, y=Float64.(1:50))
         fc_dw = Forecaster(TestModels.EchoColumn(:dayofweek);
@@ -336,13 +319,7 @@ end # module
         fc_df = Forecaster(TestModels.EchoColumn(:y_diff_1_lag_1);
                            features=FeatureSet(Lag(1), Diff(1)),
                            strategy=Recursive(), freq=Day(1))
-        # Closed-form oracle for the recursive feedback loop. The model echoes
-        # Diff(1) = y_hist[end] - y_hist[end-1], and its own output is appended
-        # to the history, so with y = 1:50:
-        #   step 1: 50 - 49 =   1   (history ... 49, 50)
-        #   step 2:  1 - 50 = -49   (history ... 50,  1)
-        #   step 3: -49 -  1 = -50
-        #   step 4: -50 - -49 =  -1
+        # Echoed Diff(1): 50-49, 1-50, -49-1, -50-(-49).
         @test forecast(fit(fc_df, d2), 4).y_hat == [1.0, -49.0, -50.0, -1.0]
     end
 
@@ -354,7 +331,6 @@ end # module
         vals = [res.metrics.value[i] for i in eachindex(res.metrics.fold)
                 if res.metrics.metric[i] == :mase && res.metrics.fold[i] > 0]
         @test all(isfinite, vals) && all(>(0), vals)
-        # the trait is what routes it; user metrics can opt in the same way
         @test MachineLearningForecast.needs_ytrain(mase)
         @test !MachineLearningForecast.needs_ytrain(mae)
     end

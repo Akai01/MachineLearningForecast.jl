@@ -111,7 +111,6 @@
         @test MachineLearningForecast.minhistory(fs) == 4
     end
 
-    # Materialize one feature (with a given y) into a columntable.
     materialize(f, yv=y, data=df) = begin
         out = MachineLearningForecast.ColumnAccumulator()
         MachineLearningForecast.materialize!(out, f, yv, t, data)
@@ -210,8 +209,7 @@
         @test out.fourier_7_0_sin_1[1] ≈ sin(0.0)
         @test out.fourier_7_0_sin_1[4] ≈ sin(2π * 3 / 7)
         @test out.fourier_7_0_cos_2[4] ≈ cos(2π * 2 * 3 / 7)
-        # featurevalues continues the same index: value at index n equals the
-        # materialized value at row n+1 — no phase jump at the boundary.
+        # Same index at the boundary: no phase jump.
         vals = MachineLearningForecast.featurevalues(f, y, 9, nothing)
         @test collect(vals) ≈ [out[c][10] for c in MachineLearningForecast.outputnames(f)]
     end
@@ -229,7 +227,6 @@
         @test_throws ArgumentError materialize(Exogenous(:label), y, dfs)
         @test_throws "exogenous column :label has non-numeric value \"a\" (type String)" (
             materialize(Exogenous(:label), y, dfs))
-        # featurevalues: missing column in the exogenous row errors clearly
         @test_throws ArgumentError MachineLearningForecast.featurevalues(
             Exogenous(:promo), y, t[1], (other=1.0,))
         @test_throws "new_data is missing exogenous column :promo required by Exogenous. " *
@@ -291,7 +288,6 @@
             @test_throws msg materialize(bad)
             @test_throws "f must return one real number" fv(bad, y, t[1])
         end
-        # valid features give the same values as before
         ok = CustomFeature(:s, h -> h[end - 2], 3)
         @test collect(skipmissing(materialize(ok).s)) == y[1:7]
         @test fv(ok, y, t[1]) == (y[8],)
@@ -348,7 +344,6 @@
         @test keys(X) == (:y_lag_2, :y_rollmean_2_lag_1, :dayofweek)
         @test all(eltype(X[c]) == Float64 for c in keys(X))
         @test X.y_lag_2 == y[1:8]
-        # too-short data errors with row counts in the message
         short = (ds=t[1:3], y=y[1:3])
         @test_throws ArgumentError MachineLearningForecast.build_training_frame(
             FeatureSet(Lag(5)), short, :y, :ds)
@@ -356,7 +351,6 @@
                      "the data has only 3 rows. Provide at least 6 rows" (
             MachineLearningForecast.build_training_frame(FeatureSet(Lag(5)), short, :y,
                                                          :ds))
-        # missing exogenous values error (interior missing)
         promo = Vector{Union{Missing,Float64}}(1.0:10.0)
         promo[5] = missing
         dfm = (ds=t, y=y, promo=promo)

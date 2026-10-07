@@ -1,5 +1,4 @@
-# Minimal MLJ models with fully deterministic, closed-form behavior, used to
-# test the forecasting machinery independent of any real learner.
+# Closed-form MLJ models to test without real learners.
 module TestModels
 
 using MLJModelInterface
@@ -69,4 +68,4 @@ MMI.predict(::NaNModel, fitresult, Xnew) = fill(NaN, length(Tables.rows(Xnew)))
 MMI.input_scitype(::Type{NaNModel}) = MMI.Table(MMI.Continuous)
 MMI.target_scitype(::Type{NaNModel}) = AbstractVector{MMI.Continuous}
 
-end # module
+end

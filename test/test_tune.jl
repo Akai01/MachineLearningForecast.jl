@@ -1,6 +1,4 @@
-# A trivial sequential tuning strategy defined AS IF it were third-party code:
-# only exported names are used (TuningStrategy, ask, tell!). It proposes the
-# middle candidate of its own space and stops after 3 asks.
+# Uses only exported names, as third-party code would.
 module ThirdPartyTuning
 
 using MachineLearningForecast: TuningStrategy
@@ -28,7 +26,7 @@ end
 ask(s::Fixed) = s.out
 tell!(::Fixed, candidate, score) = nothing
 
-end # module
+end
 
 @testset "tune" begin
     n = 120
@@ -50,24 +48,21 @@ end # module
         @test result isa TuneResult
         @test ncand(result) == 4
         @test all(ismissing, result.table.error)
-        # best score equals the min of the table, and best matches that row
         best_row = argmin(result.table.mean_score)
         @test result.table.mean_score[best_row] == minimum(result.table.mean_score)
         @test result.best.model == result.table.model[best_row]
         @test result.best.features == result.table.features[best_row]
-        # best_fitted forecasts without error
         fcast = forecast(result.best_fitted, 7)
         @test length(fcast.y_hat) == 7 && all(isfinite, fcast.y_hat)
-        # deterministic candidate ordering: first grid key varies fastest
+        # Deterministic order: the first grid key varies fastest.
         @test result.table.model[1:2] == grid.model
         @test result.table.features[1] == result.table.features[2] == grid.features[1]
-        # show prints a top-candidates summary
         s = sprint(show, MIME"text/plain"(), result)
         @test occursin("4 candidates", s) && occursin("Top 4", s)
     end
 
     @testset "failed candidates are recorded, not fatal" begin
-        # Lag(200) cannot be materialized on 120 rows → per-candidate failure
+        # Lag(200) needs more history than initial=90 allows.
         grid = (features=[FeatureSet(Lag(1)), FeatureSet(Lag(200))],)
         result = tune(base, df; grid=grid, horizon=14, initial=90, metric=mae)
         @test ncand(result) == 2
@@ -76,9 +71,7 @@ end # module
         # the underlying ArgumentError text
         @test occursin("history", result.table.error[2])
         @test ismissing(result.table.mean_score[2])
-        # failed candidate excluded from ranking
         @test result.best.features == FeatureSet(Lag(1))
-        # all candidates failing raises an informative error
         bad = (features=[FeatureSet(Lag(200)), FeatureSet(Lag(300))],)
         err = try tune(base, df; grid=bad, horizon=14, initial=90) catch e; e end
         @test err isa ErrorException && occursin("all 2 tuning candidates failed", err.msg)
@@ -96,7 +89,6 @@ end # module
             s = sprint(show, MIME"text/plain"(), r)
             @test occursin("(1 failed)", s) && occursin("Top 1", s)
         end
-        # the strategy is told `missing`, and all failing still raises
         tuner = ThirdPartyTuning.Midpoint([(model=TestModels.NaNModel(),)])
         @test_throws "all 3 tuning candidates failed" tune(base, df; tuner=tuner,
                                                            horizon=14, initial=90)
@@ -107,28 +99,23 @@ end # module
         space = [(model=DecisionTreeRegressor(max_depth=d, rng=StableRNG(1)),) for d in 1:5]
         tuner = ThirdPartyTuning.Midpoint(space)
         result = tune(base, df; tuner=tuner, horizon=14, initial=90, metric=mae)
-        # tune asked 3 times (the strategy's own termination), told 3 scores
         @test ncand(result) == 3
         @test length(tuner.told) == 3
         @test all(x -> x[1] == space[3], tuner.told)        # midpoint of 5 = index 3
-        # The scores handed to tell! must be the SAME numbers tune reports, not
-        # merely Float64s — this is the load-bearing half of the contract.
         @test [x[2] for x in tuner.told] ≈ collect(result.table.mean_score)
         @test result.best.model == space[3].model
         @test length(forecast(result.best_fitted, 5).y_hat) == 5
     end
 
     @testset "a failing candidate is told to the strategy as `missing`" begin
-        # Documented contract: tell! receives `missing` when a candidate could
-        # not be evaluated. Lag(200) needs more history than the 120-row series.
+        # Lag(200) needs more history than initial=90 allows.
         bad = [(features=FeatureSet(Lag(200)),) for _ in 1:1]
         tuner = ThirdPartyTuning.Midpoint(bad)
         @test_throws ErrorException tune(base, df; tuner=tuner, horizon=14, initial=90)
         @test length(tuner.told) == 3
         @test all(x -> x[2] === missing, tuner.told)
 
-        # Mixed good/bad through a grid: the search completes, the failure is
-        # recorded with its message, and ranking ignores it.
+        # A grid with one failure completes and ranks the rest.
         r = tune(base, df; grid=(features=[FeatureSet(Lag(1), Lag(7)),
                                            FeatureSet(Lag(200))],),
                  horizon=14, initial=90, metric=mae)
@@ -151,7 +138,6 @@ end # module
         r1 = tune(base, df; grid=grid, tuner=RandomSearch(3; rng=StableRNG(7)),
                   horizon=14, initial=90)
         @test ncand(r1) == 3
-        # reproducible with the same seed
         r2 = tune(base, df; grid=grid, tuner=RandomSearch(3; rng=StableRNG(7)),
                   horizon=14, initial=90)
         @test r1.table.model == r2.table.model
@@ -160,10 +146,7 @@ end # module
         @test_throws "RandomSearch n must be ≥ 1, got 0. Pass the number of candidates " *
                      "to draw, e.g. RandomSearch(10)." RandomSearch(0)
 
-        # A RandomSearch that always returned the same candidate (or always the
-        # first) would pass the checks above. Draw enough to make that visible:
-        # over 24 draws from 4 values, seeing only one value has probability
-        # 4·(1/4)^24, and a different seed must give a different sequence.
+        # 24 draws from 4 values: all-equal has p = 4·4^-24.
         many = tune(base, df; grid=grid, tuner=RandomSearch(24; rng=StableRNG(7)),
                     horizon=14, initial=90)
         depths = [m.max_depth for m in many.table.model]
@@ -175,7 +158,6 @@ end # module
     end
 
     @testset "grid validation" begin
-        # GridSearch needs grid
         @test_throws ArgumentError tune(base, df; horizon=14, initial=90)
         @test_throws "GridSearch() requires the grid keyword: pass grid=(model=[...], " *
                      "features=[...], ...) to tune." tune(base, df; horizon=14, initial=90)
@@ -266,14 +248,10 @@ end # module
         @test_logs (:warn, r"756 model fits") match_mode=:any tune(
             base, df; grid=big, horizon=14, initial=90)
 
-        # The guard must count only the fits that will ACTUALLY run: with
-        # max_evals=1 just 1 candidate × 2 folds × 14 machines = 28 fits are
-        # planned, which is under the threshold, so warning about 756 (and
-        # advising "lower max_evals", already done) would be misinformation.
+        # max_evals=1 plans only 28 fits: no warning.
         @test_logs min_level=Logging.Warn tune(
             base, df; grid=big, max_evals=1, horizon=14, initial=90)
-        # ...and a budget that still exceeds the threshold does warn, with the
-        # budgeted count rather than the full grid's.
+        # A budget over the threshold warns with its own count.
         @test_logs (:warn, r"560 model fits") match_mode=:any tune(
             base, df; grid=big, max_evals=20, horizon=14, initial=90)
     end

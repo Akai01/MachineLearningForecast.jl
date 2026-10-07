@@ -8,16 +8,14 @@
     @test mae(y, y) == 0.0
     @test smape(y, y) == 0.0
 
-    # mape with zeros warns and returns Inf
     @test (@test_logs (:warn, r"mape is undefined") mape([0.0, 1.0], [1.0, 1.0])) == Inf
 
     # smape 0/0 terms contribute 0
     @test smape([0.0, 1.0], [0.0, 1.0]) == 0.0
 
-    # mase: hand-computed
     y_train = [1.0, 3.0, 1.0, 3.0, 1.0]   # naive m=1 error: mean(|2,2,2,2|) = 2
     @test mase([10.0, 12.0], [11.0, 11.0]; y_train=y_train) ≈ 1.0 / 2
-    # seasonal m=2: |y_t - y_{t-2}| = 0 everywhere → Inf with a warning
+    # seasonal m=2: y_t == y_{t-2} everywhere, so Inf
     @test (@test_logs (:warn, r"mase is undefined") mase(y, ŷ; y_train=y_train, m=2)) == Inf
     @test_throws ArgumentError mase(y, ŷ; y_train=[1.0], m=1)
     @test_throws "mase needs length(y_train) > m; got length(y_train)=1 with m=1. " *
@@ -27,7 +25,6 @@
                  "steps, e.g. m=7 for weekly seasonality on daily data, or m=1 (the " *
                  "default)." mase(y, ŷ; y_train=y_train, m=0)
 
-    # argument validation
     @test_throws ArgumentError mae([1.0], [1.0, 2.0])
     @test_throws "metric inputs must have equal length, got length(y)=1 and " *
                  "length(ŷ)=2. Pass one forecast per actual, aligned element by " *
@@ -47,7 +44,7 @@ end
     y = Float64.(1:n)
     df = (ds=t, y=y)
     fs = FeatureSet(Lag(1))
-    # EchoColumn(:y_lag_1) is the naive forecaster: constant y[origin] over the horizon.
+    # Echoing y_lag_1 is the naive forecast.
     fc = Forecaster(TestModels.EchoColumn(:y_lag_1); features=fs,
                     strategy=Recursive(), freq=Day(1))
 
@@ -61,22 +58,18 @@ end
         @test res.folds.origin == [fill(t[80], 5); fill(t[90], 5)]
         @test res.folds.ds == [t[81:85]; t[91:95]]
         @test res.folds.y == [y[81:85]; y[91:95]]
-        # naive forecast: y[80] and y[90] carried forward
         @test res.folds.y_hat == [fill(80.0, 5); fill(90.0, 5)]
         # per-fold metrics: |y - origin| averaged: mean(1,2,3,4,5) = 3
         m = res.metrics
         perfold = m.fold .> 0
         @test count(perfold) == 4   # 2 folds × 2 metrics
         @test all(m.value[perfold .& (m.metric .== :mae)] .≈ 3.0)
-        # overall summary: fold 0, mean over folds, missing origin
         overall = m.fold .== 0
         @test count(overall) == 2
         @test all(ismissing, m.origin[overall])
         @test only(m.value[overall .& (m.metric .== :mae)]) ≈ 3.0
         @test only(m.value[overall .& (m.metric .== :rmse)]) ≈ sqrt(mean([1, 4, 9, 16, 25]))
-        # both tables are Tables.jl-compatible
         @test Tables.istable(res.folds) && Tables.istable(res.metrics)
-        # show is compact and informative
         s = sprint(show, MIME"text/plain"(), res)
         @test occursin("2 folds", s) && occursin("mae", s)
     end
@@ -87,7 +80,6 @@ end
                          features=FeatureSet(Lag(1), Exogenous(:promo)),
                          strategy=Recursive(), freq=Day(1))
         res = backtest(fce, dfe; horizon=3, initial=90, step=100, metrics=(mae,))
-        # forecast echoes future promo values
         @test res.folds.y_hat == dfe.promo[91:93]
     end
 
@@ -104,12 +96,10 @@ end
         @test_throws "backtest step must be ≥ 1, got 0. Pass how many steps each fold " *
                      "moves the origin, e.g. step=5, which equals horizon (the " *
                      "default)." backtest(fc, df; horizon=5, initial=50, step=0)
-        # no complete folds
         @test_throws ArgumentError backtest(fc, df; horizon=30, initial=90)
         @test_throws "no complete backtest folds: data has 100 rows, but the first fold " *
                      "needs initial + horizon = 120. Provide more data" backtest(
             fc, df; horizon=30, initial=90)
-        # initial must exceed minhistory
         fc_deep = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(30)),
                              freq=Day(1))
         @test_throws ArgumentError backtest(fc_deep, df; horizon=5, initial=30)
@@ -117,14 +107,12 @@ end
                      "(30 rows) so the first training window has at least one usable " *
                      "row. Pass initial=31 or more, or reduce lags/windows." backtest(
             fc_deep, df; horizon=5, initial=30)
-        # Direct max_horizon < backtest horizon
         fc_d = Forecaster(TestModels.LinAR(1.0, 0.0); features=fs, strategy=Direct(3),
                           freq=Day(1))
         @test_throws ArgumentError backtest(fc_d, df; horizon=5, initial=80)
         @test_throws "backtest horizon=5 exceeds the Direct strategy's max_horizon=3. " *
                      "Use Direct(5) or reduce horizon." backtest(fc_d, df; horizon=5,
                                                                 initial=80)
-        # ... but works when compatible
         res = backtest(fc_d, df; horizon=3, initial=90, metrics=(mae,))
         @test maximum(res.metrics.fold) == 3   # origins 90, 93, 96
     end
@@ -140,7 +128,6 @@ end
                     fcm, df; horizon=5, initial=80, metrics=bad)
             end
         end
-        # a vector, named tuple and closure still work
         r = backtest(fc, df; horizon=5, initial=80, step=10, metrics=[mae, rmse])
         @test r.metrics.metric == [:mae, :rmse, :mae, :rmse, :mae, :rmse]
         r2 = backtest(fc, df; horizon=5, initial=80, step=10, metrics=(a=mae,))

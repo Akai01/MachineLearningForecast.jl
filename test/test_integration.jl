@@ -1,9 +1,4 @@
-# End-to-end integration with real learners (EvoTrees gradient boosting and a
-# DecisionTree random forest) on a synthetic seasonal series: the model must
-# beat a seasonal-naive baseline on backtest sMAPE. The series has weekly and
-# annual seasonality plus a mild trend — the weekly part is what seasonal-naive
-# nails, the annual drift is what it structurally cannot track but Fourier
-# features can.
+# Fourier terms track the annual drift seasonal-naive misses.
 @testset "integration" begin
     rng = StableRNG(2024)
     n = 730
@@ -16,7 +11,7 @@
     features = FeatureSet(Lag(7), Lag(14), RollingMean(7), Calendar(:dayofweek),
                           Fourier(7, 2), Fourier(365.25, 2))
 
-    # seasonal-naive baseline over the same folds: ŷ_{o+s} = y[o + s - 7⌈s/7⌉]
+    # seasonal naive: ŷ_{o+s} = y[o + s - 7⌈s/7⌉]
     snaive(o, h, m) = [y[o + s - m * cld(s, m)] for s in 1:h]
     origins = initial:step:(n - horizon)
     snaive_smape = mean(smape(y[(o+1):(o+horizon)], snaive(o, horizon, 7)) for o in origins)
@@ -47,12 +42,10 @@
         @test length(fitted.machines) == 14
         fcast = forecast(fitted, 14)
         @test all(isfinite, fcast.y_hat)
-        # sanity: forecasts stay in a plausible band around the signal level
         @test all(abs.(fcast.y_hat .- mean(y)) .< 8)
     end
 
     @testset "exogenous end-to-end (the README example shape)" begin
-        # y depends strongly on a future-known covariate
         promo = Float64.(rand(rng, Bool, n))
         y2 = 10 .+ 3 .* sin.(2π .* (1:n) ./ 7) .+ 5 .* promo .+ 0.3 .* randn(rng, n)
         df2 = (ds=ts, y=y2, promo=promo)
@@ -65,7 +58,6 @@
         future = (ds=ts[end] .+ Day.(1:14),
                   promo=Float64.([ones(7); zeros(7)]))
         fcast = forecast(fitted, 14; new_data=future)
-        # promo weeks must forecast visibly higher than non-promo weeks
         @test mean(fcast.y_hat[1:7]) - mean(fcast.y_hat[8:14]) > 2.5
     end
 end
