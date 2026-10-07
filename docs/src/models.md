@@ -356,17 +356,8 @@ Theta: the margin over Theta is at most 0.19, there is no significance test,
 and the series differ. The nearest-neighbour and linear models are close to
 Comb S-H-D and ahead of ARIMA.
 
-Tuning added little for four of the six learners. In a separate experiment,
-each learner was given 30 hyperparameter configurations under this setup, its
-defaults among them, and the one with the lowest sMAPE on the validation
-window was scored on the holdout. Against the defaults, that changed holdout
-sMAPE by -0.60 for `KNNRegressor`, whose default of 5 neighbours is small (the
-pick used 75), -0.22 for `XGBoostRegressor`, -0.03 for `EvoTreeRegressor`,
-+0.02 for `LGBMRegressor`, +0.04 for `RandomForestRegressor`, and 0.00 for the
-linear learner, whose search covered least squares, ridge and lasso and picked
-a lasso with ``\lambda = 10^{-5}``. These numbers come from one holdout, one
-transform and one feature set, so they describe this setup and not the
-learners in general.
+[Tuning the models](tuning.md) tunes each learner's hyperparameters on a
+validation window and scores the chosen configurations on this holdout.
 
 **Tested with** Julia 1.12.5 and 1.10.12, each started with `--threads=auto`
 (20 threads), which gave the same scores; the times above are from Julia
@@ -378,6 +369,7 @@ MLJDecisionTreeInterface 0.5.0, MLJLinearModels 0.10.4, MLJXGBoostInterface
 
 ## Next steps
 
-These are default hyperparameters on one feature set. To search over models,
-hyperparameters, feature sets and strategies, scored on backtest error, see
-[`tune`](@ref).
+These are default hyperparameters on one feature set. To tune the
+hyperparameters of these six learners on a validation window, continue with
+[Tuning the models](tuning.md). To search over models, hyperparameters,
+feature sets and strategies, scored on backtest error, see [`tune`](@ref).

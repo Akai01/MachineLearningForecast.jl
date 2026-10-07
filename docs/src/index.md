@@ -39,6 +39,7 @@ two-level tuning story — including the **leakage warning** about always using
 with MLJ's `TunedModel`.
 
 [Using different models](models.md) compares six MLJ learners on the M3 monthly series.
+[Tuning the models](tuning.md) tunes their hyperparameters on a validation window.
 
 ## API reference
 

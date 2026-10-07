@@ -30,7 +30,8 @@ makedocs(;
     modules = [MachineLearningForecast],
     authors = "Resul Akay and contributors",
     format,
-    pages = ["Home" => "index.md", "Using different models" => "models.md"],
+    pages = ["Home" => "index.md", "Using different models" => "models.md",
+             "Tuning the models" => "tuning.md"],
     checkdocs = :exports,
     repo_kwargs...,
 )

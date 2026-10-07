@@ -30,6 +30,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   multiplicative indices) and modelled as the log ratio to its previous 12
   months. The page scores the learners against seasonal-naive and Naive2
   baselines on the M3 holdout and compares them with published M3 results.
+- A documentation page, "Tuning the models", continues "Using different
+  models": it gives each of the six learners the same budget of 30
+  hyperparameter configurations (its defaults and 29 drawn at random with a
+  fixed seed, or the whole space where it has 30 points), picks the one with
+  the lowest sMAPE on the 18 months before the holdout, and scores it once on
+  the M3 holdout next to the defaults.
 
 ### Changed
 
