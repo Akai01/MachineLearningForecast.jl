@@ -4,3 +4,4 @@ MachineLearningForecast = "ede6d084-214d-4f73-af1a-aaa9e99759ae"
 
 [compat]
 Documenter = "1"
+MachineLearningForecast = "0.1"
