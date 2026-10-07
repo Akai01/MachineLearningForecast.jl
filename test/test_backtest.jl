@@ -121,11 +121,17 @@ end
         for m in (EvoTreeRegressor(nrounds=5),
                   DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             fcm = Forecaster(m; features=fs, freq=Day(1))
-            for bad in (mae, (:mae,), ("mae", "rmse"), Dict(:mae => mae), [mae, :rmse])
+            for bad in (mae, :mae, "mae", (:mae,), ("mae", "rmse"), Dict(:mae => mae),
+                        [mae, :rmse])
                 @test_throws ArgumentError backtest(fcm, df; horizon=5, initial=80,
                                                     metrics=bad)
                 @test_throws "got $(repr(bad)). Pass e.g. metrics=(mae, rmse)" backtest(
                     fcm, df; horizon=5, initial=80, metrics=bad)
+            end
+            bt(ms) = backtest(fcm, df; horizon=5, initial=80, metrics=ms).metrics
+            for (it, ref) in ((Set([mae]), (mae,)), ((f for f in (mae,)), (mae,)),
+                              ((f for f in (mae, rmse)), (mae, rmse)))
+                @test isequal(bt(it), bt(ref))
             end
         end
         r = backtest(fc, df; horizon=5, initial=80, step=10, metrics=[mae, rmse])

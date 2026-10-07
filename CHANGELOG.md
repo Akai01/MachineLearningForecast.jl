@@ -32,7 +32,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   anything. A bare function (`metrics=mae`), symbols or strings throw an
   `ArgumentError` with an example (`metrics=(mae, rmse)`, `metric=smape`)
   instead of a `MethodError` after the first fold's fit, or in `tune` an "all
-  candidates failed" error.
+  candidates failed" error. `metrics` still accepts any iterable of metric
+  functions: a tuple, vector, `NamedTuple`, `Set` or generator.
 - `tune` checks the `grid` values for `:strategy` and `:features` before any
   fit. A value that is not a strategy (`strategy=[:recursive]`) or not a
   `FeatureSet` (`features=[Lag(1)]`) throws an `ArgumentError` naming the
