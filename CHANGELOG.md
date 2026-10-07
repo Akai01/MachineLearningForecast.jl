@@ -100,8 +100,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Thursdays). Each series now takes exogenous values from its own rows and is
   forecast only over the steps it has data for, so a fold scores the same
   `(id, time)` rows as it would without the exogenous feature.
-- `Fourier` rejects a non-finite period: `Fourier(Inf, 2)` was accepted and
-  produced constant columns.
 - A time column typed `Union{Missing,Date}` or `Any` (for example after
   `allowmissing`) whose values are all `Date`s now works with `Exogenous`
   features. `fit` accepted it, but `backtest` and `tune` rejected the

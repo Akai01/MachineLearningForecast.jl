@@ -271,8 +271,8 @@ struct Fourier <: TimeFeature
     period::Float64
     order::Int
     function Fourier(period::Real, order::Integer)
-        isfinite(period) && period > 0 || throw(ArgumentError(
-            "Fourier period must be finite and > 0 (in freq steps), got $period. " *
+        period > 0 || throw(ArgumentError(
+            "Fourier period must be > 0 (in freq steps), got $period. " *
             "Use e.g. Fourier(7, 2) for weekly seasonality on daily data."))
         order ≥ 1 || throw(ArgumentError(
             "Fourier order must be ≥ 1, got $order. Use e.g. Fourier($period, 2) for " *

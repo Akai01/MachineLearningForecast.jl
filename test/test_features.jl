@@ -29,8 +29,7 @@
         @test_throws "Diff lag must be ≥ 1, got 0, which would use the current or a " *
                      "future target (leakage). Use lag=1, the default." Diff(1; lag=0)
         @test_throws ArgumentError Fourier(0, 3)
-        @test_throws "Fourier period must be finite and > 0 (in freq steps), got 0." (
-            Fourier(0, 3))
+        @test_throws "Fourier period must be > 0 (in freq steps), got 0." Fourier(0, 3)
         @test_throws ArgumentError Fourier(7, 0)
         @test_throws "Fourier order must be ≥ 1, got 0. Use e.g. Fourier(7, 2) for two " *
                      "harmonics." Fourier(7, 0)
@@ -56,7 +55,7 @@
         end
     end
 
-    @testset "Lag needs a whole number, Fourier a finite period" begin
+    @testset "Lag needs a whole number, Fourier a positive period" begin
         for bad in (1.5, "a", missing, Inf)
             @test_throws ArgumentError Lag(bad)
             @test_throws "lag must be a whole number" Lag(bad)
@@ -64,12 +63,25 @@
         @test_throws "got Lag(1.5). Use e.g. Lag(7)" Lag(1.5)
         @test Lag(7.0) == Lag(7)             # a whole float is still accepted
         @test_throws "lag must be ≥ 1" Lag(0)
-        for bad in (Inf, -Inf, NaN)
+        for bad in (-Inf, NaN)
             @test_throws ArgumentError Fourier(bad, 2)
-            @test_throws "Fourier period must be finite and > 0" Fourier(bad, 2)
+            @test_throws "Fourier period must be > 0" Fourier(bad, 2)
         end
-        @test_throws "Fourier(7, 2)" Fourier(Inf, 2)
+        @test_throws "Fourier(7, 2)" Fourier(-Inf, 2)
         @test Fourier(365.25, 3).period == 365.25
+        # An infinite period gives sin 0 and cos 1, as in 0.1.0.
+        @test Fourier(Inf, 2).period == Inf
+        d30 = (ds=collect(Date(2022, 1, 1):Day(1):Date(2022, 1, 30)), y=Float64.(1:30))
+        fs_inf = FeatureSet(Lag(1), Fourier(Inf, 1))
+        echo = Forecaster(TestModels.EchoColumn(:fourier_Inf_cos_1); features=fs_inf,
+                          freq=Day(1))
+        @test forecast(fit(echo, d30), 3).y_hat == ones(3)
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+            f = fit(Forecaster(m; features=fs_inf, freq=Day(1)), d30)
+            @test f.feature_names == [:y_lag_1, :fourier_Inf_sin_1, :fourier_Inf_cos_1]
+            @test all(isfinite, forecast(f, 3).y_hat)
+        end
     end
 
     @testset "equality (features are value objects)" begin
