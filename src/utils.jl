@@ -1,10 +1,3 @@
-# Table normalization, validation helpers, and the future time grid.
-#
-# MachineLearningForecast is Tables.jl-native: any Tables.jl-compatible source is accepted
-# and normalized to a columntable (a NamedTuple of column vectors). All tabular
-# return values are columntables too — convert them to your favorite table type
-# (e.g. a DataFrame) if you prefer.
-
 """
     normalize_table(data) -> NamedTuple
 
@@ -80,14 +73,7 @@ function validate_time_column(t::AbstractVector, time::Symbol, freq, rows=eachin
     firstdup = nothing
     ngap = 0
     firstgap = nothing
-    # Walk the grid ANCHORED at t[1] (`t[1] + g*freq`) rather than stepping from the
-    # previous row: for Month/Year steps the two differ, and only the anchored form
-    # accepts a month-end series (Jan 31, Feb 29, Mar 31, ...). `future_grid` is
-    # anchored the same way, so validation and forecasting agree.
-    #
-    # `g` tracks the grid position of the previous row, so a gap is counted once per
-    # DISCONTINUITY. Counting rows that merely sit off the anchored grid would report
-    # every row after the first gap, turning one missing day into hundreds of "gaps".
+    # Anchor at t[1] so month-end series stay on the grid.
     g = 0
     for i in 2:n
         if t[i] == t[i-1]
@@ -104,6 +90,7 @@ function validate_time_column(t::AbstractVector, time::Symbol, freq, rows=eachin
             "time column :$time has the timestamp $(t[i]) at row $(rows[i]), which " *
             "does not lie on the freq=$freq grid starting at $(t[1]). Resample your " *
             "data onto a regular grid, or pass the freq the data actually uses."))
+        # Count discontinuities, not rows after a gap.
         if g > gprev + 1
             ngap += 1
             firstgap === nothing && (firstgap = t[i-1])

@@ -46,4 +46,4 @@ include("panel.jl")
 include("backtest.jl")
 include("tune.jl")
 
-end # module
+end

@@ -1,5 +1,3 @@
-# FeatureSet: an ordered collection of features, plus training-frame materialization.
-
 """
     FeatureSet(features::AbstractFeature...)
     FeatureSet(features::AbstractVector{<:AbstractFeature})
@@ -31,9 +29,7 @@ struct FeatureSet
     end
 end
 FeatureSet(fs::AbstractFeature...) = FeatureSet(collect(AbstractFeature, fs))
-# Julia arrays are invariant, so `Vector{Lag}` is not a `Vector{AbstractFeature}`.
-# Accept any vector of features so that `FeatureSet([Lag(k) for k in 1:7])` works
-# (useful when building tuning grids programmatically).
+# Arrays are invariant: accept Vector{Lag} and similar.
 FeatureSet(fs::AbstractVector{<:AbstractFeature}) = FeatureSet(collect(AbstractFeature, fs))
 
 Base.iterate(fs::FeatureSet, s...) = iterate(fs.features, s...)
@@ -122,8 +118,7 @@ function build_training_frame(fs::FeatureSet, tbl::NamedTuple, target::Symbol,
         "$(mh + 1) rows or reduce lags/windows."))
     keep = falses(n)
     keep[(mh + 1):n] .= true
-    # Interior missings can only come from missing exogenous values (target
-    # features produce leading missings only, by construction).
+    # Only exogenous columns can hold interior missings.
     for (name, col) in out
         for i in (mh + 1):n
             ismissing(col[i]) && throw(ArgumentError(

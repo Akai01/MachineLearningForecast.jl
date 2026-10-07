@@ -1,5 +1,4 @@
-# Forecast accuracy metrics. All take (y, ŷ) vectors of equal length and
-# return a Float64; lower is better. Inputs are assumed missing-free.
+# Lower is better; inputs are assumed missing-free.
 
 function _validate_metric_args(y, ŷ)
     length(y) == length(ŷ) || throw(ArgumentError(
@@ -134,7 +133,6 @@ MachineLearningForecast.needs_ytrain(::typeof(my_mase)) = true
 needs_ytrain(::Any) = false
 needs_ytrain(::typeof(mase)) = true
 
-# Call a metric under its own convention.
 _apply_metric(metric, y, ŷ, y_train) =
     needs_ytrain(metric) ? metric(y, ŷ; y_train=y_train) : metric(y, ŷ)
 

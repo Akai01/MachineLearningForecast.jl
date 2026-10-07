@@ -1,5 +1,3 @@
-# Forecasting strategies: dispatchable types, never string flags.
-
 """
     ForecastStrategy
 
@@ -33,6 +31,12 @@ or use [`Recursive`](@ref)).
 v1 simplification: at forecast time, the direct models condition their
 target-history features on the training-end history, while exogenous and time
 features vary per step.
+
+Model `i` predicts the target `i` steps ahead. At fit time its target-history
+features (lags, rolling statistics, differences, custom) come from the feature
+row `j`, and its time and exogenous features come from the target row `j+i-1`,
+which is what `forecast` feeds at step `i`. Taking both from row `j` would be a
+train/serve skew that silently degrades every step after the first.
 
 # Example
 ```julia

@@ -1,5 +1,3 @@
-# Expanding-window backtesting (time-series cross-validation).
-
 """
     BacktestResult
 
@@ -76,7 +74,6 @@ function backtest(fc::Forecaster, data; horizon::Integer, initial::Integer,
     return _backtest_spec(fc, tbl, horizon, initial, step, metrics)
 end
 
-# Panel: folds are cut on the global timestamp grid (see panel.jl).
 _backtest_spec(fc::Forecaster{M,S,Symbol}, tbl, horizon, initial, step,
                metrics) where {M,S} =
     _backtest_panel(fc, tbl, horizon, initial, step, metrics)
@@ -128,7 +125,6 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, initial,
             push!(m_value, Float64(_apply_metric(m, ytrue, yhat, y_all[1:o])))
         end
     end
-    # Overall summary: mean of the per-fold values, one row per metric, fold=0.
     for m in metrics
         name = _metric_name(m)
         vals = [m_value[i] for i in eachindex(m_value)
@@ -145,9 +141,7 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, initial,
 end
 
 function Base.show(io::IO, ::MIME"text/plain", r::BacktestResult)
-    # Derive both counts from `folds`, which is populated even when `metrics=()`.
-    # `step` runs 1..horizon per series, so this is right for panels too, where a
-    # fold contributes nseries * horizon rows rather than horizon.
+    # Count from folds: it is filled even when metrics=().
     h = isempty(r.folds.step) ? 0 : maximum(r.folds.step)
     nfolds = length(unique(r.folds.origin))
     println(io, "BacktestResult: $nfolds fold$(nfolds == 1 ? "" : "s"), horizon $h")

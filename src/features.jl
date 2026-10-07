@@ -1,15 +1,3 @@
-# Feature type hierarchy and the per-feature dispatch contract:
-#
-#   outputnames(f)   -> Vector{Symbol}: names of the columns this feature produces
-#   minhistory(f)    -> Int: minimum history rows needed before the feature is defined
-#   materialize!(out, f, y, t, data) -> pushes outputnames(f) columns onto `out`
-#                       (vectorized, for training; `missing` where undefined)
-#   featurevalues(f, y_hist, t_next, exog_row) -> Tuple of values for one future row
-#                       (for recursive/direct forecasting)
-#
-# Leakage rule: every TargetFeature uses only information strictly before the
-# current row's target. Rolling/diff features therefore require `lag ≥ 1`.
-
 "Ordered accumulator of materialized feature columns (name => column pairs)."
 const ColumnAccumulator = Vector{Pair{Symbol,Vector{Union{Missing,Float64}}}}
 
@@ -24,6 +12,19 @@ Root of the feature hierarchy. Concrete features are one of:
   for future rows), e.g. [`Calendar`](@ref), [`Fourier`](@ref).
 - [`ExogenousFeature`](@ref): passed through from user data (must be provided
   for the future via `new_data`), i.e. [`Exogenous`](@ref).
+
+Every concrete feature implements four methods:
+
+- `outputnames(f)`: the names of the columns it produces, a `Vector{Symbol}`.
+- `minhistory(f)`: the number of history rows it needs before it is defined.
+- `materialize!(out, f, y, t, data)`: pushes its `outputnames(f)` columns for
+  every training row onto `out`, with `missing` where it is undefined.
+- `featurevalues(f, y_hist, t_next, exog_row)`: a tuple of its values for one
+  future row, used by recursive and direct forecasting.
+
+The batch and single-row methods compute the same function. Every
+`TargetFeature` uses only information strictly before the current row's
+target, so rolling and difference features require `lag ≥ 1`.
 """
 abstract type AbstractFeature end
 
@@ -35,10 +36,6 @@ abstract type TimeFeature <: AbstractFeature end
 
 "Features passed through from user data (must be provided for the future)."
 abstract type ExogenousFeature <: AbstractFeature end
-
-# ---------------------------------------------------------------------------
-# Lag
-# ---------------------------------------------------------------------------
 
 """
     Lag(k)
@@ -78,10 +75,6 @@ end
 
 featurevalues(f::Lag, y_hist::AbstractVector, t_next, exog_row) =
     (y_hist[end - f.k + 1],)
-
-# ---------------------------------------------------------------------------
-# Rolling statistics: RollingMean, RollingStd, RollingMin, RollingMax
-# ---------------------------------------------------------------------------
 
 for (T, stem, fun, minw, example) in (
         (:RollingMean, "rollmean", :(Statistics.mean), 1,
@@ -151,10 +144,6 @@ function featurevalues(f::RollingFeature, y_hist::AbstractVector, t_next, exog_r
     return (_roll_fun(f)(view(y_hist, (hi - f.window + 1):hi)),)
 end
 
-# ---------------------------------------------------------------------------
-# Diff
-# ---------------------------------------------------------------------------
-
 """
     Diff(k; lag=1)
 
@@ -199,10 +188,6 @@ function featurevalues(f::Diff, y_hist::AbstractVector, t_next, exog_row)
     i = length(y_hist) + 1
     return (y_hist[i - f.lag] - y_hist[i - f.lag - f.k],)
 end
-
-# ---------------------------------------------------------------------------
-# Calendar
-# ---------------------------------------------------------------------------
 
 const CALENDAR_PARTS = Dict{Symbol,Function}(
     :year       => Dates.year,
@@ -264,10 +249,6 @@ end
 featurevalues(f::Calendar, y_hist::AbstractVector, t_next, exog_row) =
     Tuple(Float64(CALENDAR_PARTS[p](t_next))::Float64 for p in f.parts)
 
-# ---------------------------------------------------------------------------
-# Fourier
-# ---------------------------------------------------------------------------
-
 """
     Fourier(period, order)
 
@@ -306,8 +287,7 @@ function outputnames(f::Fourier)
                 [Symbol("fourier_", p, "_cos_", k) for k in 1:f.order])
 end
 
-# Fourier's featurevalues receives the integer step index as `t_next`
-# (see `uses_step_index`), not the timestamp.
+# Fourier gets the step index, not the time, as t_next.
 _uses_step_index(::AbstractFeature) = false
 _uses_step_index(::Fourier) = true
 
@@ -330,10 +310,6 @@ function featurevalues(f::Fourier, y_hist::AbstractVector, n::Integer, exog_row)
     coss = ntuple(k -> cos(2π * k * n / f.period), f.order)
     return (sins..., coss...)
 end
-
-# ---------------------------------------------------------------------------
-# Exogenous
-# ---------------------------------------------------------------------------
 
 """
     Exogenous(cols::Symbol...)
@@ -399,10 +375,6 @@ function featurevalues(f::Exogenous, y_hist::AbstractVector, t_next, exog_row)
         _to_float(exog_row[c], c)
     end for c in f.cols)
 end
-
-# ---------------------------------------------------------------------------
-# CustomFeature
-# ---------------------------------------------------------------------------
 
 """
     CustomFeature(name, f, minhistory)
@@ -471,10 +443,7 @@ end
 
 _nvalues(h) = string(length(h), " history value", length(h) == 1 ? "" : "s")
 
-# ---------------------------------------------------------------------------
-# Equality and hashing: features are value objects — two features with the same
-# type and parameters are equal (useful in tests, tuning tables, and Dicts).
-# ---------------------------------------------------------------------------
+# Features are value objects: equal params, equal hash.
 
 function Base.:(==)(a::AbstractFeature, b::AbstractFeature)
     typeof(a) === typeof(b) || return false

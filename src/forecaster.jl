@@ -1,6 +1,3 @@
-# Forecaster spec (immutable), FittedForecaster (fitted state), fit, and the
-# strategy-agnostic forecast entry point.
-
 """
 Column names used by `forecast`/`backtest` result tables; the time column may
 not shadow them.
@@ -80,9 +77,7 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
         target == time && throw(ArgumentError(
             "target and time must be different columns, both were :$target. Pass the " *
             "names of your target and time columns, e.g. target=:y, time=:ds."))
-        # A feature that emits the target column would feed the target straight
-        # into the design matrix — a silent, total leak that backtests as a
-        # perfect score. Reject it at construction.
+        # A target-named feature is a silent, total leak.
         outs = outputnames(features)
         target in outs && throw(ArgumentError(
             "the feature set produces a column named :$target, which is the target " *
@@ -93,7 +88,7 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
             "the feature set produces a column named :$time, which is the time " *
             "column. Timestamps cannot be used as a numeric feature directly — use " *
             "Calendar(...), Fourier(...), or a CustomFeature for a trend index."))
-        # `backtest`/`forecast` return tables with these fixed column names.
+        # forecast and backtest results use these column names.
         if time in RESERVED_OUTPUT_NAMES
             throw(ArgumentError(
                 "time=:$time collides with a column name reserved by forecast()/" *
@@ -174,9 +169,7 @@ struct FittedForecaster{F<:Forecaster}
     feature_names::Vector{Symbol}
 end
 
-# Single-series state stays reachable as `fitted.y_history` etc., as documented,
-# but those names are meaningless for a panel — say so rather than silently
-# returning the first series.
+# Panels have no single history; refuse, don't guess.
 const _SERIES_PROPS = (:y_history, :t_last, :t_start, :n_train)
 
 function Base.getproperty(f::FittedForecaster, name::Symbol)
@@ -231,17 +224,14 @@ function fit(fc::Forecaster, data)
     return _fit_spec(fc, tbl)
 end
 
-# Single series: validate the one time column and fit directly.
 function _fit_spec(fc::Forecaster{M,S,Nothing}, tbl::NamedTuple) where {M,S}
     t = require_column(tbl, fc.time, "time")
     validate_time_column(t, fc.time, fc.freq)
     return _fit(fc, fc.strategy, tbl)
 end
 
-# Panel: group by id, then fit ONE global model on the pooled rows (see panel.jl).
 _fit_spec(fc::Forecaster{M,S,Symbol}, tbl::NamedTuple) where {M,S} = _fit_panel(fc, tbl)
 
-# Shared by both strategies: materialize the design matrix and package the state.
 _training_frame(fc::Forecaster, tbl::NamedTuple) =
     build_training_frame(fc.features, tbl, fc.target, fc.time)
 
@@ -302,7 +292,6 @@ function _forecast_spec(f::FittedForecaster, spec::Forecaster{M,S,Nothing},
     return _forecast(f, spec.strategy, h, grid, exog_rows)
 end
 
-# Align new_data to the forecast grid: one NamedTuple of exogenous values per step.
 function _exogenous_rows(spec::Forecaster, exogcols::Vector{Symbol}, grid, new_data)
     nd = normalize_table(new_data)
     needed = [spec.time; exogcols]
@@ -346,7 +335,7 @@ function _new_time(v, T::Type, time::Symbol, i::Integer)
     ismissing(v) && throw(ArgumentError(
         "new_data's time column :$time has a missing value at row $i. Every " *
         "new_data row needs a timestamp; drop or fill that row."))
-    # A Date vs DateTime mismatch would make every lookup miss.
+    # Name the eltype mismatch, not an obscure Dict key error.
     v isa T || throw(ArgumentError(
         "new_data's time column :$time has element type $(typeof(v)) at row $i, " *
         "but the training time column is $T. Convert it (e.g. `Date.(col)` / " *
@@ -354,8 +343,6 @@ function _new_time(v, T::Type, time::Symbol, i::Integer)
     return v
 end
 
-# Assemble one future feature row in-place into preallocated length-1 column
-# vectors (reused across steps), in the stable feature_names order.
 function _fill_row!(colvecs::Vector{Vector{Float64}}, features::FeatureSet,
                     y_hist::AbstractVector{Float64}, t_next, n_next::Integer,
                     exog_row)
@@ -383,7 +370,6 @@ function _prediction_row(f::FittedForecaster)
     return colvecs, row
 end
 
-# The (time, y_hat) columntable returned by forecast.
 _forecast_table(spec::Forecaster, grid, preds::Vector{Float64}) =
     NamedTuple{(spec.time, :y_hat)}((grid, preds))
 

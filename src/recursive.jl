@@ -1,6 +1,3 @@
-# Recursive strategy: one machine trained on the one-step-ahead frame,
-# iterated over the horizon with predictions fed back as pseudo-history.
-
 function _fit(fc::Forecaster, ::Recursive, tbl::NamedTuple)
     X, y, _ = _training_frame(fc, tbl)
     mach = MLJBase.machine(deepcopy(fc.model), X, y)
@@ -16,8 +13,7 @@ function _forecast(f::FittedForecaster, ::Recursive, h::Integer, grid, exog_rows
     preds = Vector{Float64}(undef, h)
     mach = only(f.machines)
     for s in 1:h
-        # 0-based Fourier step index continuing the training index seamlessly:
-        # training rows occupy 0 .. n_train-1, so step s is n_train - 1 + s.
+        # Fourier index continues the 0-based training index.
         n_next = f.n_train - 1 + s
         exog_row = exog_rows === nothing ? nothing : exog_rows[s]
         _fill_row!(colvecs, spec.features, y_hist, grid[s], n_next, exog_row)

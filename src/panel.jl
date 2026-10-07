@@ -1,14 +1,3 @@
-# Panel (multi-series) forecasting.
-#
-# A panel forecaster fits ONE global model on the rows of every series pooled
-# together, which is the point of panel forecasting: short or noisy series
-# borrow strength from the rest. Features are always materialised WITHIN a
-# series — a lag never reaches across a series boundary — and only the finished
-# design-matrix rows are pooled.
-#
-# Series may be ragged: they need not share a start date, an end date or a
-# length. Each series forecasts forward from its own last timestamp.
-
 "Group row indices by the id column, preserving first-appearance order."
 function _group_rows(ids::AbstractVector, id::Symbol)
     order = Any[]
@@ -70,8 +59,7 @@ function _in_series(f, fc::Forecaster, key)
     end
 end
 
-# Build each series' one-step design matrix, reporting which series are too
-# short rather than failing on the first one.
+# Skip short series so the rest can still train.
 function _panel_frames(fc::Forecaster, groups)
     mh = minhistory(fc.features)
     frames = Tuple{Any,NamedTuple,Vector{Float64},NamedTuple}[]
@@ -122,7 +110,6 @@ function _fit_panel(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
     return FittedForecaster(fc, machines, states, outputnames(fc.features))
 end
 
-# Recursive: pool every series' one-step frame and fit a single global model.
 function _panel_machines(fc::Forecaster, ::Recursive, frames)
     X = _vcat_frames([f[2] for f in frames])
     y = reduce(vcat, (f[3] for f in frames))
@@ -131,9 +118,7 @@ function _panel_machines(fc::Forecaster, ::Recursive, frames)
     return MLJBase.Machine[mach]
 end
 
-# Direct: the per-step target shift happens WITHIN each series, then the shifted
-# rows are pooled. Anchoring matches the single-series path — target-history
-# columns stay on the feature row, time/exogenous columns move to the target row.
+# Shift within each series, as in single-series Direct.
 function _panel_machines(fc::Forecaster, s::Direct, frames)
     istarget = targetcolumnmask(fc.features)
     machines = Vector{MLJBase.Machine}(undef, s.max_horizon)
@@ -160,12 +145,7 @@ function _panel_machines(fc::Forecaster, s::Direct, frames)
     return machines
 end
 
-# ---------------------------------------------------------------------------
-# Forecasting
-# ---------------------------------------------------------------------------
-
-# One future row per series, assembled into a single design matrix so the model
-# is called once per horizon step rather than once per series per step.
+# One predict call per step, not per series per step.
 function _panel_batch(f::FittedForecaster, states, histories, step::Integer,
                       grids, exog_rows, active)
     spec = f.spec
@@ -227,8 +207,6 @@ function _forecast_panel(f::FittedForecaster, hs::Vector{Int}, new_data)
         (identity.(idcol), tcol, ycol))
 end
 
-# Recursive: predict every series for step s in one call, then feed each
-# prediction back into that series' own history.
 function _panel_predict!(preds, f, ::Recursive, states, histories, grids, exog_rows, hs)
     mach = only(f.machines)
     for s in 1:maximum(hs)
@@ -244,8 +222,6 @@ function _panel_predict!(preds, f, ::Recursive, states, histories, grids, exog_r
     return preds
 end
 
-# Direct: step s uses machine s, with every series' target features conditioned
-# on its own training-end history.
 function _panel_predict!(preds, f, strat::Direct, states, histories, grids, exog_rows, hs)
     h = maximum(hs)
     h ≤ strat.max_horizon || throw(ArgumentError(
@@ -263,8 +239,6 @@ function _panel_predict!(preds, f, strat::Direct, states, histories, grids, exog
     return preds
 end
 
-# Align new_data to each series' forecast grid: exog_rows[k][s] is the NamedTuple
-# of exogenous values for series k at step s. The join is on (id, timestamp).
 function _panel_exogenous_rows(spec::Forecaster, exogcols, states, grids, new_data)
     nd = normalize_table(new_data)
     needed = [spec.id; spec.time; exogcols]
@@ -309,14 +283,6 @@ function _panel_exogenous_rows(spec::Forecaster, exogcols, states, grids, new_da
     return out
 end
 
-# ---------------------------------------------------------------------------
-# Backtesting a panel
-# ---------------------------------------------------------------------------
-
-# Folds are cut on the GLOBAL timestamp grid, not on row counts: a panel's rows
-# are spread across series, so "the first 300 rows" is not a point in time.
-# Each fold trains on every row at or before the origin timestamp and scores by
-# joining forecasts to actuals on (id, time), which handles ragged series.
 function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step, metrics)
     for (key, sub, rows) in panel_groups(fc, tbl)        # validates each series
         _in_series(() -> target_vector(sub, fc.target, rows), fc, key)
@@ -339,7 +305,6 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
         "Provide more history or reduce initial/horizon."))
     exogcols = exogenous_columns(fc.features)
 
-    # actuals indexed by (id, timestamp) so ragged series line up
     actual = Dict{Tuple{Any,Any},Float64}()
     for i in eachindex(y_all)
         actual[(ids[i], t_all[i])] = y_all[i]
@@ -375,7 +340,6 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
             _forecast_panel(fitted, hs, nd)
         end
 
-        # keep only forecasts that have a matching actual
         fid, ft, fy = fcast[fc.id], fcast[fc.time], fcast.y_hat
         ytrue = Float64[]
         yhat = Float64[]

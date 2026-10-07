@@ -1,17 +1,14 @@
-# Pipeline tuning on backtest score, with an ask/tell strategy interface.
-#
-# The loop in `tune` is a pure ask/tell driver: it repeatedly calls
-# `ask(strategy)` for the next candidate, evaluates it with `backtest`, and
-# reports the score back via `tell!(strategy, candidate, score)`. Batch
-# strategies (GridSearch, RandomSearch) are adapted onto this loop through an
-# internal queue; sequential strategies (e.g. a Bayesian optimizer defined
-# outside this package) drive it directly.
-
 """
     TuningStrategy
 
 Abstract supertype of tuning search strategies for [`tune`](@ref). Shipped
 strategies: [`GridSearch`](@ref) and [`RandomSearch`](@ref).
+
+`tune` is an ask/tell loop: it asks the strategy for the next candidate,
+scores it with [`backtest`](@ref) and tells the strategy the score. The batch
+strategies serve a precomputed candidate list through this loop; a sequential
+strategy, such as a Bayesian optimizer defined outside this package, drives it
+directly.
 
 # Extending with your own (sequential) strategy
 
@@ -106,10 +103,6 @@ your own strategy subtypes; see [`TuningStrategy`](@ref) for the full contract.
 """
 function tell! end
 
-# ---------------------------------------------------------------------------
-# Batch strategies: candidate generation + internal queue adapter
-# ---------------------------------------------------------------------------
-
 function _validate_grid(grid)
     grid isa NamedTuple || throw(ArgumentError(
         "grid must be a NamedTuple of Forecaster field names to candidate value " *
@@ -151,7 +144,6 @@ function candidates(t::RandomSearch, grid::NamedTuple)
     return [NamedTuple{ks}(map(v -> rand(t.rng, v), values(grid))) for _ in 1:t.n]
 end
 
-# Adapter that serves a precomputed candidate list through the ask/tell loop.
 mutable struct CandidateQueue
     candidates::Vector{NamedTuple}
     i::Int
@@ -162,8 +154,6 @@ ask(q::CandidateQueue) = q.i > length(q.candidates) ? nothing :
                          (c = q.candidates[q.i]; q.i += 1; c)
 tell!(::CandidateQueue, candidate, score) = nothing
 
-# How `tune` turns a strategy into an ask/tell sequence. Sequential strategies
-# are their own sequence (default); batch strategies materialize a queue.
 _sequence(t::TuningStrategy, grid) = t
 function _sequence(t::Union{GridSearch,RandomSearch}, grid)
     grid === nothing && throw(ArgumentError(
@@ -173,12 +163,7 @@ function _sequence(t::Union{GridSearch,RandomSearch}, grid)
     return CandidateQueue(candidates(t, grid))
 end
 
-# ---------------------------------------------------------------------------
-# Spec reconstruction
-# ---------------------------------------------------------------------------
-
-# Rebuild the immutable Forecaster with some fields overridden. Hand-written
-# constructor call (only 6 fields) — no Setfield dependency.
+# Explicit constructor call avoids a Setfield dependency.
 function reconstruct(fc::Forecaster; kwargs...)
     bad = setdiff(keys(kwargs), fieldnames(Forecaster))
     isempty(bad) || throw(ArgumentError(
@@ -193,10 +178,6 @@ function reconstruct(fc::Forecaster; kwargs...)
                       get(kwargs, :time, fc.time),
                       get(kwargs, :id, fc.id))
 end
-
-# ---------------------------------------------------------------------------
-# TuneResult
-# ---------------------------------------------------------------------------
 
 """
     TuneResult
@@ -220,9 +201,7 @@ end
 
 _ncandidates(r::TuneResult) = length(r.table.mean_score)
 
-# Show a model candidate by the hyperparameters that actually DIFFER from a
-# default-constructed prototype, so competing candidates in the top-5 table are
-# distinguishable (showing the first two numeric fields made them identical).
+# Show only changed hyperparameters, so rows differ.
 function _short(x)
     x isa MLJModelInterface.Model || return string(x)
     T = typeof(x)
@@ -255,10 +234,6 @@ end
 
 Base.show(io::IO, r::TuneResult) =
     print(io, "TuneResult(", _ncandidates(r), " candidates)")
-
-# ---------------------------------------------------------------------------
-# tune
-# ---------------------------------------------------------------------------
 
 """
     tune(fc::Forecaster, data; grid=nothing, tuner=GridSearch(), max_evals=nothing,
@@ -302,8 +277,7 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
               metric=smape)
     max_evals === nothing || max_evals ≥ 1 || throw(ArgumentError(
         "max_evals must be ≥ 1 (or nothing for no budget), got $max_evals."))
-    # Validate here too, so a bad value is diagnosed before any candidate is built
-    # rather than surfacing as a bare `step cannot be zero` from the range below.
+    # Check before _warn_fit_count's range sees step=0.
     horizon ≥ 1 || throw(ArgumentError(
         "tune horizon must be ≥ 1, got $horizon. Pass the number of steps each " *
         "fold forecasts, e.g. horizon=28."))
@@ -318,7 +292,7 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
         "metric=smape; tune ranks candidates by a single metric."))
     tbl = normalize_table(data)
     seq = _sequence(tuner, grid)
-    # Only warn about fits that will actually run: max_evals truncates the queue.
+    # max_evals truncates the queue: warn only for real fits.
     if seq isa CandidateQueue
         planned = max_evals === nothing ? seq.candidates :
                   seq.candidates[1:min(length(seq.candidates), max_evals)]
@@ -353,14 +327,13 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
             "all $(length(cands)) tuning candidates failed to evaluate. " *
             "Errors:\n  - $msgs"))
     end
-    best_idx = ok[argmin([means[i] for i in ok])]   # ties: first-seen wins (argmin)
+    best_idx = ok[argmin([means[i] for i in ok])]
     best = reconstruct(fc; cands[best_idx]...)
     best_fitted = fit(best, tbl)
     return TuneResult(table, best, best_fitted)
 end
 
-# TODO: Threads.@threads over candidates (backtest folds inside a candidate stay
-# serial — MLJ machines aren't guaranteed thread-safe across all model packages).
+# TODO: thread candidates, keeping each one's folds serial.
 function _evaluate_candidate(fc, cand, tbl, horizon, initial, step, metric)
     try
         cfc = reconstruct(fc; cand...)
@@ -391,7 +364,6 @@ function _tune_table(cands, means, stds, errors)
     return NamedTuple{names}(Tuple(cols))
 end
 
-# Warn before large batch searches: candidates × folds × machines-per-fit.
 function _warn_fit_count(fc, cands, tbl, horizon, initial, step)
     # Panel folds are cut on distinct timestamps, not on rows.
     span = ispanel(fc) ? length(unique(require_column(tbl, fc.time, "time"))) :
@@ -407,8 +379,3 @@ function _warn_fit_count(fc, cands, tbl, horizon, initial, step)
         "reduce the grid, increase step, or lower max_evals to shrink it.")
     return nothing
 end
-
-# TODO: continuous range types for sequential strategies (needed for a real
-# TPE/Bayesian optimizer) would slot in here: a `ParamRange` declaration
-# accepted in `grid` values and interpreted by the strategy's `candidates`/`ask`.
-# v1 supports discrete candidate lists only.
