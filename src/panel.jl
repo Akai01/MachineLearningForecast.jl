@@ -22,10 +22,10 @@ end
 
 Split a long-format panel table into `(id, subtable, rows)` tuples in
 first-appearance order, validating each series' time column independently.
-Rows of a series need not be contiguous in the input, but within a series the
-timestamps must be sorted, duplicate-free and gap-free with respect to
-`fc.freq`. `rows[i]` is the user's row of the subtable's row `i`, where `tbl`'s
-row `j` is the user's row `base[j]`.
+Rows of a series need not be contiguous or sorted in the input: each series is
+sorted by time, and its timestamps must be duplicate-free and gap-free with
+respect to `fc.freq`. `rows[i]` is the user's row of the subtable's row `i`,
+where `tbl`'s row `j` is the user's row `base[j]`.
 """
 function panel_groups(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
     ids = require_column(tbl, fc.id, "id")

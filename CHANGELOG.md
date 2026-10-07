@@ -114,6 +114,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   result, and the id column and per-series timestamps `new_data` needs. The
   `Forecaster` signature shows `id=nothing`, and the `TuningStrategy` and `ask`
   docstrings list `:id` among the candidate keys.
+- The `fit` docstring said the time column must be sorted. That holds for a
+  single series; a panel's rows may come in any order, since `fit` sorts each
+  series by time.
 
 ## [0.1.0]
 

@@ -221,8 +221,11 @@ nseries(f::FittedForecaster) = length(getfield(f, :series))
     fit(fc::Forecaster, data) -> FittedForecaster
 
 Fit the forecaster on `data`, any Tables.jl-compatible table containing the
-spec's time and target columns (plus any exogenous columns). The time column
-must be sorted, duplicate-free, and gap-free with respect to `fc.freq`.
+spec's time and target columns (plus any exogenous columns, and the id column
+for a panel). For a single series the time column must be sorted,
+duplicate-free, and gap-free with respect to `fc.freq`. For a panel, rows may
+come in any order: `fit` sorts each series by time, and each series must be
+duplicate-free and gap-free.
 
 `fit` is a function owned by MachineLearningForecast (not an extension of `MLJBase.fit` or
 `StatsAPI.fit`); qualify as `MachineLearningForecast.fit` when another `fit` is in scope.
