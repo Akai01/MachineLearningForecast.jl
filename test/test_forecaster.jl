@@ -100,6 +100,9 @@
         bad_cols = (ds=t[end] .+ Day.(1:3), other=zeros(3))
         err = try forecast(fitted, 3; new_data=bad_cols) catch e; e end
         @test err isa ArgumentError && occursin(":promo", err.msg)
+        @test_throws "new_data is missing column :promo; it must contain the time " *
+                     "column :ds and the exogenous column :promo." forecast(
+            fitted, 3; new_data=bad_cols)
 
         short = (ds=t[end] .+ Day.(1:2), promo=zeros(2))
         err = try forecast(fitted, 3; new_data=short) catch e; e end

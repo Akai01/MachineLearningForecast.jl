@@ -220,6 +220,9 @@
         noid = (ds=nd.ds, promo=nd.promo)
         err2 = try forecast(f, 2; new_data=noid) catch e; e end
         @test err2 isa ArgumentError && occursin("unique_id", err2.msg)
+        @test_throws "new_data is missing column :unique_id; a panel forecast needs " *
+                     "the id column :unique_id, the time column :ds and the exogenous " *
+                     "column :promo." forecast(f, 2; new_data=noid)
         for m in (EvoTreeRegressor(nrounds=5),
                   DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             @test_throws "id column :unique_id not found in the data. Available " *
@@ -493,13 +496,16 @@
     end
 
     @testset "show displays panel specs and fitted panels" begin
-        for s in (Recursive(), Direct(2))
-            fc = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)); strat=s)
+        for m in (TestModels.LinAR(1.0, 0.0), EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1))),
+            s in (Recursive(), Direct(2))
+            fc = mk(m, FeatureSet(Lag(1)); strat=s)
             @test occursin("id=:unique_id", sprint(show, fc))
             f = fit(fc, panel)
             for txt in (sprint(show, f), sprint(show, MIME"text/plain"(), f))
                 @test occursin("trained on 3 series", txt)
                 @test occursin(string(s), txt)
+                @test occursin(string(nameof(typeof(m))), txt)
             end
         end
         single = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
