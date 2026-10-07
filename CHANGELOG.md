@@ -72,6 +72,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `got DataType`. A panel `backtest` fold with nothing to score says that no
   series trained up to its origin has data after it, instead of suggesting a
   `freq` grid mismatch.
+- When every `tune` candidate fails, the `ErrorException` says to fix the
+  listed errors, and to check `horizon`, `initial` and the grid if every
+  candidate fails the same way.
 - Forecasting allocates less per step: each feature fills the forecast row
   through a function barrier, and `Calendar` returns a concretely typed tuple.
   `Exogenous` converts its columns in a type-stable loop, so building the

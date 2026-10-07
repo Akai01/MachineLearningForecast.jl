@@ -365,7 +365,9 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
     if isempty(ok)
         msgs = join(unique(skipmissing(errors)), "\n  - ")
         throw(ErrorException(
-            "all $(length(cands)) tuning candidates failed to evaluate. " *
+            "all $(length(cands)) tuning candidates failed to evaluate. Fix the " *
+            "errors listed below and run tune again; if every candidate fails the " *
+            "same way, check horizon, initial and the grid against the data. " *
             "Errors:\n  - $msgs"))
     end
     best_idx = ok[argmin([means[i] for i in ok])]

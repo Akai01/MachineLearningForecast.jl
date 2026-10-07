@@ -75,6 +75,10 @@ end
         bad = (features=[FeatureSet(Lag(200)), FeatureSet(Lag(300))],)
         err = try tune(base, df; grid=bad, horizon=14, initial=90) catch e; e end
         @test err isa ErrorException && occursin("all 2 tuning candidates failed", err.msg)
+        @test_throws "all 2 tuning candidates failed to evaluate. Fix the errors listed " *
+                     "below and run tune again; if every candidate fails the same way, " *
+                     "check horizon, initial and the grid against the data. Errors:\n" *
+                     "  - ArgumentError: " tune(base, df; grid=bad, horizon=14, initial=90)
     end
 
     @testset "a non-finite score fails the candidate, never wins" begin
