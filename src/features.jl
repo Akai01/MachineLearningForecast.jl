@@ -416,16 +416,16 @@ function materialize!(out::ColumnAccumulator, f::CustomFeature, y::AbstractVecto
     n = length(y)
     col = Vector{Union{Missing,Float64}}(missing, n)
     for i in (f.minhistory + 1):n
-        col[i] = _customvalue(f, view(y, 1:(i - 1)), t[i])
+        col[i] = _custom_value(f, view(y, 1:(i - 1)), t[i])
     end
     push!(out, f.name => col)
     return out
 end
 
 featurevalues(f::CustomFeature, y_hist::AbstractVector, t_next, exog_row) =
-    (_customvalue(f, y_hist, t_next),)
+    (_custom_value(f, y_hist, t_next),)
 
-function _customvalue(f::CustomFeature, h::AbstractVector, t)
+function _custom_value(f::CustomFeature, h::AbstractVector, t)
     v = try
         f.f(h)
     catch err
