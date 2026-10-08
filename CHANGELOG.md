@@ -106,6 +106,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Fitting a panel took time and memory quadratic in the number of series,
+  because the series' training rows were stacked one pair at a time. They are
+  now stacked in one pass, with identical results. On the 1399 M3 monthly
+  series, the package's own share of a `Recursive` fit fell from about 1.2 s
+  and 11 GB allocated to 0.06 s and 107 MB, and of a `Direct(18)` fit from
+  16 s and 169 GB to 0.3 s and 711 MB; `backtest` and `tune` on panels gain
+  the same way.
 - `Recursive` fits, single-series and panel, now copy the model prototype
   before training, as `Direct` already did. A model holding an RNG object (e.g.
   `DecisionTreeRegressor(rng=StableRNG(1))`) no longer has its RNG advanced by

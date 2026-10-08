@@ -513,6 +513,25 @@
         @test !occursin("id=", sprint(show, single))
     end
 
+    @testset "stacking the series' rows takes memory linear in the rows" begin
+        Xs = NamedTuple[(a=rand(StableRNG(k), 10), b=rand(StableRNG(k + 1), 10))
+                        for k in 1:2000]
+        stack = MachineLearningForecast._vcat_frames
+        @test stack(Xs) == (a=reduce(vcat, [X.a for X in Xs]),
+                            b=reduce(vcat, [X.b for X in Xs]))
+        stack(Xs)
+        # The output is 2 columns of 20000 rows; 4x is headroom.
+        @test (@allocated stack(Xs)) < 4 * 2 * 20_000 * sizeof(Float64)
+        big = makepanel(lens=fill(30, 2000), levels=fill(1.0, 2000),
+                        starts=fill(Date(2022, 1, 1), 2000))
+        fc = mk(TestModels.MeanModel(), FeatureSet(Lag(1)))
+        f = fit(fc, big)
+        @test nseries(f) == 2000
+        @test only(f.machines).fitresult == 1.0 + sum(2:30) / 29
+        # A quadratic stack of 2000 series allocates about 1 GB.
+        @test (@allocated fit(fc, big)) < 100 * 2^20
+    end
+
     @testset "single-series behaviour is unchanged" begin
         df = (ds=collect(Date(2022, 1, 1):Day(1):Date(2022, 2, 19)), y=Float64.(1:50))
         fc = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),

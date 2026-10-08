@@ -96,7 +96,8 @@ end
 function _vcat_frames(Xs::Vector{<:NamedTuple})
     length(Xs) == 1 && return only(Xs)
     names = keys(first(Xs))
-    return NamedTuple{names}(ntuple(j -> reduce(vcat, (X[names[j]] for X in Xs)),
+    # A vector, not a generator, hits vcat's linear fast path.
+    return NamedTuple{names}(ntuple(j -> reduce(vcat, [X[names[j]] for X in Xs]),
                                     length(names)))
 end
 
@@ -112,7 +113,7 @@ end
 
 function _panel_machines(fc::Forecaster, ::Recursive, frames)
     X = _vcat_frames([f[2] for f in frames])
-    y = reduce(vcat, (f[3] for f in frames))
+    y = reduce(vcat, [f[3] for f in frames])
     mach = MLJBase.machine(deepcopy(fc.model), X, y)
     MLJBase.fit!(mach; verbosity=0)
     return MLJBase.Machine[mach]
