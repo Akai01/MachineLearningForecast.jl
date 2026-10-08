@@ -330,6 +330,33 @@
         end
     end
 
+    @testset "scaled metrics use each series' own training values" begin
+        # a climbs 1 a day and b 10, so each naive MAE is its slope.
+        function trends(nb)
+            ids = String[]; ds = Date[]; y = Float64[]
+            for i in 1:50, (id, slope, n) in (("a", 1.0, 50), ("b", 10.0, nb))
+                i ≤ n || continue
+                push!(ids, id); push!(ds, Date(2022, 1, 1) + Day(i - 1))
+                push!(y, (id == "a" ? 0.0 : 1000.0) + slope * i)
+            end
+            return (unique_id=ids, ds=ds, y=y)
+        end
+        fc = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
+        scores(pd) = backtest(fc, pd; horizon=5, initial=40, step=5, metrics=(mae, mase))
+        r = scores(trends(50))
+        folds = r.metrics.fold .> 0
+        # Naive misses step s by s*slope: MAE 3 and 30, MASE 3 each.
+        @test r.metrics.value[folds .& (r.metrics.metric .== :mase)] ≈ [3.0, 3.0]
+        @test r.metrics.value[folds .& (r.metrics.metric .== :mae)] ≈ [16.5, 16.5]
+        pd = trends(50)
+        shuffled = map(c -> c[shuffle(StableRNG(2), 1:length(pd.y))], pd)
+        @test scores(shuffled).metrics.value ≈ r.metrics.value
+        # b ends 2 days into the last fold: weigh series by their points.
+        rr = scores(trends(47))
+        @test rr.metrics.value[(rr.metrics.fold .> 0) .& (rr.metrics.metric .== :mase)] ≈
+              [3.0, (5 * 3.0 + 2 * 1.5) / 7]
+    end
+
     @testset "the step column is each row's position in its series' forecast" begin
         steps = MachineLearningForecast._steps_by_id
         @test steps(["a", "b", "a", "c", "b", "a"]) == [1, 1, 2, 1, 2, 3]

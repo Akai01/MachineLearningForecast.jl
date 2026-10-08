@@ -133,6 +133,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Panel `backtest` scored `mase`, and any metric declaring `needs_ytrain`, with
+  one training vector pooled from every series in table order, so its scale
+  mixed series and changed with row order. Two series climbing 1 and 10 a day
+  under a naive forecast scored 0.014 instead of 3.0. Such metrics are now
+  computed per series, with each series' own training values, and averaged
+  with each series weighted by its scored points; other metrics are unchanged.
 - Fitting a panel took time and memory quadratic in the number of series,
   because the series' training rows were stacked one pair at a time. They are
   now stacked in one pass, with identical results. On the 1399 M3 monthly

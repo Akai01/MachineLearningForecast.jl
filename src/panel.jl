@@ -278,6 +278,33 @@ function _panel_exogenous_rows(spec::Forecaster, exogcols, states, grids, new_da
     return out
 end
 
+"""
+    _panel_metric(m, fc, fitted, ids, y, ŷ) -> Real
+
+Score one panel backtest fold. A metric that needs the training target (see
+[`needs_ytrain`](@ref)) is computed per series, with that series' own training
+values, and averaged with each series weighted by its scored points; any other
+metric pools all scored rows, which weighs them the same way.
+"""
+function _panel_metric(m, fc::Forecaster, fitted::FittedForecaster, ids, y, ŷ)
+    needs_ytrain(m) || return m(y, ŷ)
+    history = Dict(st.id => st.y_history for st in getfield(fitted, :series))
+    rows = Dict{eltype(ids),Vector{Int}}()
+    for (j, id) in enumerate(ids)
+        push!(get!(rows, id, Int[]), j)
+    end
+    total = 0.0
+    # First-appearance order keeps the float sum reproducible.
+    for id in unique(ids)
+        r = rows[id]
+        v = _in_series(fc, id) do
+            m(y[r], ŷ[r]; y_train=history[id])
+        end
+        total += length(r) * v
+    end
+    return total / length(y)
+end
+
 "Each row's 1-based position among the rows of its id so far."
 function _steps_by_id(ids::AbstractVector)
     seen = Dict{eltype(ids),Int}()
@@ -345,11 +372,13 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
         steps = _steps_by_id(fid)
         ytrue = Float64[]
         yhat = Float64[]
+        scored = eltype(fid)[]
         for j in eachindex(fy)
             a = get(actual, (fid[j], ft[j]), nothing)
             a === nothing && continue
             push!(ytrue, a)
             push!(yhat, fy[j])
+            push!(scored, fid[j])
             push!(origin_col, t_origin)
             push!(step_col, steps[j])
             push!(id_col, fid[j])
@@ -362,12 +391,11 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
             "with an actual: no series trained on data up to the origin has data " *
             "after it. Choose initial and step so each origin falls inside the data " *
             "of a series."))
-        ytrain = y_all[train_rows]
         for m in metrics
             push!(m_fold, k)
             push!(m_origin, t_origin)
             push!(m_metric, _metric_name(m))
-            push!(m_value, Float64(_apply_metric(m, ytrue, yhat, ytrain)))
+            push!(m_value, Float64(_panel_metric(m, fc, fitted, scored, ytrue, yhat)))
         end
     end
     for m in metrics

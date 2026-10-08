@@ -46,7 +46,10 @@ they have actuals. The `folds` table then carries the id column too.
 [`rmse`](@ref), [`smape`](@ref)). Scaled metrics that also need the fold's
 training target — [`mase`](@ref), or your own, declared via
 [`needs_ytrain`](@ref) — are called as `metric(y, ŷ; y_train=...)` with that
-fold's training window supplied automatically. When the feature set includes
+fold's training window supplied automatically. On a panel, such a metric is
+computed per series, with each series' own training values, and averaged with
+each series weighted by its scored points, so a scale never mixes series;
+other metrics pool the fold's scored rows. When the feature set includes
 [`Exogenous`](@ref) columns, they are sliced from the held-out data
 automatically (they are "known" in a backtest).
 

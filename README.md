@@ -233,7 +233,8 @@ Notes:
   column too.
 - **Backtesting** cuts folds on the *global timestamp grid* — `initial`, `step`
   and `horizon` count distinct timestamps, not rows — and scores by joining
-  forecasts to actuals on `(id, time)`. `tune` works on panels unchanged.
+  forecasts to actuals on `(id, time)`. Scaled metrics such as `mase` use each
+  series' own training values. `tune` works on panels unchanged.
 - Per-series state is available as `fitted.series`, a vector of
   `SeriesState`; for a single series the familiar `fitted.y_history`,
   `fitted.t_last` and `fitted.n_train` still work.

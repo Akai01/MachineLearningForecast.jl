@@ -120,7 +120,8 @@ end
 
 Trait declaring that `metric` needs the fold's *training* target in addition to
 the actuals and forecasts. [`backtest`](@ref) calls such metrics as
-`metric(y, ŷ; y_train=...)` and ordinary ones as `metric(y, ŷ)`.
+`metric(y, ŷ; y_train=...)` and ordinary ones as `metric(y, ŷ)`. On a panel it
+calls them once per series, with that series' own training values.
 
 Defaults to `false`; `true` for [`mase`](@ref). Define it for your own scaled
 metrics so they can be passed to `backtest` / [`tune`](@ref):
