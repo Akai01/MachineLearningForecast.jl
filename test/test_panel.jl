@@ -330,6 +330,22 @@
         end
     end
 
+    @testset "the step column is each row's position in its series' forecast" begin
+        steps = MachineLearningForecast._steps_by_id
+        @test steps(["a", "b", "a", "c", "b", "a"]) == [1, 1, 2, 1, 2, 3]
+        @test steps(String[]) == Int[]
+        ids = rand(StableRNG(5), 1:7, 300)
+        @test steps(ids) == [count(==(ids[j]), ids[1:(j - 1)]) + 1 for j in eachindex(ids)]
+        # s2 ends inside the last fold, so its rows stop early.
+        big = makepanel(lens=(60, 52, 55))
+        r = backtest(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), big;
+                     horizon=5, initial=40, step=10)
+        @test all(Dates.value(d - o) == s
+                  for (d, o, s) in zip(r.folds.ds, r.folds.origin, r.folds.step))
+        @test r.folds.step[(r.folds.origin .== Date(2022, 2, 19)) .&
+                           (r.folds.unique_id .== "s2")] == [1, 2]
+    end
+
     @testset "ragged start dates: fit, forecast, Direct and backtest" begin
         starts = [Date(2022, 1, 1), Date(2022, 1, 11), Date(2022, 1, 21)]
         rag = makepanel(lens=(60, 50, 40), starts=starts)     # all end on 2022-03-01

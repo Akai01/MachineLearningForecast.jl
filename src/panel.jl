@@ -284,6 +284,12 @@ function _panel_exogenous_rows(spec::Forecaster, exogcols, states, grids, new_da
     return out
 end
 
+"Each row's 1-based position among the rows of its id so far."
+function _steps_by_id(ids::AbstractVector)
+    seen = Dict{eltype(ids),Int}()
+    return Int[seen[id] = get(seen, id, 0) + 1 for id in ids]
+end
+
 function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step, metrics)
     for (key, sub, rows) in panel_groups(fc, tbl)        # validates each series
         _in_series(() -> target_vector(sub, fc.target, rows), fc, key)
@@ -342,6 +348,7 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
         end
 
         fid, ft, fy = fcast[fc.id], fcast[fc.time], fcast.y_hat
+        steps = _steps_by_id(fid)
         ytrue = Float64[]
         yhat = Float64[]
         for j in eachindex(fy)
@@ -350,7 +357,7 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
             push!(ytrue, a)
             push!(yhat, fy[j])
             push!(origin_col, t_origin)
-            push!(step_col, 1 + count(==(fid[j]), @view fid[1:j-1]))
+            push!(step_col, steps[j])
             push!(id_col, fid[j])
             push!(time_col, ft[j])
             push!(y_col, a)
