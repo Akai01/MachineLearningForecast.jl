@@ -39,14 +39,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- **MLJBase is no longer a dependency.** Models are trained and queried through
-  `MLJModelInterface` directly (`clean!`, `reformat`, `fit`, `predict`), which
-  is what MLJBase's machines did for this package; forecasts are identical.
-  Loading the package fell from about 1.0 s to 0.13 s, the first fit and
-  forecast in a fresh session from about 7 s to 1.7 s, the manifest from 114
-  packages to 28, and the modules loaded by `using MachineLearningForecast`
-  from 166 to 32. Any MLJ model still works, including
-  `TunedModel` and other MLJ composites when their packages are loaded.
+- **Models are trained without MLJ machines.** They are trained and queried
+  through `MLJModelInterface` directly (`clean!`, `reformat`, `fit`,
+  `predict`), which is what MLJBase's machines did for this package; forecasts
+  are identical. MLJBase stays a dependency only because loading it gives
+  models MLJModelInterface's full data interface: XGBoost, LightGBM,
+  MLJLinearModels and NearestNeighborModels call `MLJModelInterface.matrix`,
+  which fails without it. Skipping the machine layer shortened a fresh
+  session's load plus first fit and forecast with `XGBoostRegressor` from about
+  10.8 s to 8.0 s. Any MLJ model works, including `TunedModel` and other MLJ
+  composites when their packages are loaded.
 - `FittedForecaster.machines` (MLJ machines) is now `FittedForecaster.models`,
   a vector of `TrainedModel`s, each holding the trained copy of the model as
   `.model` and its MLJ fitresult as `.fitresult`; pass both to MLJ's interface

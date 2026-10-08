@@ -87,6 +87,19 @@ mutable struct CountInput <: MMI.Deterministic end
 MMI.input_scitype(::Type{CountInput}) = MMI.Table(MMI.Count)
 MMI.target_scitype(::Type{CountInput}) = AbstractVector{MMI.Continuous}
 
+"""
+Mean model that reads its features with `MMI.matrix`, as XGBoost, LightGBM,
+MLJLinearModels and NearestNeighborModels do; that needs MMI's full interface.
+"""
+mutable struct MatrixMean <: MMI.Deterministic end
+function MMI.fit(::MatrixMean, verbosity, X, y)
+    size(MMI.matrix(X), 1) == length(y) || error("rows and targets disagree")
+    return (sum(y) / length(y), nothing, NamedTuple())
+end
+MMI.predict(::MatrixMean, fitresult, Xnew) = fill(fitresult, size(MMI.matrix(Xnew), 1))
+MMI.input_scitype(::Type{MatrixMean}) = MMI.Table(MMI.Continuous)
+MMI.target_scitype(::Type{MatrixMean}) = AbstractVector{MMI.Continuous}
+
 "Declares no input scitype, so it is Unknown."
 mutable struct NoInputTrait <: MMI.Deterministic end
 MMI.target_scitype(::Type{NoInputTrait}) = AbstractVector{MMI.Continuous}

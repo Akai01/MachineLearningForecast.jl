@@ -259,8 +259,12 @@
         @test fh.ds == [th[end] + Hour(s) for s in 1:3]
     end
 
-    @testset "fitted models go through MLJModelInterface, not MLJBase" begin
-        @test !isdefined(MachineLearningForecast, :MLJBase)
+    @testset "fitted models go through MLJModelInterface directly" begin
+        # XGBoost, LightGBM and others need MMI's full data interface.
+        fm = fit(Forecaster(TestModels.MatrixMean(); features=FeatureSet(Lag(1), Lag(2)),
+                            freq=Day(1)), df)
+        @test only(fm.models).fitresult == sum(df.y[3:end]) / (length(df.y) - 2)
+        @test forecast(fm, 2).y_hat == fill(only(fm.models).fitresult, 2)
         fc = Forecaster(TestModels.MeanModel(); features=FeatureSet(Lag(1)), freq=Day(1))
         f = fit(fc, df)
         m = only(f.models)
