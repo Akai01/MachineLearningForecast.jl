@@ -62,18 +62,24 @@ end
 # Skip short series so the rest can still train.
 function _panel_frames(fc::Forecaster, groups)
     mh = minhistory(fc.features)
-    frames = Tuple{Any,NamedTuple,Vector{Float64},NamedTuple}[]
+    frames = Tuple{Any,NamedTuple,Vector{Float64},NamedTuple,Vector{Float64},
+                   Vector{Float64},Any}[]
     short = Tuple{Any,Int}[]
     for (key, sub, rows) in groups
-        n = nrows(sub)
+        yraw, tz, z, state = _in_series(fc, key) do
+            yraw = target_vector(sub, fc.target, rows)
+            return (yraw, _transform_table(fc, sub, yraw)...)
+        end
+        n = nrows(tz)
         if n ≤ mh
             push!(short, (key, n))
             continue
         end
         X, y, _ = _in_series(fc, key) do
-            build_training_frame(fc.features, sub, fc.target, fc.time, rows)
+            build_training_frame(fc.features, tz, fc.target, fc.time,
+                                 rows[(nrows(sub) - n + 1):end])
         end
-        push!(frames, (key, X, y, sub))
+        push!(frames, (key, X, y, sub, yraw, z, state))
     end
     if isempty(frames)
         throw(ArgumentError(
@@ -105,9 +111,9 @@ function _fit_panel(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
     groups = panel_groups(fc, tbl, base)
     frames = _panel_frames(fc, groups)
     models = _panel_models(fc, fc.strategy, frames)
-    states = [SeriesState(key, target_vector(sub, fc.target),
-                          sub[fc.time][end], sub[fc.time][1], nrows(sub))
-              for (key, _, _, sub) in frames]
+    states = [SeriesState(key, yraw, sub[fc.time][end], sub[fc.time][1], nrows(sub),
+                          z, state)
+              for (key, _, _, sub, yraw, z, state) in frames]
     return FittedForecaster(fc, models, states, outputnames(fc.features))
 end
 
@@ -148,7 +154,7 @@ function _panel_batch(f::FittedForecaster, states, histories, step::Integer,
     cols = [Vector{Float64}(undef, length(active)) for _ in names]
     scratch = [Vector{Float64}(undef, 1) for _ in names]
     for (r, k) in enumerate(active)
-        n_next = states[k].n_train - 1 + step
+        n_next = length(states[k].z_history) - 1 + step
         ex = exog_rows === nothing ? nothing : exog_rows[k][step]
         _fill_row!(scratch, spec.features, histories[k], grids[k][step], n_next, ex)
         for j in eachindex(cols)
@@ -184,8 +190,10 @@ function _forecast_panel(f::FittedForecaster, hs::Vector{Int}, new_data)
     end
 
     preds = [Vector{Float64}(undef, hs[k]) for k in eachindex(states)]
-    histories = [copy(st.y_history) for st in states]
+    histories = [copy(st.z_history) for st in states]
     _panel_predict!(preds, f, spec.strategy, states, histories, grids, exog_rows, hs)
+    preds = [untransform(spec.transform, preds[k], states[k].transform_state)
+             for k in eachindex(states)]
 
     n = sum(hs)
     idcol = Vector{Any}(undef, n)

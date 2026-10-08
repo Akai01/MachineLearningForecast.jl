@@ -17,7 +17,7 @@ an ask/tell loop:
 
 - [`ask`](@ref)`(s::MyStrategy) -> Union{NamedTuple,Nothing}` — return the next
   candidate: a NamedTuple of `Forecaster` field overrides (keys among `:model`,
-  `:features`, `:strategy`, `:freq`, `:target`, `:time`, `:id`), drawn from
+  `:features`, `:strategy`, `:freq`, `:target`, `:time`, `:id`, `:transform`), drawn from
   your search space. Return `nothing` to signal termination.
 - [`tell!`](@ref)`(s::MyStrategy, candidate, score)` — receive the result of
   evaluating `candidate`: a `Float64` backtest score (lower is better), or
@@ -87,7 +87,8 @@ RandomSearch(n::Integer; rng::Random.AbstractRNG=Random.default_rng()) =
 
 Ask a [`TuningStrategy`](@ref) for its next candidate: a NamedTuple of
 [`Forecaster`](@ref) field overrides (keys among `:model`, `:features`,
-`:strategy`, `:freq`, `:target`, `:time`, `:id`). Return `nothing` to signal that the
+`:strategy`, `:freq`, `:target`, `:time`, `:id`, `:transform`). Return `nothing` to
+signal that the
 search is finished. Part of the public tuning-extension API — implement it for
 your own strategy subtypes; see [`TuningStrategy`](@ref) for the full contract.
 
@@ -204,7 +205,8 @@ function reconstruct(fc::Forecaster; kwargs...)
                       get(kwargs, :freq, fc.freq),
                       get(kwargs, :target, fc.target),
                       get(kwargs, :time, fc.time),
-                      get(kwargs, :id, fc.id))
+                      get(kwargs, :id, fc.id),
+                      get(kwargs, :transform, fc.transform))
 end
 
 """

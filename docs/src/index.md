@@ -85,6 +85,21 @@ MachineLearningForecast.TimeFeature
 MachineLearningForecast.ExogenousFeature
 ```
 
+### Target transforms
+
+```@docs
+TargetTransform
+fit_transform
+untransform
+NoTransform
+MeanScale
+LastScale
+Deseasonalize
+LogRatio
+Difference
+TransformChain
+```
+
 ### Backtesting and metrics
 
 ```@docs

@@ -5,7 +5,8 @@ not shadow them.
 const RESERVED_OUTPUT_NAMES = (:origin, :step, :y, :y_hat)
 
 """
-    Forecaster(model; features, strategy=Recursive(), freq, target=:y, time=:ds, id=nothing)
+    Forecaster(model; features, strategy=Recursive(), freq, target=:y, time=:ds, id=nothing,
+               transform=NoTransform())
 
 Immutable forecasting specification.
 
@@ -27,6 +28,12 @@ Immutable forecasting specification.
   series borrow strength from the rest. Series may be ragged (different start
   dates, end dates and lengths); each forecasts forward from its own last
   timestamp. `forecast` then returns an id column alongside the timestamps.
+- `transform`: a [`TargetTransform`](@ref) applied to each series' target
+  before features are built, e.g. [`LastScale`](@ref) or
+  `TransformChain(LastScale(12), Deseasonalize(12), LogRatio(12))`. Its state is
+  fitted per series on the training history only, and forecasts are mapped
+  back to the original scale. The default [`NoTransform`](@ref) leaves the
+  target as given.
 
 Fit with [`fit`](@ref), which returns a [`FittedForecaster`](@ref); the spec
 itself is never mutated.
@@ -45,7 +52,7 @@ panel = Forecaster(model;
                    target=:y, time=:ds, id=:unique_id)
 ```
 """
-struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
+struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol},X<:TargetTransform}
     model::M
     features::FeatureSet
     strategy::S
@@ -53,10 +60,12 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
     target::Symbol
     time::Symbol
     id::I
+    transform::X
     function Forecaster(model::M, features::FeatureSet, strategy::S, freq::Period,
-                        target::Symbol, time::Symbol,
-                        id::I=nothing) where {M,S<:ForecastStrategy,
-                                              I<:Union{Nothing,Symbol}}
+                        target::Symbol, time::Symbol, id::I=nothing,
+                        transform::X=NoTransform()) where {M,S<:ForecastStrategy,
+                                                         I<:Union{Nothing,Symbol},
+                                                         X<:TargetTransform}
         model isa Type && model <: MLJModelInterface.Model && throw(ArgumentError(
             "model must be an MLJ model instance, got the type $(nameof(model)). Pass " *
             "an instance instead, e.g. $(nameof(model))()."))
@@ -120,14 +129,15 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
                 "results ($(join(":" .* string.(RESERVED_OUTPUT_NAMES), ", "))). " *
                 "Rename the id column in your data."))
         end
-        new{M,S,I}(model, features, strategy, freq, target, time, id)
+        new{M,S,I,X}(model, features, strategy, freq, target, time, id, transform)
     end
 end
 
 function Forecaster(model; features::FeatureSet, strategy::ForecastStrategy=Recursive(),
                     freq::Period, target::Symbol=:y, time::Symbol=:ds,
-                    id::Union{Nothing,Symbol}=nothing)
-    return Forecaster(model, features, strategy, freq, target, time, id)
+                    id::Union{Nothing,Symbol}=nothing,
+                    transform::TargetTransform=NoTransform())
+    return Forecaster(model, features, strategy, freq, target, time, id, transform)
 end
 
 "Is this a panel (multi-series) specification?"
@@ -140,7 +150,10 @@ ispanel(::Forecaster{M,S,Symbol}) where {M,S} = true
 Everything `forecast` needs about one series: its id (`nothing` for a
 single-series forecaster), the training target history that lag and rolling
 features are computed from, the first and last training timestamps, and the
-number of training rows (which fixes the Fourier step index).
+number of training rows. `z_history` is the history after the spec's
+[`TargetTransform`](@ref), which lag and rolling features and the Fourier
+step index use, and `transform_state` is what [`untransform`](@ref) needs;
+without a transform, `z_history` is `y_history`.
 
 Read them off a fitted panel forecaster via `f.series`; for a single-series
 forecaster the same values are reachable directly as `f.y_history`, `f.t_last`,
@@ -160,6 +173,8 @@ struct SeriesState
     t_last::Any
     t_start::Any
     n_train::Int
+    z_history::Vector{Float64}
+    transform_state::Any
 end
 
 """
@@ -221,7 +236,8 @@ struct FittedForecaster{F<:Forecaster,T<:TrainedModel}
 end
 
 # Panels have no single history; refuse, don't guess.
-const _SERIES_PROPS = (:y_history, :t_last, :t_start, :n_train)
+const _SERIES_PROPS = (:y_history, :t_last, :t_start, :n_train, :z_history,
+                       :transform_state)
 
 function Base.getproperty(f::FittedForecaster, name::Symbol)
     name in _SERIES_PROPS || return getfield(f, name)
@@ -282,19 +298,16 @@ end
 function _fit_spec(fc::Forecaster{M,S,Nothing}, tbl::NamedTuple) where {M,S}
     t = require_column(tbl, fc.time, "time")
     validate_time_column(t, fc.time, fc.freq)
-    return _fit(fc, fc.strategy, tbl)
+    y = target_vector(tbl, fc.target)
+    tz, z, state = _transform_table(fc, tbl, y)
+    st = SeriesState(nothing, y, t[end], t[1], length(t), z, state)
+    return FittedForecaster(fc, _fit(fc, fc.strategy, tz), [st], outputnames(fc.features))
 end
 
 _fit_spec(fc::Forecaster{M,S,Symbol}, tbl::NamedTuple) where {M,S} = _fit_panel(fc, tbl)
 
 _training_frame(fc::Forecaster, tbl::NamedTuple) =
     build_training_frame(fc.features, tbl, fc.target, fc.time)
-
-function _fitted(fc::Forecaster, tbl::NamedTuple, models::Vector{<:TrainedModel})
-    t = tbl[fc.time]
-    st = SeriesState(nothing, target_vector(tbl, fc.target), t[end], t[1], length(t))
-    return FittedForecaster(fc, models, [st], outputnames(fc.features))
-end
 
 """
     forecast(f::FittedForecaster, h::Int; new_data=nothing) -> NamedTuple
@@ -437,7 +450,8 @@ function Base.show(io::IO, fc::Forecaster)
     print(io, "Forecaster(", nameof(typeof(fc.model)), ", ",
           length(fc.features), " features, ", fc.strategy, ", freq=", fc.freq,
           ", target=:", fc.target, ", time=:", fc.time,
-          ispanel(fc) ? ", id=:$(fc.id)" : "", ")")
+          ispanel(fc) ? ", id=:$(fc.id)" : "",
+          fc.transform isa NoTransform ? "" : ", transform=$(fc.transform)", ")")
 end
 
 function Base.show(io::IO, f::FittedForecaster)

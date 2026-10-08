@@ -94,6 +94,20 @@ If your feature is a `TargetFeature`, it is anchored to the *feature* row; time
 and exogenous features are anchored to the *target* row. `Direct` fitting relies
 on this split via `targetcolumnmask`, so getting the category right matters.
 
+## Adding a target transform
+
+A transform is a subtype of `TargetTransform` and implements two methods:
+
+```julia
+fit_transform(t, y)        # -> (z, state): z may be shorter, aligned to y's end
+untransform(t, ẑ, state)   # -> the forecasts of y for the forecasts ẑ of z
+```
+
+`fit_transform` sees one series' training history only, and its `state` must
+hold everything `untransform` needs. Add a test that `untransform` recovers a
+known future exactly from its forward-mapped values, as
+`test/test_transforms.jl` does for the built-ins.
+
 ## Adding a tuning strategy
 
 `TuningStrategy`, `ask` and `tell!` are public, documented API precisely so that

@@ -21,6 +21,7 @@ using .TestModels
     include("test_tune.jl")
     include("test_validation.jl")
     include("test_panel.jl")
+    include("test_transforms.jl")
     include("test_integration.jl")
 
     @testset "Aqua quality checks" begin

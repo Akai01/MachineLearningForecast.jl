@@ -33,12 +33,15 @@ export Forecaster, FittedForecaster, fit, forecast, backtest, BacktestResult,
        Recursive, Direct,
        mae, rmse, mape, smape, mase,
        tune, TuneResult, TuningStrategy, GridSearch, RandomSearch, ask, tell!,
-       SeriesState, nseries
+       SeriesState, nseries,
+       TargetTransform, fit_transform, untransform, NoTransform, MeanScale, LastScale,
+       Deseasonalize, LogRatio, Difference, TransformChain
 
 include("utils.jl")
 include("features.jl")
 include("featureset.jl")
 include("strategies.jl")
+include("transforms.jl")
 include("metrics.jl")
 include("forecaster.jl")
 include("recursive.jl")

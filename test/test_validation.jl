@@ -214,8 +214,9 @@ end
     @testset "export surface is pinned" begin
         # The README quotes these counts; keep them honest.
         exports = setdiff(names(MachineLearningForecast), [:MachineLearningForecast])
-        @test length(exports) == 33
+        @test length(exports) == 43
         @test :Forecaster in exports && :tune in exports && :mase in exports
+        @test :TransformChain in exports && :untransform in exports
     end
 
     @testset "Calendar sub-daily parts need a DateTime column" begin

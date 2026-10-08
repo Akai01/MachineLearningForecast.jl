@@ -8,6 +8,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Target transforms.** `Forecaster` takes a `transform` keyword: a
+  `TargetTransform` applied to each series' target before features are built,
+  with its state fitted on that series' own training history, refitted in every
+  `backtest` fold, and searchable as a `tune` grid key. Forecasts are mapped
+  back to the original scale. Built-ins: `NoTransform` (the default, unchanged
+  results), `MeanScale`, `LastScale(k)`, `Deseasonalize(period)` (M4
+  seasonality test, classical multiplicative indices), `LogRatio(window)`,
+  `Difference(lag)` and `TransformChain`; new ones implement `fit_transform`
+  and `untransform`. On the 1399 M3 monthly series (18-month holdout, default
+  hyperparameters, lags 1-12, a 12-month rolling mean and the month),
+  `TransformChain(LastScale(12), Deseasonalize(12), LogRatio(12))` lowered
+  sMAPE from 16.26 to 13.67 for EvoTrees, 15.69 to 13.66 for a random forest
+  and 15.74 to 13.71 for LightGBM against no transform. `SeriesState` gains
+  `z_history` and `transform_state`; `y_history` stays the untransformed target.
 - **Panel (multi-series) forecasting.** `Forecaster` takes an `id` keyword; with
   it set, `fit` groups a long-format table by series, materialises features
   within each series, and pools the rows to train **one global model**.

@@ -18,7 +18,7 @@ function _fit(fc::Forecaster, s::Direct, tbl::NamedTuple)
         yi = y[i:nX]
         _train(fc.model, Xi, yi)
     end
-    return _fitted(fc, tbl, models)
+    return models
 end
 
 function _forecast(f::FittedForecaster, s::Direct, h::Integer, grid, exog_rows)
@@ -31,10 +31,11 @@ function _forecast(f::FittedForecaster, s::Direct, h::Integer, grid, exog_rows)
     preds = Vector{Float64}(undef, h)
     for step in 1:h
         # Fourier index continues the 0-based training index.
-        n_next = f.n_train - 1 + step
+        n_next = length(f.z_history) - 1 + step
         exog_row = exog_rows === nothing ? nothing : exog_rows[step]
-        _fill_row!(colvecs, spec.features, f.y_history, grid[step], n_next, exog_row)
+        _fill_row!(colvecs, spec.features, f.z_history, grid[step], n_next, exog_row)
         preds[step] = Float64(only(_predict(f.models[step], row)))
     end
-    return _forecast_table(spec, grid, preds)
+    ŷ = untransform(spec.transform, preds, f.transform_state)
+    return _forecast_table(spec, grid, ŷ)
 end

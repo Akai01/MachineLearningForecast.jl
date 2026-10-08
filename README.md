@@ -101,6 +101,32 @@ columntables convert straight back: `DataFrame(fcast)`.
 strictly *before* the current row's target (rolling windows and differences
 require `lag ≥ 1`), and the test suite asserts it.
 
+## Target transforms
+
+A transform reshapes each series' target before features are built, and maps
+the forecasts back. Its state is fitted on each series' own training history,
+and `backtest` refits it in every fold, so it never sees the forecast window.
+Tree models cannot forecast beyond the levels they were trained on, so for
+trending series a transform often matters more than the hyperparameters.
+
+```julia
+fc = Forecaster(EvoTreeRegressor(); freq=Month(1), id=:unique_id,
+                features=FeatureSet(Lag.(1:12)..., RollingMean(12), Calendar(:month)),
+                transform=TransformChain(LastScale(12), Deseasonalize(12), LogRatio(12)))
+```
+
+| Transform | Effect |
+|---|---|
+| `NoTransform()` | the default: the target as given |
+| `MeanScale()` / `LastScale(k)` | divide by the mean of the whole history / of its last `k` values |
+| `Deseasonalize(period)` | classical multiplicative adjustment, for series passing the M4 seasonality test |
+| `LogRatio(window)` | `log(y_t / mean(y[t-window:t-1]))`: scale-free and stationary |
+| `Difference(lag)` | `y_t - y_{t-lag}` |
+| `TransformChain(t...)` | apply in order, undo in reverse |
+
+Your own transform subtypes `TargetTransform` and implements
+`fit_transform(t, y) -> (z, state)` and `untransform(t, ẑ, state)`.
+
 ## Strategies
 
 - `Recursive()` — one model trained one-step-ahead; forecasts are fed back as
@@ -281,7 +307,7 @@ Reindex your data or resample before fitting.
        horizon=28, initial=730)
   ```
 
-  The other 29 exports are collision-free. Note that MachineLearningForecast's `mae`/`rmse`
+  The other 39 exports are collision-free. Note that MachineLearningForecast's `mae`/`rmse`
   are plain functions of two vectors, whereas MLJ's are measure objects — they
   are not interchangeable, which is exactly why the choice must be explicit.
 - **Multiple dispatch over configuration flags**: strategies, features, and
