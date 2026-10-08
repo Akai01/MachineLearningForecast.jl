@@ -46,7 +46,7 @@
     @testset "fit covers every series and keeps their state apart" begin
         f = fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), panel)
         @test nseries(f) == 3
-        @test length(f.machines) == 1
+        @test length(f.models) == 1
         @test [s.id for s in f.series] == ["s1", "s2", "s3"]
         @test [s.n_train for s in f.series] == [40, 30, 35]
         @test [s.t_last for s in f.series] ==
@@ -274,7 +274,7 @@
 
     @testset "Direct on a panel" begin
         f = fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)); strat=Direct(4)), panel)
-        @test length(f.machines) == 4
+        @test length(f.models) == 4
         out = forecast(f, 4)
         @test length(out.y_hat) == 3 * 4
         @test_throws ArgumentError forecast(f, 5)
@@ -470,7 +470,7 @@
             s in (Recursive(), Direct(4))
             fc = mk(m, fs; strat=s)
             f = fit(fc, noisy)
-            @test nseries(f) == 3 && length(f.machines) == (s isa Direct ? 4 : 1)
+            @test nseries(f) == 3 && length(f.models) == (s isa Direct ? 4 : 1)
             out = forecast(f, 4)
             @test out.unique_id == repeat(["s1", "s2", "s3"], inner=4)
             @test out.ds == reduce(vcat, [st.t_last .+ Day.(1:4) for st in f.series])
@@ -543,7 +543,7 @@
         fc = mk(TestModels.MeanModel(), FeatureSet(Lag(1)))
         f = fit(fc, big)
         @test nseries(f) == 2000
-        @test only(f.machines).fitresult == 1.0 + sum(2:30) / 29
+        @test only(f.models).fitresult == 1.0 + sum(2:30) / 29
         # A quadratic stack of 2000 series allocates about 1 GB.
         @test (@allocated fit(fc, big)) < 100 * 2^20
     end

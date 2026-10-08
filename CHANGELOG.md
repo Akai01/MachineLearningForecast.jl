@@ -39,6 +39,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **MLJBase is no longer a dependency.** Models are trained and queried through
+  `MLJModelInterface` directly (`clean!`, `reformat`, `fit`, `predict`), which
+  is what MLJBase's machines did for this package; forecasts are identical.
+  Loading the package fell from about 1.0 s to 0.13 s, the first fit and
+  forecast in a fresh session from about 7 s to 1.7 s, the manifest from 114
+  packages to 28, and the modules loaded by `using MachineLearningForecast`
+  from 166 to 32. Any MLJ model still works, including
+  `TunedModel` and other MLJ composites when their packages are loaded.
+- `FittedForecaster.machines` (MLJ machines) is now `FittedForecaster.models`,
+  a vector of `TrainedModel`s, each holding the trained copy of the model as
+  `.model` and its MLJ fitresult as `.fitresult`; pass both to MLJ's interface
+  functions, e.g. `fitted_params(t.model, t.fitresult)`, to inspect them.
+- A model whose declared `input_scitype` does not cover a table of `Continuous`
+  columns now warns when the `Forecaster` is built, instead of when MLJBase's
+  machine was built at every fit. Models declaring no input scitype are not
+  checked, as before.
 - `Forecaster` gained a third type parameter (`Nothing` or `Symbol`) so panel
   and single-series fitting are selected by dispatch rather than a runtime flag.
 - `FittedForecaster` stores `series::Vector{SeriesState}`. For a single series

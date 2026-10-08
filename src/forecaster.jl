@@ -74,6 +74,15 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol}}
                   "not cover AbstractVector{Continuous}; forecasting a continuous " *
                   "target may fail or behave unexpectedly."
         end
+        # Every feature table is Continuous; Unknown skips, as in MLJ.
+        is = MLJModelInterface.input_scitype(model)
+        if is !== MLJModelInterface.Unknown &&
+           !(MLJModelInterface.Table{AbstractVector{MLJModelInterface.Continuous}} <: is)
+            @warn "model $(typeof(model)) declares input_scitype $is, which does not " *
+                  "cover a table of Continuous columns, the only input " *
+                  "MachineLearningForecast passes; fitting may fail. Use a regressor " *
+                  "that accepts Continuous features."
+        end
         target == time && throw(ArgumentError(
             "target and time must be different columns, both were :$target. Pass the " *
             "names of your target and time columns, e.g. target=:y, time=:ds."))
@@ -154,14 +163,42 @@ struct SeriesState
 end
 
 """
+    TrainedModel{M,R}
+
+One model trained by [`fit`](@ref): `model` is the copy of the spec's model that
+was trained, and `fitresult` is what its `MLJModelInterface.fit` returned. Pass
+both to MLJ's interface functions to inspect it, e.g.
+`MLJModelInterface.fitted_params(t.model, t.fitresult)`.
+"""
+struct TrainedModel{M<:MLJModelInterface.Model,R}
+    model::M
+    fitresult::R
+end
+
+# The prototype is copied so fit never mutates it.
+function _train(prototype::MLJModelInterface.Model, X, y)
+    model = deepcopy(prototype)
+    warning = MLJModelInterface.clean!(model)
+    isempty(warning) || @warn warning
+    fitresult, _, _ = MLJModelInterface.fit(model, 0,
+                                            MLJModelInterface.reformat(model, X, y)...)
+    return TrainedModel(model, fitresult)
+end
+
+_predict(t::TrainedModel, X) = MLJModelInterface.predict(
+    t.model, t.fitresult, MLJModelInterface.reformat(t.model, X)...)
+
+"""
     FittedForecaster
 
 The result of [`fit`](@ref): the immutable spec plus everything needed to
-forecast — the fitted MLJ machine(s) (one for [`Recursive`](@ref),
-`max_horizon` for [`Direct`](@ref)), the training target history (needed to
-compute lag features at forecast time), the first/last training timestamps, and
-the stable feature column order. Use with [`forecast`](@ref).
+forecast — the trained models (one for [`Recursive`](@ref), `max_horizon` for
+[`Direct`](@ref)), the training target history (needed to compute lag features
+at forecast time), the first/last training timestamps, and the stable feature
+column order. Use with [`forecast`](@ref).
 
+`fitted.models` holds the trained models, each with the trained copy of the
+spec's model as `.model` and its MLJ fitresult as `.fitresult`.
 `fitted.series` holds one [`SeriesState`](@ref) per series. For a single
 series, `fitted.y_history`, `fitted.t_last`, `fitted.t_start` and
 `fitted.n_train` read its one state directly; on a panel they throw an
@@ -170,15 +207,15 @@ series, `fitted.y_history`, `fitted.t_last`, `fitted.t_start` and
 # Example
 ```julia
 fitted = fit(fc, df)
-fitted.machines      # the trained MLJ machine(s)
+fitted.models        # the trained model(s)
 fitted.series        # one SeriesState per series
 fitted.t_last        # single series only: the last training timestamp
 forecast(fitted, 28)
 ```
 """
-struct FittedForecaster{F<:Forecaster}
+struct FittedForecaster{F<:Forecaster,T<:TrainedModel}
     spec::F
-    machines::Vector{MLJBase.Machine}
+    models::Vector{T}
     series::Vector{SeriesState}
     feature_names::Vector{Symbol}
 end
@@ -253,10 +290,10 @@ _fit_spec(fc::Forecaster{M,S,Symbol}, tbl::NamedTuple) where {M,S} = _fit_panel(
 _training_frame(fc::Forecaster, tbl::NamedTuple) =
     build_training_frame(fc.features, tbl, fc.target, fc.time)
 
-function _fitted(fc::Forecaster, tbl::NamedTuple, machines::Vector{MLJBase.Machine})
+function _fitted(fc::Forecaster, tbl::NamedTuple, models::Vector{<:TrainedModel})
     t = tbl[fc.time]
     st = SeriesState(nothing, target_vector(tbl, fc.target), t[end], t[1], length(t))
-    return FittedForecaster(fc, machines, [st], outputnames(fc.features))
+    return FittedForecaster(fc, models, [st], outputnames(fc.features))
 end
 
 """

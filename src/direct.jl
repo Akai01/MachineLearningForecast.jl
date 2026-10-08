@@ -8,20 +8,17 @@ function _fit(fc::Forecaster, s::Direct, tbl::NamedTuple)
         "set's $mh history rows, only $nX training rows remain, but the target " *
         "must be shifted up to $(s.max_horizon - 1) steps. Provide at least " *
         "$(mh + s.max_horizon) rows, reduce max_horizon, or reduce lags/windows."))
-    machines = Vector{MLJBase.Machine}(undef, s.max_horizon)
     istarget = targetcolumnmask(fc.features)
     colnames = keys(X)
-    for i in 1:s.max_horizon
+    models = map(1:s.max_horizon) do i
         # Time/exogenous columns use the target row, as forecast does.
         Xi = NamedTuple{colnames}(ntuple(
             c -> istarget[c] ? values(X)[c][1:(nX - i + 1)] : values(X)[c][i:nX],
             length(colnames)))
         yi = y[i:nX]
-        mach = MLJBase.machine(deepcopy(fc.model), Xi, yi)
-        MLJBase.fit!(mach; verbosity=0)
-        machines[i] = mach
+        _train(fc.model, Xi, yi)
     end
-    return _fitted(fc, tbl, machines)
+    return _fitted(fc, tbl, models)
 end
 
 function _forecast(f::FittedForecaster, s::Direct, h::Integer, grid, exog_rows)
@@ -37,7 +34,7 @@ function _forecast(f::FittedForecaster, s::Direct, h::Integer, grid, exog_rows)
         n_next = f.n_train - 1 + step
         exog_row = exog_rows === nothing ? nothing : exog_rows[step]
         _fill_row!(colvecs, spec.features, f.y_history, grid[step], n_next, exog_row)
-        preds[step] = Float64(only(MLJBase.predict(f.machines[step], row)))
+        preds[step] = Float64(only(_predict(f.models[step], row)))
     end
     return _forecast_table(spec, grid, preds)
 end

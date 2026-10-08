@@ -20,7 +20,6 @@ interface: any MLJ `Deterministic` regressor is a valid base model.
 module MachineLearningForecast
 
 using Dates
-import MLJBase
 import MLJModelInterface
 import Random
 import Statistics

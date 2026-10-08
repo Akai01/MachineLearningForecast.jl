@@ -52,6 +52,7 @@ MachineLearningForecast
 ```@docs
 Forecaster
 FittedForecaster
+MachineLearningForecast.TrainedModel
 SeriesState
 nseries
 fit

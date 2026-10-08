@@ -39,7 +39,7 @@
         model = EvoTreeRegressor(nrounds=30, eta=0.2, seed=123)
         fc = Forecaster(model; features=features, strategy=Direct(14), freq=Day(1))
         fitted = fit(fc, df)
-        @test length(fitted.machines) == 14
+        @test length(fitted.models) == 14
         fcast = forecast(fitted, 14)
         @test all(isfinite, fcast.y_hat)
         @test all(abs.(fcast.y_hat .- mean(y)) .< 8)

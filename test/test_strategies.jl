@@ -18,10 +18,10 @@
         fs = FeatureSet(Lag(1))
         fc_r = Forecaster(TestModels.LinAR(1.0, 0.0); features=fs, strategy=Recursive(),
                           freq=Day(1))
-        @test length(fit(fc_r, df).machines) == 1
+        @test length(fit(fc_r, df).models) == 1
         fc_d = Forecaster(TestModels.LinAR(1.0, 0.0); features=fs, strategy=Direct(3),
                           freq=Day(1))
-        @test length(fit(fc_d, df).machines) == 3
+        @test length(fit(fc_d, df).models) == 3
     end
 
     @testset "Direct(3) refuses h=5 with an actionable message" begin
@@ -94,7 +94,7 @@
                   DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             fs = FeatureSet(Lag(1), Lag(7))
             f1 = fit(Forecaster(m; features=fs, strategy=Direct(1), freq=Day(1)), df)
-            @test length(f1.machines) == 1
+            @test length(f1.models) == 1
             f3 = fit(Forecaster(m; features=fs, strategy=Direct(3), freq=Day(1)), df)
             @test forecast(f1, 1).y_hat == forecast(f3, 3).y_hat[1:1]
             @test_throws ArgumentError forecast(f1, 2)

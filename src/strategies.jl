@@ -57,6 +57,6 @@ Direct() = throw(ArgumentError(
     "one model per horizon step, so the number of models must be fixed at fit " *
     "time. Use Recursive() if you want a horizon-agnostic forecaster."))
 
-"Number of machines a strategy fits."
-nmachines(::Recursive) = 1
-nmachines(s::Direct) = s.max_horizon
+"Number of models a strategy fits."
+nmodels(::Recursive) = 1
+nmodels(s::Direct) = s.max_horizon

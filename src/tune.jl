@@ -417,11 +417,11 @@ function _warn_fit_count(fc, cands, tbl, horizon, initial, step)
         s isa ForecastStrategy || throw(ArgumentError(
             "grid key :strategy must hold values such as Recursive() or Direct(28), " *
             "but candidate $i is $(repr(s))."))
-        total += nfolds * nmachines(s)
+        total += nfolds * nmodels(s)
     end
     total > 500 && @warn(
         "tune is about to run $total model fits ($(length(cands)) candidates × " *
-        "$nfolds backtest folds × machines per fit). This may take a while; " *
+        "$nfolds backtest folds × models per fit). This may take a while; " *
         "reduce the grid, increase step, or lower max_evals to shrink it.")
     return nothing
 end

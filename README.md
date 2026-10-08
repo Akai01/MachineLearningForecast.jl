@@ -219,7 +219,7 @@ forecast(fitted, 28)                         # (unique_id, ds, y_hat), 3 x 28 ro
 
 Notes:
 
-- **One global model.** `fitted.machines` holds a single machine (or
+- **One global model.** `fitted.models` holds a single trained model (or
   `max_horizon` of them under `Direct`), trained on the pooled rows — not one
   model per series.
 - **No cross-series leakage.** `Lag(1)` at the first row of a series is

@@ -259,6 +259,34 @@
         @test fh.ds == [th[end] + Hour(s) for s in 1:3]
     end
 
+    @testset "fitted models go through MLJModelInterface, not MLJBase" begin
+        @test !isdefined(MachineLearningForecast, :MLJBase)
+        fc = Forecaster(TestModels.MeanModel(); features=FeatureSet(Lag(1)), freq=Day(1))
+        f = fit(fc, df)
+        m = only(f.models)
+        @test m isa MachineLearningForecast.TrainedModel
+        @test m.model isa TestModels.MeanModel && m.model !== fc.model
+        @test m.fitresult == sum(df.y[2:end]) / (length(df.y) - 1)
+        @test forecast(f, 2).y_hat == fill(m.fitresult, 2)
+        fd = fit(Forecaster(TestModels.MeanModel(); features=FeatureSet(Lag(1)),
+                            strategy=Direct(3), freq=Day(1)), df)
+        @test length(fd.models) == 3 && all(x -> x isa MachineLearningForecast.TrainedModel,
+                                            fd.models)
+        # As MLJBase did, fit cleans each copy and warns, not the prototype.
+        proto = TestModels.Clamped(0)
+        fcc = Forecaster(proto; features=FeatureSet(Lag(1)), freq=Day(1))
+        fitted = @test_logs (:warn, "k must be ≥ 1; resetting k to 1.") fit(fcc, df)
+        @test proto.k == 0 && only(fitted.models).model.k == 1
+        @test_logs (:warn, r"declares input_scitype .*Count") Forecaster(
+            TestModels.CountInput(); features=FeatureSet(Lag(1)), freq=Day(1))
+        @test_logs Forecaster(TestModels.NoInputTrait(); features=FeatureSet(Lag(1)),
+                              freq=Day(1))
+        for model in (EvoTreeRegressor(nrounds=5),
+                      DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+            @test_logs Forecaster(model; features=FeatureSet(Lag(1)), freq=Day(1))
+        end
+    end
+
     @testset "fit, backtest and tune leave the model prototype unchanged" begin
         dfr = (ds=t, y=10 .+ sin.(2π .* (1:n) ./ 7) .+ randn(StableRNG(4), n))
         fs = FeatureSet(Lag(1), Lag(2), Lag(7), RollingMean(3))

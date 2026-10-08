@@ -104,27 +104,24 @@ end
 function _fit_panel(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
     groups = panel_groups(fc, tbl, base)
     frames = _panel_frames(fc, groups)
-    machines = _panel_machines(fc, fc.strategy, frames)
+    models = _panel_models(fc, fc.strategy, frames)
     states = [SeriesState(key, target_vector(sub, fc.target),
                           sub[fc.time][end], sub[fc.time][1], nrows(sub))
               for (key, _, _, sub) in frames]
-    return FittedForecaster(fc, machines, states, outputnames(fc.features))
+    return FittedForecaster(fc, models, states, outputnames(fc.features))
 end
 
-function _panel_machines(fc::Forecaster, ::Recursive, frames)
+function _panel_models(fc::Forecaster, ::Recursive, frames)
     X = _vcat_frames([f[2] for f in frames])
     y = reduce(vcat, [f[3] for f in frames])
-    mach = MLJBase.machine(deepcopy(fc.model), X, y)
-    MLJBase.fit!(mach; verbosity=0)
-    return MLJBase.Machine[mach]
+    return [_train(fc.model, X, y)]
 end
 
 # Shift within each series, as in single-series Direct.
-function _panel_machines(fc::Forecaster, s::Direct, frames)
+function _panel_models(fc::Forecaster, s::Direct, frames)
     istarget = targetcolumnmask(fc.features)
-    machines = Vector{MLJBase.Machine}(undef, s.max_horizon)
     colnames = keys(frames[1][2])
-    for i in 1:s.max_horizon
+    return map(1:s.max_horizon) do i
         Xs = NamedTuple[]
         ys = Vector{Float64}[]
         for (_, X, y, _) in frames
@@ -139,11 +136,8 @@ function _panel_machines(fc::Forecaster, s::Direct, frames)
             "not enough data for Direct($(s.max_horizon)): no series has enough " *
             "rows to train the step-$i model. Shorten max_horizon, provide longer " *
             "series, or reduce lags/windows."))
-        mach = MLJBase.machine(deepcopy(fc.model), _vcat_frames(Xs), reduce(vcat, ys))
-        MLJBase.fit!(mach; verbosity=0)
-        machines[i] = mach
+        _train(fc.model, _vcat_frames(Xs), reduce(vcat, ys))
     end
-    return machines
 end
 
 # One predict call per step, not per series per step.
@@ -209,11 +203,11 @@ function _forecast_panel(f::FittedForecaster, hs::Vector{Int}, new_data)
 end
 
 function _panel_predict!(preds, f, ::Recursive, states, histories, grids, exog_rows, hs)
-    mach = only(f.machines)
+    trained = only(f.models)
     for s in 1:maximum(hs)
         active = findall(≥(s), hs)
         row = _panel_batch(f, states, histories, s, grids, exog_rows, active)
-        ŷ = MLJBase.predict(mach, row)
+        ŷ = _predict(trained, row)
         for (r, k) in enumerate(active)
             v = Float64(ŷ[r])
             preds[k][s] = v
@@ -232,7 +226,7 @@ function _panel_predict!(preds, f, strat::Direct, states, histories, grids, exog
     for s in 1:h
         active = findall(≥(s), hs)
         row = _panel_batch(f, states, histories, s, grids, exog_rows, active)
-        ŷ = MLJBase.predict(f.machines[s], row)
+        ŷ = _predict(f.models[s], row)
         for (r, k) in enumerate(active)
             preds[k][s] = Float64(ŷ[r])
         end

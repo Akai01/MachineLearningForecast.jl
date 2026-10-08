@@ -68,4 +68,27 @@ MMI.predict(::NaNModel, fitresult, Xnew) = fill(NaN, length(Tables.rows(Xnew)))
 MMI.input_scitype(::Type{NaNModel}) = MMI.Table(MMI.Continuous)
 MMI.target_scitype(::Type{NaNModel}) = AbstractVector{MMI.Continuous}
 
+"Mean model whose `clean!` resets an invalid `k` to 1, with a warning message."
+mutable struct Clamped <: MMI.Deterministic
+    k::Int
+end
+function MMI.clean!(m::Clamped)
+    m.k ≥ 1 && return ""
+    m.k = 1
+    return "k must be ≥ 1; resetting k to 1."
+end
+MMI.fit(m::Clamped, verbosity, X, y) = (m.k * sum(y) / length(y), nothing, NamedTuple())
+MMI.predict(::Clamped, fitresult, Xnew) = fill(fitresult, length(Tables.rows(Xnew)))
+MMI.input_scitype(::Type{Clamped}) = MMI.Table(MMI.Continuous)
+MMI.target_scitype(::Type{Clamped}) = AbstractVector{MMI.Continuous}
+
+"Declares that it only takes Count inputs, unlike the package's Continuous ones."
+mutable struct CountInput <: MMI.Deterministic end
+MMI.input_scitype(::Type{CountInput}) = MMI.Table(MMI.Count)
+MMI.target_scitype(::Type{CountInput}) = AbstractVector{MMI.Continuous}
+
+"Declares no input scitype, so it is Unknown."
+mutable struct NoInputTrait <: MMI.Deterministic end
+MMI.target_scitype(::Type{NoInputTrait}) = AbstractVector{MMI.Continuous}
+
 end

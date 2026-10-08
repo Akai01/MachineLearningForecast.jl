@@ -293,7 +293,7 @@ end
     @testset "fit-count guard warns on large searches" begin
         big = (features=[FeatureSet(Lag(k)) for k in 1:3],
                strategy=fill(Direct(14), 9))
-        # 27 candidates × 2 folds × 14 machines = 756 > 500
+        # 27 candidates × 2 folds × 14 models = 756 > 500
         @test_logs (:warn, r"756 model fits") match_mode=:any tune(
             base, df; grid=big, horizon=14, initial=90)
 
