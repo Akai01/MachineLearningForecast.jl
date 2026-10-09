@@ -69,6 +69,12 @@ held out, and everything before them is the series' training history. All the
 steps below use the training history only; the held-out months are used only
 to score the forecasts.
 
+The M3 series span different calendar years (they end in 73 different months,
+from 1864 to 2005), so no single cut date would hold out each series' own last
+18 months. [`backtest`](@ref) with `windows = 1` cuts each series at its own
+end instead, and with `horizon = 18` it holds out exactly the M3 months.
+`train` and `test` split a series the same way for the two baselines below.
+
 ```julia
 using Statistics
 
@@ -89,121 +95,99 @@ model pulls its forecasts back towards old levels. The transform below models
 each month relative to the months just before it instead, and rebuilds the
 forecasts from each series' own last year.
 
-For each series, from its training history only:
+For each series, from its training history only, three built-in
+[`TargetTransform`](@ref)s are applied in turn:
 
-1. **Level.** Divide the series by ``m``, the mean of its last 12 values, so
-   every series is near 1 at its forecast origin.
-2. **Seasonal adjustment.** The series is seasonal if its autocorrelation at
-   lag 12, ``r_{12}``, passes the 90% test that the M4 competition's
-   benchmarks use: ``|r_{12}| > 1.645 \sqrt{(1 + 2 \sum_{k=1}^{11} r_k^2) / n}``
+1. **Level,** [`LastScale`](@ref)`(12)`. Divide the series by ``m``, the mean
+   of its last 12 values, so every series is near 1 at its forecast origin.
+2. **Seasonal adjustment,** [`Deseasonalize`](@ref)`(12)`. The series is
+   seasonal if its autocorrelation at lag 12, ``r_{12}``, passes the 90% test
+   that the M4 competition's benchmarks use:
+   ``|r_{12}| > 1.645 \sqrt{(1 + 2 \sum_{k=1}^{11} r_k^2) / n}``
    on ``n \ge 36`` points (every M3 training history has at least 48). A
    seasonal series gets the classical multiplicative indices: each value is
    divided by its centred 2×12 moving average, these ratios are averaged by
    position in the year, and the 12 averages are normalised to mean 1. A
    non-seasonal series gets indices of 1. Dividing by the indices gives the
    seasonally adjusted series ``x``.
-3. **Log ratio.** ``z_t = \log(x_t / \bar{x}_t)``, where ``\bar{x}_t`` is the
-   mean of the 12 values before ``x_t``: each month relative to the year
-   before it. A ratio has no unit, so ``z`` does not depend on the level of
-   step 1 and is on the same scale in every series. It is 12 values shorter
-   than the history.
+3. **Log ratio,** [`LogRatio`](@ref)`(12)`. ``z_t = \log(x_t / \bar{x}_t)``,
+   where ``\bar{x}_t`` is the mean of the 12 values before ``x_t``: each month
+   relative to the year before it. A ratio has no unit, so ``z`` does not
+   depend on the level of step 1 and is on the same scale in every series. It
+   is 12 values shorter than the history.
 4. **Inverse.** Forecasts of ``z`` are turned back one month at a time:
    ``\exp(\hat{z})`` times the mean of the previous 12 values of ``x``, rebuilt
    ones included, then times that month's seasonal index and ``m``.
 
+[`TransformChain`](@ref) applies the three in order and undoes them in
+reverse. Given as the `transform` of a [`Forecaster`](@ref), it is fitted on
+each series' own training history, refitted in every `backtest` fold, and the
+forecasts come back on the original scale.
+
 Positions in the year are counted from each series' first month, so the
 forecast for month ``n + j`` of a history of length ``n`` gets the index at
-position `mod1(n + j, 12)`. The log needs positive values, and the code
-assumes them: every M3 training history is positive. A series with zeros or
-negative values needs a shift before the log.
+position `mod1(n + j, 12)`. The log needs positive values: every M3 training
+history is positive, and `LogRatio` and `Deseasonalize` throw an error naming
+the series and the value otherwise. A series with zeros or negative values
+needs a shift first.
 
 This setup was chosen on a validation window, the 18 months before the
 holdout, among several target transforms and feature sets, and was then run
 once on the holdout.
 
 ```julia
-acf(x, k) = (d = x .- mean(x); sum(d[(k + 1):end] .* d[1:(end - k)]) / sum(abs2, d))
+using MachineLearningForecast
 
-function isseasonal(x)
-    n = length(x)
-    n < 36 && return false
-    return abs(acf(x, 12)) > 1.645 * sqrt((1 + 2 * sum(acf(x, k)^2 for k in 1:11)) / n)
-end
-
-function seasonal_index(x)
-    isseasonal(x) || return ones(12)
-    t = 7:(length(x) - 6)
-    # An even window needs half weights to stay centred.
-    ma = [(x[i - 6] / 2 + sum(x[(i - 5):(i + 5)]) + x[i + 6] / 2) / 12 for i in t]
-    ratio = x[t] ./ ma
-    s = [mean(ratio[mod1.(t, 12) .== p]) for p in 1:12]
-    return s ./ mean(s)
-end
-
-function transform(y)
-    m = mean(y[(end - 11):end])
-    index = seasonal_index(y ./ m)
-    x = y ./ m ./ index[mod1.(eachindex(y), 12)]
-    z = [log(x[t] / mean(x[(t - 12):(t - 1)])) for t in 13:length(x)]
-    return (; z, m, index, n = length(x), last12 = x[(end - 11):end])
-end
-
-function rebuild(zhat, state)
-    x = copy(state.last12)
-    for z in zhat
-        push!(x, exp(z) * mean(x[(end - 11):end]))
-    end
-    return state.m .* x[13:end] .* state.index[mod1.(state.n .+ eachindex(zhat), 12)]
-end
+chain = TransformChain(LastScale(12), Deseasonalize(12), LogRatio(12))
 ```
 
 ## The panel
 
-`tr` holds each series' transform: its ``z`` and what `rebuild` needs.
-The ``z`` of all series go into one long-format table with columns
-`unique_id`, `ds` and `y`. Since ``z`` starts at the 13th month of each
-history, so does `ds`.
+`long` puts series into one long-format table with columns `unique_id`, `ds`
+and `y`, each series whole, its held-out months included: `backtest` cuts them
+off. The transform drops the first 12 months of each training history, which
+have no year before them.
 
 ```julia
-tr = Dict(s.id => transform(train(s)) for s in dated)
-
-panel = (unique_id = reduce(vcat, [fill(s.id, length(tr[s.id].z)) for s in dated]),
-         ds = reduce(vcat, [s.start .+ Month.(12:(length(train(s)) - 1)) for s in dated]),
-         y = reduce(vcat, [tr[s.id].z for s in dated]))
-println(length(panel.y), " training rows")
+long(ss) = (unique_id = reduce(vcat, [fill(s.id, length(s.y)) for s in ss]),
+            ds = reduce(vcat, [s.start .+ Month.(0:(length(s.y) - 1)) for s in ss]),
+            y = reduce(vcat, [s.y for s in ss]))
+panel = long(dated)
+println(length(panel.y), " rows")
 ```
 
 ```text
-123533 training rows
+165503 rows
 ```
 
 ## One specification for every learner
 
 Every learner gets the same [`FeatureSet`](@ref) (lags 1 to 12 of ``z``, its
-12-month rolling mean and the calendar month) and the same
-[`Recursive`](@ref) strategy, with `id = :unique_id` to fit one model across
-the panel. The month comes from [`Calendar`](@ref). On a panel,
+12-month rolling mean and the calendar month), the same [`Recursive`](@ref)
+strategy and the transform, with `id = :unique_id` to fit one model across the
+panel. The month comes from [`Calendar`](@ref). On a panel,
 [`Fourier`](@ref) would mark the same month in every series as well, since it
 counts steps from the earliest series' first month, although these series
 start in different months (1155 in January, 198 in October, 46 in others).
 
 ```julia
-using MachineLearningForecast
-
 features = FeatureSet(Lag.(1:12)..., RollingMean(12), Calendar(:month))
 spec(model) = Forecaster(model; features, strategy = Recursive(), freq = Month(1),
-                         id = :unique_id)
+                         id = :unique_id, transform = chain)
 ```
 
 ## Scoring
 
-`evaluate` fits one model on the panel, forecasts 18 months of ``z`` for every
-series (each from its own last training month), turns them back into values
-with `rebuild`, and scores each series with [`smape`](@ref) and
-[`mase`](@ref) on the original scale. `mase` uses seasonality `m = 12` and that
-series' training values. Both are averaged over the 1399 series, and sMAPE is
-shown in percent. MLJLinearModels also exports a `fit`, so the code calls
-`MachineLearningForecast.fit`.
+`evaluate` runs [`backtest`](@ref) with `windows = 1` on a panel: it fits one
+model on every series' training history, forecasts 18 months for every series
+(each from its own last training month), and scores the forecasts with
+[`smape`](@ref) and [`mase`](@ref) on the original scale. The M3 benchmarks
+scale MASE by the seasonal naive error, so `mase12` calls `mase` with
+seasonality `m = 12`, and
+[`needs_ytrain`](@ref MachineLearningForecast.needs_ytrain) tells `backtest`
+to pass it each series' own training values. `backtest` reports MASE averaged
+over the series and sMAPE over all forecast months, which is the same average
+over the series, since each has 18. sMAPE is shown in percent.
 
 !!! note "Why sMAPE"
     This page reports sMAPE only because the M3 competition did, so the
@@ -215,50 +199,45 @@ shown in percent. MLJLinearModels also exports a `fit`, so the code calls
     MASE as the standard for comparing accuracy across series. MASE is
     reported alongside for that reason.
 
-There are two baselines. The seasonal naive forecast repeats each series' last
-12 training months. Naive2, one of the M3 competition's benchmarks, repeats the
-last seasonally adjusted value and puts the season back, with the seasonal
-indices of the transform.
+There are two baselines, scored the same way series by series. The seasonal
+naive forecast repeats each series' last 12 training months. Naive2, one of
+the M3 competition's benchmarks, repeats the last seasonally adjusted value and
+puts the season back. [`fit_transform`](@ref) with `Deseasonalize(12)` does
+the adjustment, with the same seasonal indices as step 2 of the transform,
+since they do not depend on the level, and [`untransform`](@ref) the inverse.
 
 ```julia
+mase12(y, ŷ; y_train) = mase(y, ŷ; y_train, m = 12)
+MachineLearningForecast.needs_ytrain(::typeof(mase12)) = true
+
+function evaluate(model, data = panel)
+    t0 = time()
+    r = backtest(spec(model), data; horizon = h, windows = 1, metrics = (smape, mase12))
+    seconds = time() - t0
+    s, m = r.metrics.value[r.metrics.fold .== 1]
+    return 100 * s, m, seconds
+end
+
 function scores(forecasts)
     smapes = [smape(test(s), forecasts[s.id]) for s in dated]
-    mases = [mase(test(s), forecasts[s.id]; y_train = train(s), m = 12) for s in dated]
+    mases = [mase12(test(s), forecasts[s.id]; y_train = train(s)) for s in dated]
     return 100 * mean(smapes), mean(mases)
 end
 
-function evaluate(model)
-    t0 = time()
-    fc = forecast(MachineLearningForecast.fit(spec(model), panel), h)
-    seconds = time() - t0
-    forecasts = Dict(s.id => rebuild(fc.y_hat[fc.unique_id .== s.id], tr[s.id])
-                     for s in dated)
-    return (scores(forecasts)..., seconds)
-end
-
-function naive2(y, index)
-    n = length(y)
-    return y[end] / index[mod1(n, 12)] .* index[mod1.(n .+ (1:h), 12)]
+function naive2(y)
+    z, state = fit_transform(Deseasonalize(12), y)
+    return untransform(Deseasonalize(12), fill(z[end], h), state)
 end
 
 snaive = Dict(s.id => repeat(train(s)[(end - 11):end], 2)[1:h] for s in dated)
-naive2s = Dict(s.id => naive2(train(s), tr[s.id].index) for s in dated)
+naive2s = Dict(s.id => naive2(train(s)) for s in dated)
 ```
-
-This holdout is built by hand to show each step. The M3 series span different
-calendar years (they end in 73 different months, from 1864 to 2005), so a cut
-on one shared date would not hold out each series' own last 18 months.
-[`backtest`](@ref) with `windows = 1` cuts each series at its own end instead,
-so with `horizon = 18` it holds out the same months, and the `transform`
-keyword of [`Forecaster`](@ref), here
-`TransformChain(LastScale(12), Deseasonalize(12), LogRatio(12))`, replaces the
-hand-written transform. [`tune`](@ref) builds on `backtest`.
 
 ## The models
 
 Each model is used with its package's default hyperparameters, except
-XGBoost's `base_score`, set below. Where a model
-draws random numbers, its seed is fixed, so the results reproduce.
+XGBoost's `base_score`, set below. Where a model draws random numbers, its seed
+is fixed, so the results reproduce.
 
 | Model | Package | Kind |
 |---|---|---|
@@ -324,11 +303,11 @@ end
 model                   sMAPE %   MASE  seconds
 seasonal naive            17.26  1.146        -
 Naive2                    16.93  1.046        -
-EvoTreeRegressor          13.67  0.854      0.5
-RandomForestRegressor     13.66  0.855     11.8
-LinearRegressor           14.58  0.991      0.1
-XGBoostRegressor          13.78  0.858      0.4
-LGBMRegressor             13.71  0.856      0.4
+EvoTreeRegressor          13.67  0.854      0.6
+RandomForestRegressor     13.66  0.855     11.6
+LinearRegressor           14.58  0.991      0.2
+XGBoostRegressor          13.78  0.858      0.5
+LGBMRegressor             13.71  0.856      0.5
 KNNRegressor              14.32  0.898      2.4
 ```
 
@@ -378,14 +357,14 @@ validation window and scores the chosen configurations on this holdout.
 (20 threads), which gave the same scores; the times above are from Julia
 1.12.5 and depend on the machine and the thread count. Run alone, download
 included, the whole script took about a minute on both versions and peaked at
-about 2.6 GiB of memory on Julia 1.12.5 and 5 GiB on 1.10.12. Package
+about 2.8 GiB of memory on Julia 1.12.5 and 5 GiB on 1.10.12. Package
 versions: MachineLearningForecast 0.1.0, EvoTrees 0.19.0,
 MLJDecisionTreeInterface 0.5.0, MLJLinearModels 0.10.4, MLJXGBoostInterface
 0.3.13, LightGBM 2.2.2, NearestNeighborModels 0.2.3 and ZipArchives 2.6.1.
 
 ## Next steps
 
-These are default hyperparameters, `base_score` aside, on one feature set. To tune the
-hyperparameters of these six learners on a validation window, continue with
-[Tuning the models](tuning.md). To search over models, hyperparameters,
+These are default hyperparameters, `base_score` aside, on one feature set. To
+tune the hyperparameters of these six learners on a validation window, continue
+with [Tuning the models](tuning.md). To search over models, hyperparameters,
 feature sets and strategies, scored on backtest error, see [`tune`](@ref).

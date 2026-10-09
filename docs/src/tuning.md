@@ -6,44 +6,34 @@ hyperparameters of each learner on a validation window, then scores the chosen
 configuration once on the same M3 holdout.
 
 This page continues the session of [Using different models](models.md): run
-that page's code first. The code below reuses its data, `train` and `test`,
-`transform` and `rebuild`, `spec` with its features, `evaluate` and the
-list of `models`, and adds the standard library Random. It runs top to bottom
-after that page's code, and the outputs shown are from that run.
+that page's code first. The code below reuses its data, `h`, `long`, `spec`
+with its features and transform, `evaluate` and the list of `models`, and adds
+the standard library Random. It runs top to bottom after that page's code, and
+the outputs shown are from that run.
 
 ## The validation window
 
 The tuning must not see the holdout, so it scores on the window before it. For
 each series, the validation history is `y[1:end-36]`, the training history
 without its last 18 months, and the validation target is the 18 months that
-follow it. Cutting the holdout off each series turns `train` and `test` into
-exactly these. The transform is fitted on the validation history only, as it
-was fitted on the training history before. 291 of the 1399 validation
-histories are shorter than 36 months (the shortest has 30), too short for the
-seasonality test, so the transform treats them as non-seasonal. `validate`
-scores a model as `evaluate` does, on the validation target.
+follow it. `vpanel` is the panel with the holdout cut off each series, so
+`evaluate` on it, with `backtest` and `windows = 1`, scores exactly this
+window, and the transform is fitted on the validation history only, as it was
+fitted on the training history before. 291 of the 1399 validation histories
+are shorter than 36 months (the shortest has 30), too short for the
+seasonality test, so `Deseasonalize` treats them as non-seasonal. `validate`
+returns the sMAPE and MASE.
 
 ```julia
 vdated = [(id = s.id, start = s.start, y = s.y[1:(end - h)]) for s in dated]
-vtr = Dict(s.id => transform(train(s)) for s in vdated)
+vpanel = long(vdated)
+println(length(vpanel.y), " rows")
 
-vpanel = (unique_id = reduce(vcat, [fill(s.id, length(vtr[s.id].z)) for s in vdated]),
-          ds = reduce(vcat, [s.start .+ Month.(12:(length(train(s)) - 1)) for s in vdated]),
-          y = reduce(vcat, [vtr[s.id].z for s in vdated]))
-println(length(vpanel.y), " training rows")
-
-function validate(model)
-    fc = forecast(MachineLearningForecast.fit(spec(model), vpanel), h)
-    forecasts = Dict(s.id => rebuild(fc.y_hat[fc.unique_id .== s.id], vtr[s.id])
-                     for s in vdated)
-    smapes = [smape(test(s), forecasts[s.id]) for s in vdated]
-    mases = [mase(test(s), forecasts[s.id]; y_train = train(s), m = 12) for s in vdated]
-    return 100 * mean(smapes), mean(mases)
-end
+validate(model) = evaluate(model, vpanel)[1:2]
 ```
 
 ```text
-98351 training rows
+140321 rows
 ```
 
 ## The search spaces
@@ -144,7 +134,7 @@ the validation target. Each learner keeps the configuration with the lowest
 validation sMAPE; on a tie, the first. `tried` keeps every learner's
 candidates and validation scores for the optional diagnostic at the end of the
 page. This step takes most of the runtime without that diagnostic, about 13 of
-the 15.4 minutes on 20 threads (see the end of the page). For 12 of the 14
+the 14.7 minutes on 20 threads (see the end of the page). For 12 of the 14
 lasso fits, those with ``\lambda \le 10^{-2.5}``, MLJLinearModels warns that
 proximal gradient descent did not converge in 1000 iterations, and it warns
 again when the chosen lasso is fitted for the holdout below. The outputs leave
@@ -256,9 +246,9 @@ same order as the change from drawing a different 29 configurations, up to
 0.14. The linear and nearest-neighbour searches try their whole space and
 chose the same configurations on both versions.
 
-The search is done by hand to show each step, as the holdout is on the
-previous page. [`tune`](@ref) runs it for you: given the panel without its
-holdout, `windows = 1` and `horizon = 18`, it scores each candidate on each
+The search loop is written out so that the page can show both sMAPE and MASE
+for every candidate. [`tune`](@ref) runs the same search for one metric: given
+`vpanel`, `windows = 1` and `horizon = 18`, it scores each candidate on each
 series' own 18 months before the holdout, and with `windows` above 1 by its
 mean over several such windows. Pass the candidate models in `grid` with
 [`RandomSearch`](@ref) or [`GridSearch`](@ref), or write a
@@ -287,31 +277,24 @@ tied scores share their average rank. Four validation scores are compared:
 sMAPE on the validation window above (`window 1`); sMAPE on a second window,
 the 18 months before window 1 (`window 2`); the sMAPE of both windows pooled,
 with every series-window pair weighted equally (`both`); and MASE on window 1
-(`w1 MASE`). Window 2 is scored, as window 1 is, from a transform and a panel
-fitted on the history before it, and only for the series with at least 30
-months of history there, the length of the shortest history in window 1.
+(`w1 MASE`). Window 2 is scored as window 1 is, by `evaluate` on the panel
+with the last 36 months cut off each series, and only for the series with at
+least 30 months of history before it, the length of the shortest history in
+window 1.
 
 !!! warning "Optional, and for diagnosis only"
     This step is not part of the tuning: it peeks at the holdout, which a
     real forecast cannot do, and nothing on this page is chosen from it. It
-    refits 240 models, 120 on the holdout and 120 on window 2, which took 24
-    minutes here, 19 of them for the random forest.
+    refits 240 models, 120 on the holdout and 120 on window 2, which took 22
+    minutes here, 17 of them for the random forest.
 
 ```julia
 w2 = [(id = s.id, start = s.start, y = s.y[1:(end - h)]) for s in vdated
       if length(s.y) - 2h >= 30]
-w2tr = Dict(s.id => transform(train(s)) for s in w2)
-w2panel = (unique_id = reduce(vcat, [fill(s.id, length(w2tr[s.id].z)) for s in w2]),
-           ds = reduce(vcat, [s.start .+ Month.(12:(length(train(s)) - 1)) for s in w2]),
-           y = reduce(vcat, [w2tr[s.id].z for s in w2]))
+w2panel = long(w2)
 println(length(w2), " of ", length(vdated), " series have window 2")
 
-function validate2(model)
-    fc = forecast(MachineLearningForecast.fit(spec(model), w2panel), h)
-    forecasts = Dict(s.id => rebuild(fc.y_hat[fc.unique_id .== s.id], w2tr[s.id])
-                     for s in w2)
-    return 100 * mean(smape(test(s), forecasts[s.id]) for s in w2)
-end
+validate2(model) = evaluate(model, w2panel)[1]
 
 # Average ranks for ties, as standard Spearman uses.
 ranks(x) = [count(<(v), x) + (count(==(v), x) + 1) / 2 for v in x]
@@ -381,10 +364,10 @@ are findings for this panel and these spaces, not general ones.
 
 **Tested with** Julia 1.12.5 and 1.10.12, each started with `--threads=auto`
 (20 threads), running the previous page's code and this page's as one script.
-The outputs above are from Julia 1.12.5, where the script took 39 minutes, 15.4
-of them before the optional diagnostic, and peaked at about 5.4 GiB of memory.
-On 1.10.12 it took 28 minutes, 11.7 before the diagnostic, and peaked at about
-15.6 GiB. Julia 1.11 changed how `MersenneTwister` turns an integer seed into
+The outputs above are from Julia 1.12.5, where the script took 36 minutes, 14.7
+of them before the optional diagnostic, and peaked at about 5.5 GiB of memory.
+On 1.10.12 it took 29 minutes, 11.7 before the diagnostic, and peaked at about
+17.4 GiB. Julia 1.11 changed how `MersenneTwister` turns an integer seed into
 its state, so on Julia 1.10 `MersenneTwister(2026)` gives other random numbers
 and the four random searches draw other configurations. The defaults and the
 linear and nearest-neighbour searches score the same on both versions. Package

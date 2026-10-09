@@ -54,8 +54,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   model with the same features, strategy and default hyperparameters. Each
   series is seasonally adjusted (the M4 seasonality test and classical
   multiplicative indices) and modelled as the log ratio to its previous 12
-  months. The page scores the learners against seasonal-naive and Naive2
-  baselines on the M3 holdout and compares them with published M3 results.
+  months, with the built-in
+  `TransformChain(LastScale(12), Deseasonalize(12), LogRatio(12))`. The page
+  scores the learners with `backtest(...; windows = 1)`, which holds out each
+  series' last 18 months, against seasonal-naive and Naive2 baselines, and
+  compares them with published M3 results.
   XGBoost is given `base_score = 0.0`, the centre of the log-ratio target:
   MLJ's default of 0.5 is an offset every XGBoost model would first have to
   unlearn, while LightGBM and EvoTrees start from the target's mean.
@@ -63,8 +66,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   models": it gives each of the six learners the same budget of 30
   hyperparameter configurations (its defaults and 29 drawn at random with a
   fixed seed, or the whole space where it has 30 points), picks the one with
-  the lowest sMAPE on the 18 months before the holdout, and scores it once on
-  the M3 holdout next to the defaults. Its XGBoost candidates get
+  the lowest sMAPE on the 18 months before the holdout, scored with
+  `backtest(...; windows = 1)` on the panel without its holdout, and scores it
+  once on the M3 holdout next to the defaults. Its XGBoost candidates get
   `base_score = 0.0` too, and a short check shows what the default 0.5 costs
   candidates with a small learning rate and few rounds. An optional section,
   "How much tuning can gain here", scores every configuration of the four tree
