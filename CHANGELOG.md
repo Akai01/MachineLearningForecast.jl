@@ -74,6 +74,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- A panel `Direct` fit builds each step's training table with one gather per
+  column from the stacked series, instead of slicing every series and stacking
+  the slices again. On the 1399 M3 monthly series, the package's own share of
+  a `Direct(18)` fit allocates 429 MiB instead of 707 MiB, with identical
+  results.
 - On a panel, `Fourier` counts steps from the earliest series' first training
   timestamp, not from each series' own, so series that start on different
   dates have the same Fourier values on the same date and one global model

@@ -640,6 +640,22 @@
         @test (@allocated fit(fc, big)) < 100 * 2^20
     end
 
+    @testset "panel Direct gathers each step's rows in one pass" begin
+        k = 2000
+        big = makepanel(lens=fill(30, k), levels=fill(1.0, k),
+                        starts=fill(Date(2022, 1, 1), k))
+        feats = FeatureSet(Lag.(1:7)..., RollingMean(7), Calendar(:dayofweek))
+        dir = mk(TestModels.MeanModel(), feats; strat=Direct(5))
+        rec = mk(TestModels.MeanModel(), feats)
+        # Step i trains on targets at t = 7 + i, ..., 30.
+        @test [t.fitresult for t in fit(dir, big).models] == [1 + (37 + i) / 2 for i in 1:5]
+        fit(rec, big)
+        extra = (@allocated fit(dir, big)) - (@allocated fit(rec, big))
+        steps = k * sum(24 - i for i in 1:5) * 10 * sizeof(Float64)
+        # Slicing per series first allocated the steps twice.
+        @test extra < 1.6 * steps
+    end
+
     @testset "single-series behaviour is unchanged" begin
         df = (ds=collect(Date(2022, 1, 1):Day(1):Date(2022, 2, 19)), y=Float64.(1:50))
         fc = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),

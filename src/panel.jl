@@ -127,23 +127,28 @@ end
 # Shift within each series, as in single-series Direct.
 function _panel_models(fc::Forecaster, s::Direct, frames)
     istarget = targetcolumnmask(fc.features)
-    colnames = keys(frames[1][2])
+    X = _vcat_frames([f[2] for f in frames])
+    y = reduce(vcat, [f[3] for f in frames])
+    lens = [length(f[3]) for f in frames]
     return map(1:s.max_horizon) do i
-        Xs = NamedTuple[]
-        ys = Vector{Float64}[]
-        for (_, X, y, _) in frames
-            nX = length(y)
-            nX ≥ i || continue           # this series cannot reach step i
-            push!(Xs, NamedTuple{colnames}(ntuple(
-                c -> istarget[c] ? values(X)[c][1:(nX - i + 1)] : values(X)[c][i:nX],
-                length(colnames))))
-            push!(ys, y[i:nX])
+        # One gather per column, not one slice per series.
+        m = sum(nX -> max(nX - i + 1, 0), lens)
+        from, to = Vector{Int}(undef, m), Vector{Int}(undef, m)
+        k = o = 0
+        for nX in lens
+            for j in 1:(nX - i + 1)
+                k += 1
+                from[k], to[k] = o + j, o + j + i - 1
+            end
+            o += nX
         end
-        isempty(Xs) && throw(ArgumentError(
+        m == 0 && throw(ArgumentError(
             "not enough data for Direct($(s.max_horizon)): no series has enough " *
             "rows to train the step-$i model. Shorten max_horizon, provide longer " *
             "series, or reduce lags/windows."))
-        _train(fc.model, _vcat_frames(Xs), reduce(vcat, ys))
+        Xi = NamedTuple{keys(X)}(ntuple(c -> values(X)[c][istarget[c] ? from : to],
+                                        length(X)))
+        _train(fc.model, Xi, y[to])
     end
 end
 
