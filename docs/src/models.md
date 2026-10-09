@@ -148,7 +148,7 @@ function transform(y)
     return (; z, m, index, n = length(x), last12 = x[(end - 11):end])
 end
 
-function untransform(zhat, state)
+function rebuild(zhat, state)
     x = copy(state.last12)
     for z in zhat
         push!(x, exp(z) * mean(x[(end - 11):end]))
@@ -159,7 +159,7 @@ end
 
 ## The panel
 
-`tr` holds each series' transform: its ``z`` and what `untransform` needs.
+`tr` holds each series' transform: its ``z`` and what `rebuild` needs.
 The ``z`` of all series go into one long-format table with columns
 `unique_id`, `ds` and `y`. Since ``z`` starts at the 13th month of each
 history, so does `ds`.
@@ -182,11 +182,10 @@ println(length(panel.y), " training rows")
 Every learner gets the same [`FeatureSet`](@ref) (lags 1 to 12 of ``z``, its
 12-month rolling mean and the calendar month) and the same
 [`Recursive`](@ref) strategy, with `id = :unique_id` to fit one model across
-the panel. The month comes from [`Calendar`](@ref) and not from
-[`Fourier`](@ref): `Fourier` counts steps from each series' first timestamp,
-and these series start in different months (1155 in January, 198 in October,
-46 in other months), so the same `Fourier` value would mean a different month
-in different series.
+the panel. The month comes from [`Calendar`](@ref). On a panel,
+[`Fourier`](@ref) would mark the same month in every series as well, since it
+counts steps from the earliest series' first month, although these series
+start in different months (1155 in January, 198 in October, 46 in others).
 
 ```julia
 using MachineLearningForecast
@@ -200,7 +199,7 @@ spec(model) = Forecaster(model; features, strategy = Recursive(), freq = Month(1
 
 `evaluate` fits one model on the panel, forecasts 18 months of ``z`` for every
 series (each from its own last training month), turns them back into values
-with `untransform`, and scores each series with [`smape`](@ref) and
+with `rebuild`, and scores each series with [`smape`](@ref) and
 [`mase`](@ref) on the original scale. `mase` uses seasonality `m = 12` and that
 series' training values. Both are averaged over the 1399 series, and sMAPE is
 shown in percent. MLJLinearModels also exports a `fit`, so the code calls
@@ -232,7 +231,7 @@ function evaluate(model)
     t0 = time()
     fc = forecast(MachineLearningForecast.fit(spec(model), panel), h)
     seconds = time() - t0
-    forecasts = Dict(s.id => untransform(fc.y_hat[fc.unique_id .== s.id], tr[s.id])
+    forecasts = Dict(s.id => rebuild(fc.y_hat[fc.unique_id .== s.id], tr[s.id])
                      for s in dated)
     return (scores(forecasts)..., seconds)
 end
@@ -246,12 +245,14 @@ snaive = Dict(s.id => repeat(train(s)[(end - 11):end], 2)[1:h] for s in dated)
 naive2s = Dict(s.id => naive2(train(s), tr[s.id].index) for s in dated)
 ```
 
-This holdout is built by hand and not with [`backtest`](@ref) because, on a
-panel, `backtest` cuts its folds on one global timestamp grid. The M3 series
-span different calendar years (they end in 73 different months, from 1864 to
-2005), so a cut on a shared date would not hold out each series' own last 18
-months. When your series share a calendar, `backtest` does this for you, and
-[`tune`](@ref) builds on it.
+This holdout is built by hand to show each step. The M3 series span different
+calendar years (they end in 73 different months, from 1864 to 2005), so a cut
+on one shared date would not hold out each series' own last 18 months.
+[`backtest`](@ref) with `windows = 1` cuts each series at its own end instead,
+so with `horizon = 18` it holds out the same months, and the `transform`
+keyword of [`Forecaster`](@ref), here
+`TransformChain(LastScale(12), Deseasonalize(12), LogRatio(12))`, replaces the
+hand-written transform. [`tune`](@ref) builds on `backtest`.
 
 ## The models
 

@@ -7,7 +7,7 @@ configuration once on the same M3 holdout.
 
 This page continues the session of [Using different models](models.md): run
 that page's code first. The code below reuses its data, `train` and `test`,
-`transform` and `untransform`, `spec` with its features, `evaluate` and the
+`transform` and `rebuild`, `spec` with its features, `evaluate` and the
 list of `models`, and adds the standard library Random. It runs top to bottom
 after that page's code, and the outputs shown are from that run.
 
@@ -34,7 +34,7 @@ println(length(vpanel.y), " training rows")
 
 function validate(model)
     fc = forecast(MachineLearningForecast.fit(spec(model), vpanel), h)
-    forecasts = Dict(s.id => untransform(fc.y_hat[fc.unique_id .== s.id], vtr[s.id])
+    forecasts = Dict(s.id => rebuild(fc.y_hat[fc.unique_id .== s.id], vtr[s.id])
                      for s in vdated)
     smapes = [smape(test(s), forecasts[s.id]) for s in vdated]
     mases = [mase(test(s), forecasts[s.id]; y_train = train(s), m = 12) for s in vdated]
@@ -256,14 +256,12 @@ same order as the change from drawing a different 29 configurations, up to
 0.14. The linear and nearest-neighbour searches try their whole space and
 chose the same configurations on both versions.
 
-The search is done by hand, and not with [`tune`](@ref), for the reason the
-holdout is built by hand on the previous page: on a panel, [`backtest`](@ref)
-cuts its folds on one global timestamp grid, and the M3 series span different
-calendar years, so a cut on a shared date would not give each series its own
-validation window. When your series share a calendar, or for a single series,
-`tune` runs this search for you and scores each candidate by its mean over
-several backtest folds instead of one window: pass the candidate models in
-`grid` with [`RandomSearch`](@ref) or [`GridSearch`](@ref), or write a
+The search is done by hand to show each step, as the holdout is on the
+previous page. [`tune`](@ref) runs it for you: given the panel without its
+holdout, `windows = 1` and `horizon = 18`, it scores each candidate on each
+series' own 18 months before the holdout, and with `windows` above 1 by its
+mean over several such windows. Pass the candidate models in `grid` with
+[`RandomSearch`](@ref) or [`GridSearch`](@ref), or write a
 [`TuningStrategy`](@ref) for a search of your own.
 
 The choice is made on sMAPE, the measure the M3 competition reported, so the
@@ -310,7 +308,7 @@ println(length(w2), " of ", length(vdated), " series have window 2")
 
 function validate2(model)
     fc = forecast(MachineLearningForecast.fit(spec(model), w2panel), h)
-    forecasts = Dict(s.id => untransform(fc.y_hat[fc.unique_id .== s.id], w2tr[s.id])
+    forecasts = Dict(s.id => rebuild(fc.y_hat[fc.unique_id .== s.id], w2tr[s.id])
                      for s in w2)
     return 100 * mean(smape(test(s), forecasts[s.id]) for s in w2)
 end
