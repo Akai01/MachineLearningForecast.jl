@@ -74,6 +74,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The package precompiles a workload with PrecompileTools, a new dependency:
+  single-series and panel `fit`, `forecast` and `backtest` with both
+  strategies, with and without a transform. In a fresh session, loading the
+  package and EvoTrees, then a first panel fit and forecast, a panel backtest
+  and a single-series `Direct` fit and forecast took 9.0 s instead of 14.8 s
+  on Julia 1.12.5 and 7.1 s instead of 10.2 s on Julia 1.10.12. Precompiling
+  the package, once per install or update, takes 13 s instead of 2 s on Julia
+  1.12.5 and 8 s instead of 2 s on Julia 1.10.12.
 - A panel `Direct` fit builds each step's training table with one gather per
   column from the stacked series, instead of slicing every series and stacking
   the slices again. On the 1399 M3 monthly series, the package's own share of

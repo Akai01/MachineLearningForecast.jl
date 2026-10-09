@@ -24,6 +24,7 @@ using Dates
 # Loading it gives models MLJModelInterface's full interface.
 import MLJBase
 import MLJModelInterface
+import PrecompileTools
 import Random
 import Statistics
 import Tables
@@ -50,5 +51,6 @@ include("direct.jl")
 include("backtest.jl")
 include("panel.jl")
 include("tune.jl")
+include("precompile.jl")
 
 end

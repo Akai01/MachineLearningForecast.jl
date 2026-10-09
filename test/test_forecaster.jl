@@ -67,6 +67,10 @@
         @test all(isfinite, r.folds.y_hat)
     end
 
+    @testset "the precompile workload runs without logging" begin
+        @test_logs MachineLearningForecast._precompile_workload()
+    end
+
     @testset "recursive oracle: LinAR closed-form iteration" begin
         # ŷ_{n+1} = a*y_n + b, then iterated on its own predictions.
         a, b = 0.8, 2.0
