@@ -5,8 +5,9 @@ Any MLJ `Deterministic` regressor can be the base model of a
 else: the features, the strategy and the data stay as they are. This page fits
 six learners from six packages to the same panel of 1399 monthly series from
 the M3 competition, each as one global model with the same specification and
-its package's default hyperparameters. It scores them on the M3 holdout next to
-two baselines and published results.
+its package's default hyperparameters, apart from one XGBoost setting explained
+in [The models](@ref). It scores them on the M3 holdout next to two baselines
+and published results.
 
 The code below runs top to bottom as one script, and the outputs shown are
 from that run. Besides MachineLearningForecast it uses the standard libraries
@@ -254,7 +255,8 @@ months. When your series share a calendar, `backtest` does this for you, and
 
 ## The models
 
-Each model is used with its package's default hyperparameters. Where a model
+Each model is used with its package's default hyperparameters, except
+XGBoost's `base_score`, set below. Where a model
 draws random numbers, its seed is fixed, so the results reproduce.
 
 | Model | Package | Kind |
@@ -273,6 +275,18 @@ does not export its MLJ model, so it is reached as
 `LightGBM.MLJInterface.LGBMRegressor`, and `verbosity = -1` silences its
 training log.
 
+Boosted trees start from a constant prediction and add trees to correct it.
+LightGBM and EvoTrees start from the mean of the target, but MLJ's
+`XGBoostRegressor` starts from its `base_score` hyperparameter, which defaults
+to 0.5. The target ``z`` here is a log ratio centred near 0, so XGBoost is
+given `base_score = 0.0`, its natural centre, which puts it on the same footing
+as the other two. With the default 0.5, every XGBoost model first has to
+unlearn an offset of 0.5: a small learning rate or few rounds then leave part
+of it in every forecast. The setting was changed after a first run on the
+holdout, in which XGBoost with the default 0.5 scored 13.85 sMAPE and 0.860
+MASE. [Tuning the models](tuning.md) measures the effect on two such
+configurations.
+
 ```julia
 using EvoTrees, MLJDecisionTreeInterface, MLJLinearModels, MLJXGBoostInterface
 using LightGBM, NearestNeighborModels
@@ -281,7 +295,7 @@ models = [
     EvoTreeRegressor(seed = 1),
     RandomForestRegressor(rng = 1),
     LinearRegressor(),
-    XGBoostRegressor(seed = 1),
+    XGBoostRegressor(seed = 1, base_score = 0.0),
     LightGBM.MLJInterface.LGBMRegressor(seed = 1, verbosity = -1),
     KNNRegressor(),
 ]
@@ -309,17 +323,17 @@ end
 model                   sMAPE %   MASE  seconds
 seasonal naive            17.26  1.146        -
 Naive2                    16.93  1.046        -
-EvoTreeRegressor          13.67  0.854      1.4
+EvoTreeRegressor          13.67  0.854      0.5
 RandomForestRegressor     13.66  0.855     11.8
-LinearRegressor           14.58  0.991      1.4
-XGBoostRegressor          13.85  0.860      1.7
-LGBMRegressor             13.71  0.856      1.8
-KNNRegressor              14.32  0.898      3.5
+LinearRegressor           14.58  0.991      0.1
+XGBoostRegressor          13.78  0.858      0.4
+LGBMRegressor             13.71  0.856      0.4
+KNNRegressor              14.32  0.898      2.4
 ```
 
 All six learners beat both baselines on both metrics: their sMAPE is 2.3 to
 3.3 points below Naive2's, and every MASE is below 1, while both baselines'
-are above it. The four tree ensembles score 13.66 to 13.85, the
+are above it. The four tree ensembles score 13.66 to 13.78, the
 nearest-neighbour model 14.32 and the linear model 14.58. The random forest
 took the longest to fit and forecast. Differences of a few hundredths between
 learners mean little here: step 1 of the transform cancels in step 3, so
@@ -350,8 +364,8 @@ comparison is approximate. Naive2 scores 16.93 here against the published
 | N-BEATS-I+G | 13.11 |
 
 The four tree ensembles land level with Theta, the winner of M3, ForecastPro,
-DOTM and bagged ETS. EXP, a later statistical method, is 0.2 to 0.4 ahead of
-them, and N-BEATS about 0.5 to 0.7. That does not show that the trees beat
+DOTM and bagged ETS. EXP, a later statistical method, is 0.2 to 0.35 ahead
+of them, and N-BEATS about 0.5 to 0.7. That does not show that the trees beat
 Theta: the margin over Theta is at most 0.19, there is no significance test,
 and the series differ. The nearest-neighbour and linear models are close to
 Comb S-H-D and ahead of ARIMA.
@@ -361,15 +375,16 @@ validation window and scores the chosen configurations on this holdout.
 
 **Tested with** Julia 1.12.5 and 1.10.12, each started with `--threads=auto`
 (20 threads), which gave the same scores; the times above are from Julia
-1.12.5 and depend on the machine and the thread count. The whole script
-peaked at about 3 GB of memory on Julia 1.12.5 and 5 GB on 1.10.12. Package
+1.12.5 and depend on the machine and the thread count. Run alone, download
+included, the whole script took about a minute on both versions and peaked at
+about 2.6 GiB of memory on Julia 1.12.5 and 5 GiB on 1.10.12. Package
 versions: MachineLearningForecast 0.1.0, EvoTrees 0.19.0,
 MLJDecisionTreeInterface 0.5.0, MLJLinearModels 0.10.4, MLJXGBoostInterface
 0.3.13, LightGBM 2.2.2, NearestNeighborModels 0.2.3 and ZipArchives 2.6.1.
 
 ## Next steps
 
-These are default hyperparameters on one feature set. To tune the
+These are default hyperparameters, `base_score` aside, on one feature set. To tune the
 hyperparameters of these six learners on a validation window, continue with
 [Tuning the models](tuning.md). To search over models, hyperparameters,
 feature sets and strategies, scored on backtest error, see [`tune`](@ref).
