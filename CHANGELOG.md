@@ -157,6 +157,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `Fourier` values drifted as the step index grew: computing
+  `sin(2πkn/period)` directly rounds more as `n` grows, so a phase took a
+  slightly different value in every period (at phase 0, -2.4e-16 after one
+  period and -2.7e-14 after 25). Tree learners split on these differences as
+  if they were a time index, and histogram learners such as EvoTrees could put
+  a forecast row in another phase's bin: on a year of daily data with a pure
+  weekly season, EvoTrees missed by up to 3.6 on an amplitude of 5. `Fourier`
+  now reduces `k * n` modulo the period first, so a phase has the same value in
+  every period. On 200 noisy daily series with a weekly season, forecasting 14
+  days with `Fourier(7, 2)` alone, the mean absolute error fell from 1.22 to
+  1.08 for EvoTrees and the random forest; with lags 1 to 7 added it changed
+  by less than 0.03.
 - Panel `backtest` scored `mase`, and any metric declaring `needs_ytrain`, with
   one training vector pooled from every series in table order, so its scale
   mixed series and changed with row order. Two series climbing 1 and 10 a day

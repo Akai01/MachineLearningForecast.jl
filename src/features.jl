@@ -291,23 +291,24 @@ end
 _uses_step_index(::AbstractFeature) = false
 _uses_step_index(::Fourier) = true
 
+# Reducing k * n first makes whole periods repeat bit for bit.
+_fourier_angle(f::Fourier, k::Integer, n::Integer) = 2π * mod(k * n, f.period) / f.period
+
 function materialize!(out::ColumnAccumulator, f::Fourier, y::AbstractVector{Float64},
                       t::AbstractVector, data::NamedTuple)
     idx = 0:(length(y) - 1)
     names = outputnames(f)
-    sincols = [names[k] => Vector{Union{Missing,Float64}}(sin.(2π .* k .* idx ./ f.period))
-               for k in 1:f.order]
-    coscols = [names[f.order + k] =>
-                   Vector{Union{Missing,Float64}}(cos.(2π .* k .* idx ./ f.period))
-               for k in 1:f.order]
-    append!(out, sincols)
-    append!(out, coscols)
+    θ = [_fourier_angle.(Ref(f), k, idx) for k in 1:f.order]
+    append!(out, [names[k] => Vector{Union{Missing,Float64}}(sin.(θ[k]))
+                  for k in 1:f.order])
+    append!(out, [names[f.order + k] => Vector{Union{Missing,Float64}}(cos.(θ[k]))
+                  for k in 1:f.order])
     return out
 end
 
 function featurevalues(f::Fourier, y_hist::AbstractVector, n::Integer, exog_row)
-    sins = ntuple(k -> sin(2π * k * n / f.period), f.order)
-    coss = ntuple(k -> cos(2π * k * n / f.period), f.order)
+    sins = ntuple(k -> sin(_fourier_angle(f, k, n)), f.order)
+    coss = ntuple(k -> cos(_fourier_angle(f, k, n)), f.order)
     return (sins..., coss...)
 end
 

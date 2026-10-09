@@ -154,6 +154,16 @@
         end
     end
 
+    @testset "Fourier values repeat exactly every whole period" begin
+        for (f, p) in ((Fourier(7, 3), 7), (Fourier(365.25, 2), 1461))
+            v(n) = MachineLearningForecast.featurevalues(f, Float64[], n, nothing)
+            @test all(v(n) == v(n + 1000p) for n in 0:(p - 1))
+            acc = MachineLearningForecast.ColumnAccumulator()
+            MachineLearningForecast.materialize!(acc, f, zeros(3p), 1:3p, (;))
+            @test all(c[i] == c[i + 2p] for (_, c) in acc, i in 1:p)
+        end
+    end
+
     @testset "every feature: single-row value equals the batch value" begin
         n = 30
         yr = 10 .* randn(StableRNG(10), n)
