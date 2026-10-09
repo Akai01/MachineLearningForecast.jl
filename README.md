@@ -77,6 +77,9 @@ fcast.ds               # the future timestamps
 results = backtest(fc, df; horizon=28, initial=730, step=28,
                    metrics=(mae, rmse, smape))
 results.metrics        # per-fold and overall scores
+
+# Or hold out the last 3 folds, counted back from the end
+results = backtest(fc, df; horizon=28, windows=3)
 ```
 
 Everything above works identically with a `DataFrame`, a `CSV.File`, or any
@@ -257,10 +260,14 @@ Notes:
   aborting the fit.
 - **Exogenous covariates** join on `(id, time)`, so `new_data` must carry the id
   column too.
-- **Backtesting** cuts folds on the *global timestamp grid* — `initial`, `step`
-  and `horizon` count distinct timestamps, not rows — and scores by joining
-  forecasts to actuals on `(id, time)`. Scaled metrics such as `mase` use each
-  series' own training values. `tune` works on panels unchanged.
+- **Backtesting** with `initial` cuts folds on the *global timestamp grid* —
+  `initial`, `step` and `horizon` count distinct timestamps, not rows. With
+  `windows` it instead counts each series' folds back from *its own* end, as
+  the M competitions hold out each series' last values, which suits panels
+  whose series span different years. Either way it scores by joining forecasts
+  to actuals on `(id, time)`, and scaled metrics such as `mase` use each
+  series' own training values. `tune` takes `initial` or `windows` the same
+  way.
 - Per-series state is available as `fitted.series`, a vector of
   `SeriesState`; for a single series the familiar `fitted.y_history`,
   `fitted.t_last` and `fitted.n_train` still work.
@@ -327,12 +334,7 @@ MIT — see [LICENSE](LICENSE).
 
 ## Roadmap (not in v1)
 
-- **Target transforms** built into `fit`, `backtest` and `tune`: differencing,
-  per-series scaling (such as by the last 12 values), Box-Cox, and
-  deseasonalise-and-ratio. Fitting them inside each fold avoids the leak of
-  scaling a whole panel by hand before `backtest`.
-- **Per-series panel backtests**: cut each series at its own end instead of on
-  one shared timeline.
+- **Box-Cox** and other power transforms as built-in `TargetTransform`s.
 - **Static features**: per-series constants given once, not repeated in
   `new_data`, and per-series encodings (a series-id feature).
 - **More history features**: expanding mean, exponentially weighted mean,

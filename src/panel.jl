@@ -319,26 +319,57 @@ function _steps_by_id(ids::AbstractVector)
     return Int[seen[id] = get(seen, id, 0) + 1 for id in ids]
 end
 
-function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step, metrics)
-    for (key, sub, rows) in panel_groups(fc, tbl)        # validates each series
+# One cutoff per series and fold: the last timestamp it trains on.
+function _panel_cuts(s::FromStart, fc, groups, t_all, horizon, mh)
+    grid = sort!(unique(t_all))
+    ngrid = length(grid)
+    s.initial > mh || throw(ArgumentError(
+        "backtest initial=$(s.initial) must exceed the feature set's minimum history " *
+        "($mh timestamps) so the first training window has at least one usable row. " *
+        "For a panel, initial counts distinct timestamps, not rows. Pass " *
+        "initial=$(mh + 1) or more, or reduce lags/windows."))
+    origins = s.initial:s.step:(ngrid - horizon)
+    isempty(origins) && throw(ArgumentError(
+        "no complete backtest folds: the panel spans $ngrid distinct timestamps, " *
+        "but the first fold needs initial + horizon = $(s.initial + horizon). " *
+        "Provide more history or reduce initial/horizon."))
+    keys_ = [key for (key, _, _) in groups]
+    return [Dict(key => grid[o] for key in keys_) for o in origins]
+end
+
+function _panel_cuts(s::FromEnd, fc, groups, t_all, horizon, mh)
+    longest = maximum(nrows(sub) for (_, sub, _) in groups)
+    first = longest - horizon - (s.windows - 1) * s.step
+    first > mh || throw(ArgumentError(
+        "backtest windows=$(s.windows) with step=$(s.step) and horizon=$horizon " *
+        "would train its first fold on at most $first rows of the longest series " *
+        "($longest rows), but the feature set needs more than $mh. Reduce windows, " *
+        "step or horizon, or provide longer series."))
+    # A series too short for a fold sits that fold out.
+    return [Dict(key => sub[fc.time][c] for (key, sub, _) in groups
+                 for c in (nrows(sub) - horizon - (s.windows - w) * s.step,) if c ≥ 1)
+            for w in 1:s.windows]
+end
+
+_rows_before(cut, ids, t) =
+    [i for i in eachindex(t) if haskey(cut, ids[i]) && t[i] ≤ cut[ids[i]]]
+_rows_after(cut, ids, t) =
+    [i for i in eachindex(t) if haskey(cut, ids[i]) && t[i] > cut[ids[i]]]
+
+function _fold_origin(cut)
+    origins = unique(values(cut))
+    return length(origins) == 1 ? only(origins) : missing
+end
+
+function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, scheme, metrics)
+    groups = panel_groups(fc, tbl)
+    for (key, sub, rows) in groups                       # validates each series
         _in_series(() -> target_vector(sub, fc.target, rows), fc, key)
     end
     ids = tbl[fc.id]
     t_all = tbl[fc.time]
     y_all = target_vector(tbl, fc.target)
-    grid = sort!(unique(t_all))
-    ngrid = length(grid)
-    mh = minhistory(fc.features)
-    initial > mh || throw(ArgumentError(
-        "backtest initial=$initial must exceed the feature set's minimum history " *
-        "($mh timestamps) so the first training window has at least one usable row. " *
-        "For a panel, initial counts distinct timestamps, not rows. Pass " *
-        "initial=$(mh + 1) or more, or reduce lags/windows."))
-    origins = initial:step:(ngrid - horizon)
-    isempty(origins) && throw(ArgumentError(
-        "no complete backtest folds: the panel spans $ngrid distinct timestamps, " *
-        "but the first fold needs initial + horizon = $(initial + horizon). " *
-        "Provide more history or reduce initial/horizon."))
+    cuts = _panel_cuts(scheme, fc, groups, t_all, horizon, minhistory(fc.features))
     exogcols = exogenous_columns(fc.features)
 
     actual = Dict{Tuple{Any,Any},Float64}()
@@ -348,6 +379,7 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
 
     T = eltype(t_all)
     I = eltype(ids)
+    fold_col = Int[]
     origin_col = T[]
     step_col = Int[]
     id_col = I[]
@@ -359,15 +391,14 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
     m_metric = Symbol[]
     m_value = Float64[]
 
-    for (k, o) in enumerate(origins)
-        t_origin = grid[o]
-        train_rows = findall(≤(t_origin), t_all)
+    for (k, cut) in enumerate(cuts)
+        train_rows = _rows_before(cut, ids, t_all)
         fitted = _fit_panel(fc, row_subset(tbl, train_rows), train_rows)
         fcast = if isempty(exogcols)
             forecast(fitted, horizon)
         else
             nd = row_subset(tbl[Tuple([fc.id; fc.time; exogcols])],
-                            findall(>(t_origin), t_all))
+                            _rows_after(cut, ids, t_all))
             # Steps past a series' data have no exogenous row or actual.
             hs = map(fitted.series) do st
                 g = future_grid(st.t_start, fc.freq, st.n_train, horizon)
@@ -387,21 +418,23 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
             push!(ytrue, a)
             push!(yhat, fy[j])
             push!(scored, fid[j])
-            push!(origin_col, t_origin)
+            push!(fold_col, k)
+            push!(origin_col, cut[fid[j]])
             push!(step_col, steps[j])
             push!(id_col, fid[j])
             push!(time_col, ft[j])
             push!(y_col, a)
             push!(yhat_col, fy[j])
         end
+        origin = _fold_origin(cut)
         isempty(ytrue) && throw(ArgumentError(
-            "backtest fold $k (origin $t_origin) produced no forecast that lines up " *
+            "backtest fold $k (origin $origin) produced no forecast that lines up " *
             "with an actual: no series trained on data up to the origin has data " *
             "after it. Choose initial and step so each origin falls inside the data " *
             "of a series."))
         for m in metrics
             push!(m_fold, k)
-            push!(m_origin, t_origin)
+            push!(m_origin, origin)
             push!(m_metric, _metric_name(m))
             push!(m_value, Float64(_panel_metric(m, fc, fitted, scored, ytrue, yhat)))
         end
@@ -415,8 +448,8 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, initial, step
         push!(m_metric, name)
         push!(m_value, Statistics.mean(vals))
     end
-    folds = NamedTuple{(:origin, :step, fc.id, fc.time, :y, :y_hat)}(
-        (origin_col, step_col, id_col, time_col, y_col, yhat_col))
+    folds = NamedTuple{(:fold, :origin, :step, fc.id, fc.time, :y, :y_hat)}(
+        (fold_col, origin_col, step_col, id_col, time_col, y_col, yhat_col))
     return BacktestResult(folds, (fold=m_fold, origin=m_origin,
                                   metric=m_metric, value=m_value))
 end

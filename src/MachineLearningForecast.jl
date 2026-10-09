@@ -46,8 +46,8 @@ include("metrics.jl")
 include("forecaster.jl")
 include("recursive.jl")
 include("direct.jl")
-include("panel.jl")
 include("backtest.jl")
+include("panel.jl")
 include("tune.jl")
 
 end

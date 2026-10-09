@@ -4,13 +4,15 @@
 Result of [`backtest`](@ref). Both fields are columntables (NamedTuples of
 vectors, Tables.jl-compatible):
 
-- `folds`: one row per fold × horizon step, with columns `:origin` (the last
-  training timestamp of the fold), `:step` (1..horizon), the spec's time
-  column, `:y` (actual), and `:y_hat` (forecast). A panel backtest adds the id
-  column after `:step`.
+- `folds`: one row per fold × horizon step, with columns `:fold`, `:origin`
+  (the last training timestamp the row's forecast starts from), `:step`
+  (1..horizon), the spec's time column, `:y` (actual), and `:y_hat` (forecast).
+  A panel backtest adds the id column after `:step`.
 - `metrics`: one row per fold × metric (columns `:fold`, `:origin`, `:metric`,
   `:value`), plus one overall summary row per metric with `fold=0` (`:value`
-  is the mean of the per-fold values, `:origin` is `missing`).
+  is the mean of the per-fold values, `:origin` is `missing`). A fold's
+  `:origin` is `missing` when its series start their forecasts at different
+  timestamps.
 
 # Example
 ```julia
@@ -26,21 +28,89 @@ end
 
 _metric_name(m) = Symbol(m)
 
+"Where backtest folds start: from the data's start, or from each series' end."
+abstract type FoldScheme end
+
+"Folds growing from the start: the first trains on `initial` timestamps."
+struct FromStart <: FoldScheme
+    initial::Int
+    step::Int
+end
+
+"The last `windows` folds of each series, counted back from its own end."
+struct FromEnd <: FoldScheme
+    windows::Int
+    step::Int
+end
+
+function _fold_scheme(who::AbstractString, initial, windows, step::Integer)
+    (initial === nothing) == (windows === nothing) && throw(ArgumentError(
+        "$who needs exactly one of initial (folds growing from the start of the " *
+        "data) and windows (folds counted back from each series' end), got " *
+        "initial=$(repr(initial)) and windows=$(repr(windows)). Pass e.g. " *
+        "initial=730 or windows=3."))
+    if initial !== nothing
+        initial ≥ 1 || throw(ArgumentError(
+            "$who initial must be ≥ 1, got $initial. Pass the size of the first " *
+            "training window, e.g. initial=730."))
+        return FromStart(initial, step)
+    end
+    windows ≥ 1 || throw(ArgumentError(
+        "$who windows must be ≥ 1, got $windows. Pass the number of folds to hold " *
+        "out at the end of each series, e.g. windows=3."))
+    return FromEnd(windows, step)
+end
+
+_scheme_kwargs(s::FromStart) = (initial=s.initial, step=s.step)
+_scheme_kwargs(s::FromEnd) = (windows=s.windows, step=s.step)
+
+function _origins(s::FromStart, n, horizon, mh)
+    s.initial > mh || throw(ArgumentError(
+        "backtest initial=$(s.initial) must exceed the feature set's minimum history " *
+        "($mh rows) so the first training window has at least one usable row. " *
+        "Pass initial=$(mh + 1) or more, or reduce lags/windows."))
+    origins = s.initial:s.step:(n - horizon)
+    isempty(origins) && throw(ArgumentError(
+        "no complete backtest folds: data has $n rows, but the first fold needs " *
+        "initial + horizon = $(s.initial + horizon). Provide more data or reduce " *
+        "initial/horizon."))
+    return origins
+end
+
+function _origins(s::FromEnd, n, horizon, mh)
+    first = n - horizon - (s.windows - 1) * s.step
+    first > mh || throw(ArgumentError(
+        "backtest windows=$(s.windows) with step=$(s.step) and horizon=$horizon " *
+        "would train its first fold on $first of the $n rows, but the feature set " *
+        "needs more than $mh. Reduce windows, step or horizon, or provide more data."))
+    return first:s.step:(n - horizon)
+end
+
 """
-    backtest(fc::Forecaster, data; horizon, initial, step=horizon,
-             metrics=(mae, rmse)) -> BacktestResult
+    backtest(fc::Forecaster, data; horizon, initial=nothing, windows=nothing,
+             step=horizon, metrics=(mae, rmse)) -> BacktestResult
 
-Expanding-window time-series cross-validation: train on rows `1:initial`,
-forecast `horizon` steps, evaluate against the held-out actuals; advance the
-origin by `step` rows and repeat while a full horizon of actuals remains.
+Expanding-window time-series cross-validation. Pass exactly one of:
 
-For a **panel** forecaster (one with `id` set), folds are cut on the *global
-timestamp grid* rather than on row counts, since rows are then spread across
-series: `initial`, `step` and `horizon` count distinct timestamps. Each fold
-trains on every row at or before the origin timestamp, forecasts each series
-forward from its own last observed timestamp, and scores the result by joining
-forecasts to actuals on `(id, time)` — so ragged series contribute wherever
-they have actuals. The `folds` table then carries the id column too.
+- `initial`: train on rows `1:initial`, forecast `horizon` steps, evaluate
+  against the held-out actuals; advance the origin by `step` rows and repeat
+  while a full horizon of actuals remains.
+- `windows`: hold out the last `windows` folds, `step` apart, the last ending
+  at the end of the data. For a single series this is `initial` chosen so the
+  final fold ends at the last row.
+
+For a **panel** forecaster (one with `id` set), `initial` cuts folds on the
+*global timestamp grid*, since rows are spread across series: `initial`,
+`step` and `horizon` count distinct timestamps. Each fold trains on every row
+at or before the origin timestamp, forecasts each series forward from its own
+last observed timestamp, and scores the result by joining forecasts to actuals
+on `(id, time)`, so ragged series contribute wherever they have actuals.
+`windows` instead counts the folds back from **each series' own end**, as the
+M competitions hold out each series' last values: in fold `k`, every series
+trains on its rows up to its own cutoff, and one global model is fitted on all
+of them. When the series span different calendar periods, a series' cutoff can
+fall before other series' training rows, as with every global model evaluated
+this way. The `folds` table then carries the id column too.
 
 `metrics` is a tuple of callables `(y, ŷ) -> Float64` (e.g. [`mae`](@ref),
 [`rmse`](@ref), [`smape`](@ref)). Scaled metrics that also need the fold's
@@ -60,14 +130,14 @@ results = backtest(fc, df; horizon=28, initial=730, step=28,
 results.metrics   # per-fold and overall scores
 ```
 """
-function backtest(fc::Forecaster, data; horizon::Integer, initial::Integer,
+function backtest(fc::Forecaster, data; horizon::Integer,
+                  initial::Union{Nothing,Integer}=nothing,
+                  windows::Union{Nothing,Integer}=nothing,
                   step::Integer=horizon, metrics=(mae, rmse))
     horizon ≥ 1 || throw(ArgumentError(
         "backtest horizon must be ≥ 1, got $horizon. Pass the number of steps each " *
         "fold forecasts, e.g. horizon=28."))
-    initial ≥ 1 || throw(ArgumentError(
-        "backtest initial must be ≥ 1, got $initial. Pass the size of the first " *
-        "training window, e.g. initial=730."))
+    scheme = _fold_scheme("backtest", initial, windows, step)
     step ≥ 1 || throw(ArgumentError(
         "backtest step must be ≥ 1, got $step. Pass how many steps each fold moves " *
         "the origin, e.g. step=$horizon, which equals horizon (the default)."))
@@ -86,32 +156,23 @@ function backtest(fc::Forecaster, data; horizon::Integer, initial::Integer,
             "$(repr(metrics)). Pass e.g. metrics=(mae, rmse), or metrics=(mae,) " *
             "for one metric."))
     tbl = normalize_table(data)
-    return _backtest_spec(fc, tbl, horizon, initial, step, ms)
+    return _backtest_spec(fc, tbl, horizon, scheme, ms)
 end
 
-_backtest_spec(fc::Forecaster{M,S,Symbol}, tbl, horizon, initial, step,
+_backtest_spec(fc::Forecaster{M,S,Symbol}, tbl, horizon, scheme,
                metrics) where {M,S} =
-    _backtest_panel(fc, tbl, horizon, initial, step, metrics)
+    _backtest_panel(fc, tbl, horizon, scheme, metrics)
 
-function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, initial,
-                        step, metrics) where {M,S}
+function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, scheme,
+                        metrics) where {M,S}
     t_all = require_column(tbl, fc.time, "time")
     validate_time_column(t_all, fc.time, fc.freq)
     y_all = target_vector(tbl, fc.target)
-    n = nrows(tbl)
-    mh = minhistory(fc.features)
-    initial > mh || throw(ArgumentError(
-        "backtest initial=$initial must exceed the feature set's minimum history " *
-        "($mh rows) so the first training window has at least one usable row. " *
-        "Pass initial=$(mh + 1) or more, or reduce lags/windows."))
-    origins = initial:step:(n - horizon)
-    isempty(origins) && throw(ArgumentError(
-        "no complete backtest folds: data has $n rows, but the first fold needs " *
-        "initial + horizon = $(initial + horizon). Provide more data or reduce " *
-        "initial/horizon."))
+    origins = _origins(scheme, nrows(tbl), horizon, minhistory(fc.features))
     exogcols = exogenous_columns(fc.features)
 
     T = eltype(t_all)
+    fold_col = Int[]
     origin_col = T[]
     step_col = Int[]
     time_col = T[]
@@ -128,6 +189,7 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, initial,
         fcast = forecast(fitted, horizon; new_data=nd)
         ytrue = y_all[(o + 1):(o + horizon)]
         yhat = fcast.y_hat
+        append!(fold_col, fill(k, horizon))
         append!(origin_col, fill(t_all[o], horizon))
         append!(step_col, 1:horizon)
         append!(time_col, fcast[fc.time])
@@ -149,8 +211,8 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, initial,
         push!(m_metric, name)
         push!(m_value, Statistics.mean(vals))
     end
-    folds = NamedTuple{(:origin, :step, fc.time, :y, :y_hat)}(
-        (origin_col, step_col, time_col, y_col, yhat_col))
+    folds = NamedTuple{(:fold, :origin, :step, fc.time, :y, :y_hat)}(
+        (fold_col, origin_col, step_col, time_col, y_col, yhat_col))
     mtable = (fold=m_fold, origin=m_origin, metric=m_metric, value=m_value)
     return BacktestResult(folds, mtable)
 end
@@ -158,7 +220,7 @@ end
 function Base.show(io::IO, ::MIME"text/plain", r::BacktestResult)
     # Count from folds: it is filled even when metrics=().
     h = isempty(r.folds.step) ? 0 : maximum(r.folds.step)
-    nfolds = length(unique(r.folds.origin))
+    nfolds = length(unique(r.folds.fold))
     println(io, "BacktestResult: $nfolds fold$(nfolds == 1 ? "" : "s"), horizon $h")
     for i in eachindex(r.metrics.fold)
         r.metrics.fold[i] == 0 || continue
@@ -169,4 +231,4 @@ function Base.show(io::IO, ::MIME"text/plain", r::BacktestResult)
 end
 
 Base.show(io::IO, r::BacktestResult) =
-    print(io, "BacktestResult(", length(unique(r.folds.origin)), " folds)")
+    print(io, "BacktestResult(", length(unique(r.folds.fold)), " folds)")

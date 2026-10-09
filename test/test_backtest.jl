@@ -48,11 +48,32 @@ end
     fc = Forecaster(TestModels.EchoColumn(:y_lag_1); features=fs,
                     strategy=Recursive(), freq=Day(1))
 
+    @testset "windows holds out the last folds of the series" begin
+        # 3 windows of 5, 10 apart, end at row 100: origins 75, 85, 95.
+        rw = backtest(fc, df; horizon=5, windows=3, step=10, metrics=(mae, rmse))
+        ri = backtest(fc, df; horizon=5, initial=75, step=10, metrics=(mae, rmse))
+        @test rw.folds == ri.folds && isequal(rw.metrics, ri.metrics)
+        @test unique(rw.folds.origin) == t[[75, 85, 95]] && last(rw.folds.ds) == t[end]
+        @test unique(backtest(fc, df; horizon=5, windows=1).folds.fold) == [1]
+        @test_throws("backtest needs exactly one of initial (folds growing from the " *
+                     "start of the data) and windows", backtest(fc, df; horizon=5))
+        @test_throws("got initial=80 and windows=2. Pass e.g. initial=730 or windows=3.",
+                     backtest(fc, df; horizon=5, initial=80, windows=2))
+        @test_throws("backtest windows must be ≥ 1, got 0. Pass the number of folds",
+                     backtest(fc, df; horizon=5, windows=0))
+        @test_throws("backtest windows=30 with step=5 and horizon=5 would train its " *
+                     "first fold on -50 of the 100 rows, but the feature set needs " *
+                     "more than 1.", backtest(fc, df; horizon=5, windows=30))
+        @test_throws("tune needs exactly one of initial",
+                     tune(fc, df; grid=(features=[fs],), horizon=5))
+    end
+
     @testset "fold structure and exact values" begin
         res = backtest(fc, df; horizon=5, initial=80, step=10, metrics=(mae, rmse))
         # origins: 80, 90 (100 would need rows 101:105)
         @test res isa BacktestResult
-        @test keys(res.folds) == (:origin, :step, :ds, :y, :y_hat)
+        @test keys(res.folds) == (:fold, :origin, :step, :ds, :y, :y_hat)
+        @test res.folds.fold == [fill(1, 5); fill(2, 5)]
         @test length(res.folds.step) == 2 * 5
         @test res.folds.step == [1:5; 1:5]
         @test res.folds.origin == [fill(t[80], 5); fill(t[90], 5)]

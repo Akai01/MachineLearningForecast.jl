@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Backtest folds counted from each series' end.** `backtest` and `tune` take
+  `windows` as an alternative to `initial`: the last `windows` folds, `step`
+  apart, with the final fold ending at the end of the data. On a panel each
+  series is cut at its own end, as the M competitions hold out each series'
+  last values, so panels whose series span different years can be backtested
+  and tuned; `windows=1` is the M3 holdout.
 - **Target transforms.** `Forecaster` takes a `transform` keyword: a
   `TargetTransform` applied to each series' target before features are built,
   with its state fitted on that series' own training history, refitted in every
@@ -62,6 +68,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `BacktestResult.folds` gained a first column `:fold`, the fold number of each
+  row, and the fold count shown by `show` now comes from it. A fold's `:origin`
+  in `metrics` is `missing` when its series start their forecasts at different
+  timestamps, as with `windows` on a ragged panel.
 - **Models are trained without MLJ machines.** They are trained and queried
   through `MLJModelInterface` directly (`clean!`, `reformat`, `fit`,
   `predict`), which is what MLJBase's machines did for this package; forecasts

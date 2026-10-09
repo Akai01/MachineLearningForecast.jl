@@ -276,14 +276,17 @@ Base.show(io::IO, r::TuneResult) =
 
 """
     tune(fc::Forecaster, data; grid=nothing, tuner=GridSearch(), max_evals=nothing,
-         horizon, initial, step=horizon, metric=smape) -> TuneResult
+         horizon, initial=nothing, windows=nothing, step=horizon,
+         metric=smape) -> TuneResult
 
 Tune the whole forecasting pipeline on backtest score. Each candidate is a
 NamedTuple of [`Forecaster`](@ref) field overrides (e.g. `model`, `features`,
 `strategy`); the candidate spec is rebuilt from `fc` with those overrides,
 backtested with [`backtest`](@ref)`(spec, data; horizon, initial, step,
-metrics=(metric,))`, and scored by the mean of `metric` across folds (lower is
-better).
+metrics=(metric,))`, or with `windows` in place of `initial`, and scored by the
+mean of `metric` across folds (lower is better). Pass exactly one of `initial`
+and `windows`; `windows` counts each series' folds back from its own end, which
+lets `tune` work on panels whose series span different calendar periods.
 
 - `grid`: NamedTuple mapping `Forecaster` field names to candidate value lists.
   Required for the batch strategies ([`GridSearch`](@ref), the Cartesian
@@ -316,7 +319,8 @@ result.best_fitted   # ready to forecast
 """
 function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSearch(),
               max_evals::Union{Nothing,Integer}=nothing,
-              horizon::Integer, initial::Integer, step::Integer=horizon,
+              horizon::Integer, initial::Union{Nothing,Integer}=nothing,
+              windows::Union{Nothing,Integer}=nothing, step::Integer=horizon,
               metric=smape)
     max_evals === nothing || max_evals ≥ 1 || throw(ArgumentError(
         "max_evals must be ≥ 1 (or nothing for no budget), got $max_evals."))
@@ -324,9 +328,7 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
     horizon ≥ 1 || throw(ArgumentError(
         "tune horizon must be ≥ 1, got $horizon. Pass the number of steps each " *
         "fold forecasts, e.g. horizon=28."))
-    initial ≥ 1 || throw(ArgumentError(
-        "tune initial must be ≥ 1, got $initial. Pass the size of the first " *
-        "training window, e.g. initial=730."))
+    scheme = _fold_scheme("tune", initial, windows, step)
     step ≥ 1 || throw(ArgumentError(
         "tune step must be ≥ 1, got $step. Pass how many steps each fold moves " *
         "the origin, e.g. step=$horizon, which equals horizon (the default)."))
@@ -339,7 +341,7 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
     if seq isa CandidateQueue
         planned = max_evals === nothing ? seq.candidates :
                   seq.candidates[1:min(length(seq.candidates), max_evals)]
-        _warn_fit_count(fc, planned, tbl, horizon, initial, step)
+        _warn_fit_count(fc, planned, tbl, horizon, scheme)
     end
 
     cands = NamedTuple[]
@@ -353,7 +355,7 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
             "ask($(nameof(typeof(tuner)))) returned $(repr(cand)); the ask/tell " *
             "contract requires a NamedTuple of Forecaster field overrides, or " *
             "nothing to stop."))
-        m, sd, err = _evaluate_candidate(fc, cand, tbl, horizon, initial, step, metric)
+        m, sd, err = _evaluate_candidate(fc, cand, tbl, horizon, scheme, metric)
         tell!(seq, cand, m)
         push!(cands, cand); push!(means, m); push!(stds, sd); push!(errors, err)
     end
@@ -378,10 +380,10 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
     return TuneResult(table, best, best_fitted)
 end
 
-function _evaluate_candidate(fc, cand, tbl, horizon, initial, step, metric)
+function _evaluate_candidate(fc, cand, tbl, horizon, scheme, metric)
     try
         cfc = reconstruct(fc; cand...)
-        res = backtest(cfc, tbl; horizon, initial, step, metrics=(metric,))
+        res = backtest(cfc, tbl; horizon, _scheme_kwargs(scheme)..., metrics=(metric,))
         vals = [res.metrics.value[i] for i in eachindex(res.metrics.fold)
                 if res.metrics.fold[i] > 0]
         m = Float64(Statistics.mean(vals))
@@ -408,11 +410,17 @@ function _tune_table(cands, means, stds, errors)
     return NamedTuple{names}(Tuple(cols))
 end
 
-function _warn_fit_count(fc, cands, tbl, horizon, initial, step)
+_nfolds(s::FromEnd, fc, tbl, horizon) = s.windows
+
+function _nfolds(s::FromStart, fc, tbl, horizon)
     # Panel folds are cut on distinct timestamps, not on rows.
     span = ispanel(fc) ? length(unique(require_column(tbl, fc.time, "time"))) :
            nrows(tbl)
-    nfolds = length(initial:step:(span - horizon))
+    return length(s.initial:s.step:(span - horizon))
+end
+
+function _warn_fit_count(fc, cands, tbl, horizon, scheme)
+    nfolds = _nfolds(scheme, fc, tbl, horizon)
     total = 0
     for (i, c) in enumerate(cands)
         s = get(c, :strategy, fc.strategy)

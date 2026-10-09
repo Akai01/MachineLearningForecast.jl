@@ -298,7 +298,8 @@
         big = makepanel(lens=(60, 50, 55))
         fc = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
         r = backtest(fc, big; horizon=5, initial=40, step=10, metrics=(mae, rmse))
-        @test keys(r.folds) == (:origin, :step, :unique_id, :ds, :y, :y_hat)
+        @test keys(r.folds) == (:fold, :origin, :step, :unique_id, :ds, :y, :y_hat)
+        @test issorted(r.folds.fold) && unique(r.folds.fold) == 1:2
         @test length(unique(r.folds.origin)) == length(40:10:(60 - 5))
         @test extrema(r.folds.step) == (1, 5)
         @test Set(unique(r.folds.unique_id)) ⊆ Set(["s1", "s2", "s3"])
@@ -355,6 +356,42 @@
         rr = scores(trends(47))
         @test rr.metrics.value[(rr.metrics.fold .> 0) .& (rr.metrics.metric .== :mase)] ≈
               [3.0, (5 * 3.0 + 2 * 1.5) / 7]
+    end
+
+    @testset "windows counts each series' folds back from its own end" begin
+        pd = makepanel(lens=(40, 30, 35),
+                       starts=[Date(2022, 1, 1), Date(2022, 1, 10), Date(2022, 1, 3)])
+        fc = mk(TestModels.MeanModel(), FeatureSet(Lag(1)))
+        r = backtest(fc, pd; horizon=5, windows=1, metrics=(mae, mase))
+        @test unique(r.folds.fold) == [1]
+        for (id, n) in (("s1", 40), ("s2", 30), ("s3", 35))
+            ds = pd.ds[pd.unique_id .== id]
+            sel = r.folds.unique_id .== id
+            @test r.folds.ds[sel] == ds[(n - 4):n]
+            @test all(==(ds[n - 5]), r.folds.origin[sel])
+        end
+        # The series' cutoffs differ, so the fold has no single origin.
+        @test ismissing(r.metrics.origin[1])
+        @test occursin("1 fold, horizon 5", sprint(show, MIME"text/plain"(), r))
+        # windows=1 is the M competitions' holdout of each series' end.
+        keep = reduce(vcat, [findall(==(id), pd.unique_id)[1:(end - 5)]
+                             for id in ("s1", "s2", "s3")])
+        manual = forecast(fit(fc, map(c -> c[keep], pd)), 5)
+        byrow = Dict(zip(zip(manual.unique_id, manual.ds), manual.y_hat))
+        @test r.folds.y_hat == [byrow[k] for k in zip(r.folds.unique_id, r.folds.ds)]
+        r2 = backtest(fc, pd; horizon=5, windows=2, step=3)
+        s2 = r2.folds.unique_id .== "s2"
+        @test unique(r2.folds.origin[s2]) == pd.ds[pd.unique_id .== "s2"][[22, 25]]
+        pdx = merge(pd, (promo=ones(length(pd.y)),))
+        fcx = mk(TestModels.MeanModel(), FeatureSet(Lag(1), Exogenous(:promo)))
+        @test backtest(fcx, pdx; horizon=5, windows=2, step=3).folds.y_hat ==
+              r2.folds.y_hat
+        @test_throws("would train its first fold on at most -10 rows of the longest " *
+                     "series (40 rows)", backtest(fc, pd; horizon=5, windows=10, step=5))
+        res = tune(fc, pd; grid=(features=[FeatureSet(Lag(1)), FeatureSet(Lag(2))],),
+                   horizon=5, windows=1, metric=mae)
+        @test res.table.mean_score[1] ≈
+              backtest(fc, pd; horizon=5, windows=1, metrics=(mae,)).metrics.value[end]
     end
 
     @testset "the step column is each row's position in its series' forecast" begin
