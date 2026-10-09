@@ -24,11 +24,47 @@
                      "the names of your target and time columns, e.g. target=:y, " *
                      "time=:ds." Forecaster(TestModels.LinAR(1.0, 0.0);
             features=FeatureSet(Lag(1)), freq=Day(1), target=:y, time=:y)
-        fc = @test_logs((:warn, r"not an MLJModelInterface.Deterministic"),
+        fc = @test_logs((:warn, r"neither an MLJModelInterface.Deterministic nor a " *
+                                "Probabilistic"),
                         (:warn, r"target_scitype"),
-                        Forecaster(TestModels.DummyProb(); features=FeatureSet(Lag(1)),
+                        Forecaster(TestModels.DummyInterval(); features=FeatureSet(Lag(1)),
                                    freq=Day(1)))
         @test fc isa Forecaster
+        # A Probabilistic model warns only about its target_scitype.
+        @test_logs (:warn, r"target_scitype") Forecaster(TestModels.DummyProb();
+            features=FeatureSet(Lag(1)), freq=Day(1))
+    end
+
+    @testset "a Probabilistic model forecasts the mean of its prediction" begin
+        @test_logs Forecaster(TestModels.ProbLinAR(0.8, 2.0); features=FeatureSet(Lag(1)),
+                              freq=Day(1))
+        panel = (unique_id=[fill("a", 40); fill("b", 30)], ds=[t[1:40]; t[1:30]],
+                 y=[y[1:40]; 3 .* y[1:30]])
+        for strat in (Recursive(), Direct(5)), (data, id) in ((df, nothing),
+                                                              (panel, :unique_id))
+            point(m) = forecast(fit(Forecaster(m; features=FeatureSet(Lag(1)),
+                                               strategy=strat, freq=Day(1), id), data),
+                                5).y_hat
+            @test point(TestModels.ProbLinAR(0.8, 2.0)) ==
+                  point(TestModels.LinAR(0.8, 2.0))
+        end
+        # A real one: EvoTrees' Gaussian model predicts Normal distributions.
+        week = (ds=t, y=[10 + 5 * sin(2π * i / 7) for i in 1:n])
+        fc = Forecaster(EvoTreeGaussian(nrounds=100, seed=1);
+                        features=FeatureSet(Fourier(7, 1)), freq=Day(1))
+        f = fit(fc, week)
+        out = forecast(f, 7)
+        vals = [MachineLearningForecast.featurevalues(Fourier(7, 1), Float64[], n - 1 + s,
+                                                      nothing) for s in 1:7]
+        future = (fourier_7_0_sin_1=first.(vals), fourier_7_0_cos_1=last.(vals))
+        MMI = MachineLearningForecast.MLJModelInterface
+        tm = only(f.models)
+        dists = MMI.predict(tm.model, tm.fitresult, MMI.reformat(tm.model, future)...)
+        @test out.y_hat isa Vector{Float64} && out.y_hat == mean.(dists)
+        truth = [10 + 5 * sin(2π * i / 7) for i in n .+ (1:7)]
+        @test maximum(abs.(out.y_hat .- truth)) < 1
+        r = backtest(fc, week; horizon=7, windows=2)
+        @test all(isfinite, r.folds.y_hat)
     end
 
     @testset "recursive oracle: LinAR closed-form iteration" begin

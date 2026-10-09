@@ -3,6 +3,7 @@ module TestModels
 
 using MLJModelInterface
 using Tables
+import Statistics
 const MMI = MLJModelInterface
 
 "Predicts `a * y_lag_1 + b`; ignores training entirely."
@@ -60,6 +61,27 @@ MMI.target_scitype(::Type{PairLookup}) = AbstractVector{MMI.Continuous}
 "A Probabilistic (non-Deterministic) model, to exercise construction warnings."
 mutable struct DummyProb <: MMI.Probabilistic end
 MMI.fit(::DummyProb, verbosity, X, y) = (nothing, nothing, NamedTuple())
+
+"Neither Deterministic nor Probabilistic, to exercise construction warnings."
+mutable struct DummyInterval <: MMI.Interval end
+MMI.fit(::DummyInterval, verbosity, X, y) = (nothing, nothing, NamedTuple())
+
+"A predicted distribution that only knows its mean."
+struct PointDist
+    μ::Float64
+end
+Statistics.mean(d::PointDist) = d.μ
+
+"Probabilistic `LinAR`: predicts a `PointDist` at `a * y_lag_1 + b`."
+mutable struct ProbLinAR <: MMI.Probabilistic
+    a::Float64
+    b::Float64
+end
+MMI.fit(::ProbLinAR, verbosity, X, y) = (nothing, nothing, NamedTuple())
+MMI.predict(m::ProbLinAR, fitresult, Xnew) =
+    PointDist.(m.a .* Float64.(collect(Tables.getcolumn(Xnew, :y_lag_1))) .+ m.b)
+MMI.input_scitype(::Type{ProbLinAR}) = MMI.Table(MMI.Continuous)
+MMI.target_scitype(::Type{ProbLinAR}) = AbstractVector{MMI.Continuous}
 
 "Always predicts `NaN`, standing in for a learner that diverged."
 mutable struct NaNModel <: MMI.Deterministic end

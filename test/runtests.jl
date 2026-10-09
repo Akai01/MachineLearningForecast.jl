@@ -6,7 +6,7 @@ using Tables
 using Statistics: mean, std
 using Random: shuffle
 using StableRNGs: StableRNG
-using EvoTrees: EvoTreeRegressor
+using EvoTrees: EvoTreeRegressor, EvoTreeGaussian
 using MLJDecisionTreeInterface: DecisionTreeRegressor, RandomForestRegressor
 import Aqua
 

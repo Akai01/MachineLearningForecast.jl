@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `Probabilistic` MLJ models work as base models: the forecast is the mean of
+  the predicted distribution (`predict_mean`), so a model such as EvoTrees'
+  `EvoTreeGaussian` fits, forecasts, backtests and tunes like a
+  `Deterministic` one; before, forecasting failed with a `MethodError`. Such a
+  model no longer warns when the `Forecaster` is built, while one that is
+  neither `Deterministic` nor `Probabilistic` still does.
 - **Backtest folds counted from each series' end.** `backtest` and `tune` take
   `windows` as an alternative to `initial`: the last `windows` folds, `step`
   apart, with the final fold ending at the end of the data. On a panel each

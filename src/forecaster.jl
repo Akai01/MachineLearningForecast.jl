@@ -11,8 +11,9 @@ const RESERVED_OUTPUT_NAMES = (:origin, :step, :y, :y_hat)
 Immutable forecasting specification.
 
 - `model`: any MLJ `Deterministic` regressor instance (EvoTrees, DecisionTree,
-  XGBoost, linear models, ... — anything implementing the MLJ model interface).
-  Used as a prototype; `fit` never mutates it.
+  XGBoost, linear models, ... — anything implementing the MLJ model interface),
+  or a `Probabilistic` one, whose predicted mean is the forecast. Used as a
+  prototype; `fit` never mutates it.
 - `features`: a [`FeatureSet`](@ref) describing the design matrix.
 - `strategy`: a [`ForecastStrategy`](@ref) — [`Recursive`](@ref) (default) or
   [`Direct`](@ref).
@@ -73,10 +74,11 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol},X<:TargetTransf
             "model must be an MLJ model instance (subtype of MLJModelInterface.Model), " *
             "got $(typeof(model)). Pass e.g. EvoTreeRegressor(), " *
             "DecisionTreeRegressor(), or any other MLJ regressor."))
-        model isa MLJModelInterface.Deterministic || @warn(
-            "model $(typeof(model)) is not an MLJModelInterface.Deterministic " *
-            "regressor; MachineLearningForecast expects point predictions and may " *
-            "fail at predict time.")
+        model isa Union{MLJModelInterface.Deterministic,
+                        MLJModelInterface.Probabilistic} || @warn(
+            "model $(typeof(model)) is neither an MLJModelInterface.Deterministic nor " *
+            "a Probabilistic regressor; MachineLearningForecast expects point " *
+            "predictions or predicted distributions and may fail at predict time.")
         ts = MLJModelInterface.target_scitype(model)
         if !(AbstractVector{MLJModelInterface.Continuous} <: ts)
             @warn "model $(typeof(model)) declares target_scitype $ts, which does " *
@@ -205,6 +207,11 @@ end
 
 _predict(t::TrainedModel, X) = MLJModelInterface.predict(
     t.model, t.fitresult, MLJModelInterface.reformat(t.model, X)...)
+
+# A Probabilistic model's point forecast is its predicted mean.
+_predict(t::TrainedModel{<:MLJModelInterface.Probabilistic}, X) =
+    MLJModelInterface.predict_mean(t.model, t.fitresult,
+                                   MLJModelInterface.reformat(t.model, X)...)
 
 """
     FittedForecaster

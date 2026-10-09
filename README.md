@@ -11,9 +11,10 @@
 </p>
 
 **Generic, composable time-series forecasting for Julia, built on the MLJ model
-interface.** Any MLJ `Deterministic` regressor is a valid base model — random
-forests, [EvoTrees](https://github.com/Evovest/EvoTrees.jl) gradient boosting,
-XGBoost, LightGBM, CatBoost, linear models — MachineLearningForecast never hard-codes a
+interface.** Any MLJ `Deterministic` regressor is a valid base model, and a
+`Probabilistic` one forecasts its predicted mean — random forests,
+[EvoTrees](https://github.com/Evovest/EvoTrees.jl) gradient boosting, XGBoost,
+LightGBM, CatBoost, linear models — MachineLearningForecast never hard-codes a
 learner.
 
 - **Declarative feature engineering**: lags, rolling statistics, differences,

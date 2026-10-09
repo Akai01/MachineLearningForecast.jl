@@ -2,7 +2,8 @@
     MachineLearningForecast
 
 A generic, composable time-series forecasting package built on the MLJ model
-interface: any MLJ `Deterministic` regressor is a valid base model.
+interface: any MLJ `Deterministic` regressor is a valid base model, and a
+`Probabilistic` one forecasts its predicted mean.
 
 - Declarative feature engineering: [`FeatureSet`](@ref), [`Lag`](@ref),
   [`RollingMean`](@ref), [`RollingStd`](@ref), [`RollingMin`](@ref),
