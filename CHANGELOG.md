@@ -68,6 +68,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- On a panel, `Fourier` counts steps from the earliest series' first training
+  timestamp, not from each series' own, so series that start on different
+  dates have the same Fourier values on the same date and one global model
+  learns one season instead of one per start phase. A single series is
+  unchanged. On five panels of 100 daily series with a weekly season and
+  start dates spread over 300 days, the mean absolute error of a 14-day
+  forecast fell from 2.24 to 1.42 with `Fourier(7, 2)` alone and from 0.98
+  to 0.94 with lags 1 to 7 added, for EvoTrees and the random forest alike.
+  `SeriesState` gains `step0`, the Fourier step index of its first value.
 - `BacktestResult.folds` gained a first column `:fold`, the fold number of each
   row, and the fold count shown by `show` now comes from it. A fold's `:origin`
   in `metrics` is `missing` when its series start their forecasts at different

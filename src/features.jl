@@ -255,7 +255,9 @@ featurevalues(f::Calendar, y_hist::AbstractVector, t_next, exog_row) =
 Fourier seasonal terms `sin(2πkn/period)`, `cos(2πkn/period)` for `k = 1:order`,
 where `n` is an integer step index (0-based from the first training timestamp,
 incremented by 1 per `freq` step). The index continues seamlessly into the
-forecast horizon, so there is no phase jump at the train/forecast boundary.
+forecast horizon, so there is no phase jump at the train/forecast boundary. In a
+panel, `n` counts from the earliest series' first training timestamp, so every
+series has the same Fourier values on the same date.
 
 `period` is expressed in units of `freq` steps, e.g. `365.25` for annual
 seasonality with daily data. `order` K produces 2K columns
@@ -294,9 +296,13 @@ _uses_step_index(::Fourier) = true
 # Reducing k * n first makes whole periods repeat bit for bit.
 _fourier_angle(f::Fourier, k::Integer, n::Integer) = 2π * mod(k * n, f.period) / f.period
 
+# A panel passes step0 to put every series on one calendar.
+materialize!(out::ColumnAccumulator, f::AbstractFeature, y, t, data, step0::Integer) =
+    materialize!(out, f, y, t, data)
+
 function materialize!(out::ColumnAccumulator, f::Fourier, y::AbstractVector{Float64},
-                      t::AbstractVector, data::NamedTuple)
-    idx = 0:(length(y) - 1)
+                      t::AbstractVector, data::NamedTuple, step0::Integer=0)
+    idx = step0:(step0 + length(y) - 1)
     names = outputnames(f)
     θ = [_fourier_angle.(Ref(f), k, idx) for k in 1:f.order]
     append!(out, [names[k] => Vector{Union{Missing,Float64}}(sin.(θ[k]))

@@ -121,6 +121,26 @@ future_grid(t_start, freq, n_train::Integer, h::Integer) =
     [t_start + (n_train - 1 + s) * freq for s in 1:h]
 
 """
+    _steps_between(a, b, freq) -> Int
+
+The number of whole `freq` steps from `a` to `b ≥ a` on the grid anchored at
+`a`, as in [`validate_time_column`](@ref), rounded down when `b` is off it.
+"""
+function _steps_between(a, b, freq)
+    hi = 1
+    while a + hi * freq ≤ b
+        hi *= 2
+    end
+    # Invariant: a + lo * freq ≤ b < a + hi * freq.
+    lo = hi ÷ 2
+    while hi - lo > 1
+        mid = (lo + hi) ÷ 2
+        a + mid * freq ≤ b ? (lo = mid) : (hi = mid)
+    end
+    return lo
+end
+
+"""
     target_vector(tbl, target, rows=1:nrows(tbl)) -> Vector{Float64}
 
 Extract and validate the target column: must exist, contain no `missing`

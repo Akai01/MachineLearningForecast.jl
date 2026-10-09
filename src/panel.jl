@@ -62,7 +62,7 @@ end
 # Skip short series so the rest can still train.
 function _panel_frames(fc::Forecaster, groups)
     mh = minhistory(fc.features)
-    frames = Tuple{Any,NamedTuple,Vector{Float64},NamedTuple,Vector{Float64},
+    usable = Tuple{Any,NamedTuple,Vector{Int},Vector{Float64},NamedTuple,
                    Vector{Float64},Any}[]
     short = Tuple{Any,Int}[]
     for (key, sub, rows) in groups
@@ -71,17 +71,10 @@ function _panel_frames(fc::Forecaster, groups)
             return (yraw, _transform_table(fc, sub, yraw)...)
         end
         n = nrows(tz)
-        if n ≤ mh
-            push!(short, (key, n))
-            continue
-        end
-        X, y, _ = _in_series(fc, key) do
-            build_training_frame(fc.features, tz, fc.target, fc.time,
-                                 rows[(nrows(sub) - n + 1):end])
-        end
-        push!(frames, (key, X, y, sub, yraw, z, state))
+        n ≤ mh ? push!(short, (key, n)) :
+                 push!(usable, (key, sub, rows, yraw, tz, z, state))
     end
-    if isempty(frames)
+    if isempty(usable)
         throw(ArgumentError(
             "no series has enough rows to train on: the feature set needs $mh " *
             "history rows before the first usable row, and the longest series has " *
@@ -95,7 +88,15 @@ function _panel_frames(fc::Forecaster, groups)
         @warn "skipping $(length(short)) series with fewer than $(mh + 1) rows, " *
               "which is the minimum the feature set needs: $names$more"
     end
-    return frames
+    origin = minimum(u[5][fc.time][1] for u in usable)
+    return map(usable) do (key, sub, rows, yraw, tz, z, state)
+        step0 = _steps_between(origin, tz[fc.time][1], fc.freq)
+        X, y, _ = _in_series(fc, key) do
+            build_training_frame(fc.features, tz, fc.target, fc.time,
+                                 rows[(nrows(sub) - nrows(tz) + 1):end]; step0)
+        end
+        return (key, X, y, sub, yraw, z, state, step0)
+    end
 end
 
 "Vertically concatenate columntables that share a schema."
@@ -112,8 +113,8 @@ function _fit_panel(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
     frames = _panel_frames(fc, groups)
     models = _panel_models(fc, fc.strategy, frames)
     states = [SeriesState(key, yraw, sub[fc.time][end], sub[fc.time][1], nrows(sub),
-                          z, state)
-              for (key, _, _, sub, yraw, z, state) in frames]
+                          z, state, step0)
+              for (key, _, _, sub, yraw, z, state, step0) in frames]
     return FittedForecaster(fc, models, states, outputnames(fc.features))
 end
 
@@ -154,7 +155,7 @@ function _panel_batch(f::FittedForecaster, states, histories, step::Integer,
     cols = [Vector{Float64}(undef, length(active)) for _ in names]
     scratch = [Vector{Float64}(undef, 1) for _ in names]
     for (r, k) in enumerate(active)
-        n_next = length(states[k].z_history) - 1 + step
+        n_next = states[k].step0 + length(states[k].z_history) - 1 + step
         ex = exog_rows === nothing ? nothing : exog_rows[k][step]
         _fill_row!(scratch, spec.features, histories[k], grids[k][step], n_next, ex)
         for j in eachindex(cols)

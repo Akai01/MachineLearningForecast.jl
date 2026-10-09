@@ -171,9 +171,10 @@
         tr = [DateTime(2021, 12, 20, 22, 15) + (i - 1) * Minute(1757) for i in 1:n]
         promo, price = randn(StableRNG(11), n), Float64.(rand(StableRNG(12), 1:9, n))
         data = (ds=tr, y=yr, promo=promo, price=price)
-        batch(f, yv) = begin
+        batch(f, yv, step0...) = begin
             acc = MachineLearningForecast.ColumnAccumulator()
-            MachineLearningForecast.materialize!(acc, f, yv, tr, merge(data, (y=yv,)))
+            MachineLearningForecast.materialize!(acc, f, yv, tr, merge(data, (y=yv,)),
+                                                 step0...)
             acc
         end
         feats = [Lag(1), Lag(3), Lag(7),
@@ -198,6 +199,15 @@
                           f, yr[1:(i - 1)], f isa Fourier ? i - 1 : tr[i],
                           (promo=promo[i], price=price[i]))) for i in rows]
             @test single == [[c[i] for (_, c) in acc] for i in rows]
+            # A panel's shared origin shifts only Fourier's index.
+            shifted = batch(f, yr, 5)
+            if f isa Fourier
+                @test [[c[i] for (_, c) in shifted] for i in rows] ==
+                      [collect(MachineLearningForecast.featurevalues(
+                           f, yr[1:(i - 1)], i + 4, nothing)) for i in rows]
+            else
+                @test isequal(shifted, acc)
+            end
             f isa MachineLearningForecast.TargetFeature || continue
             # Leakage: rewriting y[t:end] must leave rows 1:t alone.
             @test all(1:n) do t

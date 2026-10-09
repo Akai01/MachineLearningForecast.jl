@@ -102,7 +102,7 @@ _is_missing_field(err) = nameof(typeof(err)) === :FieldError ||
     (err isa ErrorException && occursin("has no field", err.msg))
 
 """
-    build_training_frame(fs, tbl, target, time, rows=1:nrows(tbl)) -> (X, y, keep)
+    build_training_frame(fs, tbl, target, time, rows=1:nrows(tbl); step0=0) -> (X, y, keep)
 
 Materialize every feature over the training columntable `tbl` and assemble the
 design matrix. Returns `X` (a columntable of the feature columns only, all
@@ -110,15 +110,15 @@ design matrix. Returns `X` (a columntable of the feature columns only, all
 rows), and `keep::BitVector` (the kept-row mask over the original rows). The
 first `minhistory(fs)` rows are dropped because at least one target feature is
 undefined there. Errors report row `i` of `tbl` as row `rows[i]` of the user's
-table.
+table. `step0` is the [`Fourier`](@ref) step index of the first row.
 """
 function build_training_frame(fs::FeatureSet, tbl::NamedTuple, target::Symbol,
-                              time::Symbol, rows=1:nrows(tbl))
+                              time::Symbol, rows=1:nrows(tbl); step0::Integer=0)
     y = target_vector(tbl, target, rows)
     t = require_column(tbl, time, "time")
     out = ColumnAccumulator()
     for f in fs
-        materialize!(out, f, y, t, tbl)
+        materialize!(out, f, y, t, tbl, step0)
     end
     mh = minhistory(fs)
     n = length(y)

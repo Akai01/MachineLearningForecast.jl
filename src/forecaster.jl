@@ -153,7 +153,9 @@ features are computed from, the first and last training timestamps, and the
 number of training rows. `z_history` is the history after the spec's
 [`TargetTransform`](@ref), which lag and rolling features and the Fourier
 step index use, and `transform_state` is what [`untransform`](@ref) needs;
-without a transform, `z_history` is `y_history`.
+without a transform, `z_history` is `y_history`. `step0` is the Fourier step
+index of the first `z_history` value: `0` for a single series, and in a panel
+the steps from the earliest series' first value.
 
 Read them off a fitted panel forecaster via `f.series`; for a single-series
 forecaster the same values are reachable directly as `f.y_history`, `f.t_last`,
@@ -175,6 +177,7 @@ struct SeriesState
     n_train::Int
     z_history::Vector{Float64}
     transform_state::Any
+    step0::Int
 end
 
 """
@@ -300,7 +303,7 @@ function _fit_spec(fc::Forecaster{M,S,Nothing}, tbl::NamedTuple) where {M,S}
     validate_time_column(t, fc.time, fc.freq)
     y = target_vector(tbl, fc.target)
     tz, z, state = _transform_table(fc, tbl, y)
-    st = SeriesState(nothing, y, t[end], t[1], length(t), z, state)
+    st = SeriesState(nothing, y, t[end], t[1], length(t), z, state, 0)
     return FittedForecaster(fc, _fit(fc, fc.strategy, tz), [st], outputnames(fc.features))
 end
 

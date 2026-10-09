@@ -410,6 +410,35 @@
                            (r.folds.unique_id .== "s2")] == [1, 2]
     end
 
+    @testset "Fourier is locked to the calendar across ragged series" begin
+        # A weekly pattern by date, sampled over ragged spans.
+        wk(d) = 10 + 5 * sin(2π * Dates.value(d) / 7)
+        spans = [(Date(2022, 1, 1), 70), (Date(2022, 1, 4), 60), (Date(2022, 1, 13), 45)]
+        ids = reduce(vcat, [fill("s$k", n) for (k, (_, n)) in enumerate(spans)])
+        ds = reduce(vcat, [collect(d0:Day(1):d0 + Day(n - 1)) for (d0, n) in spans])
+        week = (unique_id=ids, ds=ds, y=wk.(ds))
+        tree = DecisionTreeRegressor(min_samples_leaf=1, rng=StableRNG(1))
+        for model in (tree, EvoTreeRegressor(nrounds=200, eta=0.3, seed=1)),
+            s in (Recursive(), Direct(7)), tf in (NoTransform(), Difference(1))
+            fc = Forecaster(model; features=FeatureSet(Fourier(7, 1)), strategy=s,
+                            freq=Day(1), id=:unique_id, transform=tf)
+            out = forecast(fit(fc, week), 7)
+            @test maximum(abs.(out.y_hat .- wk.(out.ds))) < (model === tree ? 1e-9 : 1e-4)
+        end
+        # Month-end series keep whole-month offsets.
+        me = [Date(2021, 1, 31), Date(2021, 3, 31), Date(2021, 8, 31)]
+        mdates = [[lastdayofmonth(d + Month(i)) for i in 0:(27 - 3k)]
+                  for (k, d) in enumerate(me)]
+        monthly = (unique_id=reduce(vcat, [fill("m$k", length(t))
+                                          for (k, t) in enumerate(mdates)]),
+                   ds=reduce(vcat, mdates), y=ones(sum(length, mdates)))
+        fm = fit(Forecaster(TestModels.EchoColumn(:fourier_12_0_cos_1);
+                            features=FeatureSet(Fourier(12, 1)), freq=Month(1),
+                            id=:unique_id), monthly)
+        out = forecast(fm, 2)
+        @test out.y_hat ≈ [cos(2π * (month(d) - 1) / 12) for d in out.ds]
+    end
+
     @testset "ragged start dates: fit, forecast, Direct and backtest" begin
         starts = [Date(2022, 1, 1), Date(2022, 1, 11), Date(2022, 1, 21)]
         rag = makepanel(lens=(60, 50, 40), starts=starts)     # all end on 2022-03-01
@@ -422,11 +451,10 @@
             out = forecast(f, 3)
             @test out.ds == repeat(Date(2022, 3, 1) .+ Day.(1:3), 3)
             @test out.y_hat == repeat([160.0, 60.0, 90.0], inner=3)
-            # Fourier's step index is 0-based per series, as documented.
+            # Fourier counts from the earliest start, so dates share values.
             fe = fit(mk(TestModels.EchoColumn(:fourier_7_0_sin_1), fourier; strat=s), rag)
             got = forecast(fe, 3).y_hat
-            @test got ≈ [sin(2π * (n - 1 + i) / 7) for n in (60, 50, 40) for i in 1:3]
-            @test !(got[1] ≈ got[4]) && !(got[1] ≈ got[7])
+            @test got ≈ repeat([sin(2π * (59 + i) / 7) for i in 1:3], 3)
             # s3 starts after the first origin and joins at the second.
             r = backtest(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)); strat=s), rag;
                          horizon=5, initial=15, step=10)

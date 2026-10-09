@@ -148,6 +148,19 @@ end
             MachineLearningForecast.validate_time_column(gapped, :ds, Month(1)))
     end
 
+    @testset "steps between timestamps follow the anchored grid" begin
+        steps = MachineLearningForecast._steps_between
+        @test steps(Date(2022, 1, 1), Date(2022, 1, 1), Day(1)) == 0
+        @test steps(Date(2022, 1, 1), Date(2022, 3, 1), Day(1)) == 59
+        # Off the anchor's grid, the count rounds down.
+        @test steps(Date(2022, 1, 1), Date(2022, 1, 10), Week(1)) == 1
+        @test steps(Date(2021, 1, 31), Date(2021, 2, 28), Month(1)) == 1
+        @test steps(Date(2021, 1, 31), Date(2023, 3, 31), Month(1)) == 26
+        @test steps(Date(2021, 1, 1), Date(2021, 12, 1), Quarter(1)) == 3
+        @test steps(DateTime(2022, 1, 1), DateTime(2022, 1, 3, 5), Hour(1)) == 53
+        @test steps(0, 20, 5) == 4 && steps(0, 1_000_003, 1) == 1_000_003
+    end
+
     @testset "gap count reports discontinuities, not off-grid rows" begin
         # One missing day is one gap, not one per later row.
         full = collect(Date(2020, 1, 1):Day(1):Date(2020, 1, 1) + Day(999))

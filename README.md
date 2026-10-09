@@ -96,7 +96,7 @@ columntables convert straight back: `DataFrame(fcast)`.
 | `RollingMin(w; lag=1)` / `RollingMax(w; lag=1)` | target | min / max of the same window |
 | `Diff(k; lag=1)` | target | `y_{t-lag} - y_{t-lag-k}` |
 | `Calendar(parts...)` | time | `:year`, `:quarter`, `:month`, `:weekofyear`, `:dayofweek`, `:dayofmonth`, `:dayofyear`, `:hour`, `:minute` |
-| `Fourier(period, K)` | time | `sin`/`cos` harmonics on a step index continuing seamlessly into the future |
+| `Fourier(period, K)` | time | `sin`/`cos` harmonics on a step index continuing seamlessly into the future; on a panel, the same date has the same values in every series |
 | `Exogenous(cols...)` | exogenous | future-known covariates, supplied via `new_data` at forecast time |
 | `CustomFeature(name, f, minhistory)` | target | `f(history)` — any function of the target history strictly before the current row |
 
