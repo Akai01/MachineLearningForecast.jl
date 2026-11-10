@@ -189,6 +189,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `backtest` merged metrics with the same name (for example closures from
+  one factory, or `(mae, mae)`): their per-fold rows were indistinguishable
+  and every overall score came out as the mean of the metrics sharing the
+  name. `backtest`, on a single series or a panel, now throws an
+  `ArgumentError` naming the duplicated metric and asking you to remove the
+  repeat or give each metric its own named function. `tune` takes one metric
+  and is unaffected.
 - `Fourier` values drifted as the step index grew: computing
   `sin(2πkn/period)` directly rounds more as `n` grows, so a phase took a
   slightly different value in every period (at phase 0, -2.4e-16 after one

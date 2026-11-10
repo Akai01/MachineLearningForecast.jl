@@ -294,6 +294,22 @@
         end
     end
 
+    @testset "panel backtest rejects metrics with the same name" begin
+        fcd = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
+        mkm(k) = (a, b) -> k * mae(a, b)
+        @test_throws ArgumentError backtest(fcd, panel; horizon=5, initial=20,
+                                            metrics=(mkm(1), mkm(2)))
+        @test_throws "2 metrics are named $(repr(Symbol(mkm(1))))" backtest(
+            fcd, panel; horizon=5, initial=20, metrics=(mkm(1), mkm(2)))
+        @test_throws "backtest metrics must have distinct names, but 2 metrics are " *
+                     "named :mae, so" backtest(fcd, panel; horizon=5, initial=20,
+                                               metrics=(mae, mae))
+        @test_throws "2 metrics are named :mae" backtest(
+            fcd, panel; horizon=5, windows=2, step=5, metrics=(mae, mae))
+        r = backtest(fcd, panel; horizon=5, initial=20, metrics=(mae, rmse))
+        @test Set(r.metrics.metric) == Set([:mae, :rmse])
+    end
+
     @testset "backtest cuts folds on the global timestamp grid" begin
         big = makepanel(lens=(60, 50, 55))
         fc = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))

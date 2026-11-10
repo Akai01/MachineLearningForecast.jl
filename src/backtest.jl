@@ -28,6 +28,19 @@ end
 
 _metric_name(m) = Symbol(m)
 
+function _check_metric_names(ms)
+    labels = [_metric_name(m) for m in ms]
+    allunique(labels) && return nothing
+    name = first(l for l in labels if count(==(l), labels) > 1)
+    n = count(==(name), labels)
+    throw(ArgumentError(
+        "backtest metrics must have distinct names, but $n metrics are named " *
+        "$(repr(name)), so their per-fold rows would be merged into one wrong " *
+        "overall score. Remove the repeated metric, or give each variant its own " *
+        "named function (closures from one factory share a name), e.g. " *
+        "metrics=(mae, rmse)."))
+end
+
 "Where backtest folds start: from the data's start, or from each series' end."
 abstract type FoldScheme end
 
@@ -155,6 +168,7 @@ function backtest(fc::Forecaster, data; horizon::Integer,
             "backtest metrics must be a tuple or vector of metric functions, got " *
             "$(repr(metrics)). Pass e.g. metrics=(mae, rmse), or metrics=(mae,) " *
             "for one metric."))
+    _check_metric_names(ms)
     tbl = normalize_table(data)
     return _backtest_spec(fc, tbl, horizon, scheme, ms)
 end

@@ -126,6 +126,34 @@
         @test r3.metrics.value == r2.metrics.value
     end
 
+    @testset "metrics must have distinct names" begin
+        mkm(k) = (a, b) -> k * mae(a, b)
+        msg = "backtest metrics must have distinct names, but 2 metrics are named " *
+              ":mae, so their per-fold rows would be merged into one wrong overall " *
+              "score. Remove the repeated metric, or give each variant its own named " *
+              "function (closures from one factory share a name), e.g. " *
+              "metrics=(mae, rmse)."
+        @test_throws ArgumentError backtest(fc, df; horizon=5, initial=80,
+                                            metrics=(mae, mae))
+        @test_throws msg backtest(fc, df; horizon=5, initial=80, metrics=(mae, mae))
+        @test_throws msg backtest(fc, df; horizon=5, initial=80, metrics=[mae, rmse, mae])
+        name = Symbol(mkm(1))
+        @test_throws ArgumentError backtest(fc, df; horizon=5, initial=80,
+                                            metrics=(mkm(1), mkm(2)))
+        @test_throws "2 metrics are named $(repr(name))" backtest(
+            fc, df; horizon=5, initial=80, metrics=(mkm(1), mkm(2)))
+        @test_throws "3 metrics are named :mae" backtest(
+            fc, df; horizon=5, initial=80, metrics=(mae, rmse, mae, mae))
+        @test_throws "2 metrics are named :mae" backtest(
+            fc, df; horizon=5, windows=2, metrics=(mae, mae))
+        r = backtest(fc, df; horizon=5, initial=80, step=10, metrics=(mae, rmse))
+        @test r.metrics.metric == [:mae, :rmse, :mae, :rmse, :mae, :rmse]
+        r2 = backtest(fc, df; horizon=5, initial=80, step=10,
+                      metrics=((a, b) -> mae(a, b), (a, b) -> 2 * mae(a, b)))
+        @test r2.metrics.value[end - 1] * 2 ≈ r2.metrics.value[end]
+        @test length(unique(r2.metrics.metric)) == 2
+    end
+
     @testset "edge cases: horizon 1 and bad data" begin
         r1 = backtest(fc, df; horizon=1, initial=95, metrics=(mae,))
         @test r1.folds.step == ones(Int, 5)
