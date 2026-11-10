@@ -294,6 +294,33 @@
         end
     end
 
+    @testset "panel Direct anchors time/exogenous columns to the target row" begin
+        # Levels keep y, and so promo, distinct across series.
+        starts = [Date(2022, 1, 1), Date(2022, 1, 11), Date(2022, 1, 21)]
+        lv = (1000.0, 2000.0, 3000.0)
+        rag = makepanel(lens=(60, 50, 40), levels=lv, starts=starts)
+        dd = merge(rag, (promo=3 .* rag.y,))
+        fc = mk(TestModels.PairLookup(:promo), FeatureSet(Lag(1), Exogenous(:promo));
+                strat=Direct(4))
+        # Row r of series k has y = lv[k] + r, so promo = 3 * y there.
+        rows = ([10, 20, 30, 40], [8, 18, 28, 38], [6, 16, 26, 36])
+        future = (unique_id=repeat(["s1", "s2", "s3"], inner=4),
+                  ds=repeat(Date(2022, 3, 2) .+ Day.(0:3), 3),
+                  promo=[3 * (lv[k] + r) for k in 1:3 for r in rows[k]])
+        got = forecast(fit(fc, dd), 4; new_data=future).y_hat
+        # Correct anchoring maps promo to y of its own row.
+        @test got ≈ [lv[k] + r for k in 1:3 for r in rows[k]]
+        # Taking promo from the feature row shifts step i by i - 1.
+        @test got != [lv[k] + r + i - 1 for k in 1:3 for (i, r) in enumerate(rows[k])]
+
+        # A TimeFeature must be recoverable at every step too.
+        dw = (unique_id=rag.unique_id, ds=rag.ds, y=Float64.(dayofweek.(rag.ds)))
+        fc_cal = mk(TestModels.PairLookup(:dayofweek),
+                    FeatureSet(Lag(1), Calendar(:dayofweek)); strat=Direct(4))
+        fut_ds = Date(2022, 3, 2) .+ Day.(0:3)
+        @test forecast(fit(fc_cal, dw), 4).y_hat ≈ repeat(Float64.(dayofweek.(fut_ds)), 3)
+    end
+
     @testset "panel backtest rejects metrics with the same name" begin
         fcd = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
         mkm(k) = (a, b) -> k * mae(a, b)
