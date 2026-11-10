@@ -17,6 +17,7 @@ using .TestModels
     include("test_features.jl")
     include("test_strategies.jl")
     include("test_forecaster.jl")
+    include("test_metrics.jl")
     include("test_backtest.jl")
     include("test_tune.jl")
     include("test_validation.jl")
