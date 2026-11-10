@@ -1,20 +1,33 @@
-# Julia
-Manifest.toml
-docs/Manifest.toml
-docs/build/
+# Allowlist: everything not listed here is ignored.
+# Add new top-level paths, and new docs/ entries, below.
+/*
+!/.github/
+!/.gitignore
+!/CHANGELOG.md
+!/CODE_OF_CONDUCT.md
+!/CONTRIBUTING.md
+!/LICENSE
+!/Project.toml
+!/README.md
+!/SECURITY.md
+!/src/
+!/test/
+
+!/docs/
+/docs/*
+!/docs/Project.toml
+!/docs/make.jl
+!/docs/src/
+
+# Ignored inside allowed directories
+Manifest*.toml
 *.jl.cov
 *.jl.*.cov
 *.jl.mem
-
-# Editors
+*.jl.*.mem
+*.swp
+*.swo
+*~
 .vscode/
 .idea/
-*.swp
-
-# Claude Code / agent session transcripts. These contain full conversation
-# history and must never be committed.
-/-*/
-/.claude/
-*.jsonl
-
-CLAUDE.md
+.DS_Store
