@@ -1,34 +1,52 @@
 module ThirdPartyExog
 
-using MachineLearningForecast: ExogenousFeature, ColumnAccumulator
-import MachineLearningForecast: outputnames, materialize!, featurevalues
+using MachineLearningForecast: ExogenousFeature, TargetFeature, ColumnAccumulator
+import MachineLearningForecast: outputnames, minhistory, materialize!, featurevalues,
+    inputcolumns
 
-"Stores its input as `col`, not in the `cols` field forecast reads."
+"Stores its input as `col` and declares no inputcolumns method."
 struct NoCols <: ExogenousFeature
     col::Symbol
 end
 
-"Stores its input in the required `cols::Vector{Symbol}` field."
+"Declares its input through inputcolumns, from a cols field."
 struct Doubled <: ExogenousFeature
     cols::Vector{Symbol}
 end
+inputcolumns(f::Doubled) = f.cols
 
-"Exposes its input as a `cols` property, not a field."
+"Declares its input through inputcolumns, from a col field."
 struct PropCols <: ExogenousFeature
     col::Symbol
 end
-Base.getproperty(f::PropCols, s::Symbol) =
+inputcolumns(f::PropCols) = [getfield(f, :col)]
+
+"Only a cols property, which no longer counts as a declaration."
+struct PropCols2 <: ExogenousFeature
+    col::Symbol
+end
+Base.getproperty(f::PropCols2, s::Symbol) =
     s === :cols ? [getfield(f, :col)] : getfield(f, s)
 
-"Has a `cols` property whose getter fails for its own reason."
+"Has an inputcolumns method that fails for its own reason."
 struct BrokenCols <: ExogenousFeature
     col::Symbol
 end
-Base.getproperty(f::BrokenCols, s::Symbol) =
-    s === :cols ? error("boom in getproperty") : getfield(f, s)
+inputcolumns(::BrokenCols) = error("boom in inputcolumns")
 
-const Ours = Union{NoCols,Doubled,PropCols,BrokenCols}
-_col(f::Union{NoCols,PropCols,BrokenCols}) = f.col
+"A TargetFeature that reads the user column :promo."
+struct NeedsPromo <: TargetFeature end
+inputcolumns(::NeedsPromo) = [:promo]
+outputnames(::NeedsPromo) = [:needs_promo]
+minhistory(::NeedsPromo) = 0
+function materialize!(out::ColumnAccumulator, f::NeedsPromo, y, t, data)
+    push!(out, only(outputnames(f)) => Vector{Union{Missing,Float64}}(zeros(length(y))))
+    return out
+end
+featurevalues(::NeedsPromo, y_hist, t_next, exog_row) = (0.0,)
+
+const Ours = Union{NoCols,Doubled,PropCols,PropCols2,BrokenCols}
+_col(f::Union{NoCols,PropCols,PropCols2,BrokenCols}) = f.col
 _col(f::Doubled) = only(f.cols)
 outputnames(f::Ours) = [Symbol(_col(f), :_x2)]
 function materialize!(out::ColumnAccumulator, f::Ours, y, t, data)
@@ -362,26 +380,36 @@ end
         @test !MachineLearningForecast.needs_ytrain(mae)
     end
 
-    @testset "a third-party ExogenousFeature must store its columns in cols" begin
+    @testset "features declare their input columns through inputcolumns" begin
         dfe = (ds=df.ds, y=df.y, promo=Float64.(1:50))
         future = (ds=collect(df.ds[end] + Day(1):Day(1):df.ds[end] + Day(3)),
                   promo=[1.0, 2.0, 3.0])
+        inputcolumns = MachineLearningForecast.inputcolumns
+        @test inputcolumns(Lag(1)) == Symbol[]
+        @test inputcolumns(Calendar(:month)) == Symbol[]
+        @test inputcolumns(Exogenous(:promo, :price)) == [:promo, :price]
+        @test_throws ArgumentError inputcolumns(ThirdPartyExog.NoCols(:promo))
+        nomethod = "NoCols is an ExogenousFeature but defines no inputcolumns method"
+        @test_throws nomethod inputcolumns(ThirdPartyExog.NoCols(:promo))
         for m in (EvoTreeRegressor(nrounds=5),
                   DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
-            bad = Forecaster(m; features=FeatureSet(Lag(1), ThirdPartyExog.NoCols(:promo)),
-                             freq=Day(1))
-            f = fit(bad, dfe)                     # fitting never reads cols
-            for run in (() -> forecast(f, 3; new_data=future),
-                        () -> backtest(bad, dfe; horizon=3, initial=40))
-                @test_throws ArgumentError run()
-                @test_throws "NoCols is an ExogenousFeature without a cols field" run()
-                @test_throws "in a field cols::Vector{Symbol}" run()
+            for Bad in (ThirdPartyExog.NoCols, ThirdPartyExog.PropCols2)
+                bad = Forecaster(m; features=FeatureSet(Lag(1), Bad(:promo)), freq=Day(1))
+                f = fit(bad, dfe)                 # fitting never reads inputcolumns
+                for run in (() -> forecast(f, 3; new_data=future),
+                            () -> backtest(bad, dfe; horizon=3, initial=40))
+                    @test_throws ArgumentError run()
+                    name = nameof(Bad)
+                    msg1 = "$name is an ExogenousFeature but defines no inputcolumns method"
+                    msg2 = "Define MachineLearningForecast.inputcolumns(f::$name)"
+                    @test_throws msg1 run()
+                    @test_throws msg2 run()
+                end
             end
             good = Forecaster(m; freq=Day(1),
                               features=FeatureSet(Lag(1), ThirdPartyExog.Doubled([:promo])))
             @test all(isfinite, forecast(fit(good, dfe), 3; new_data=future).y_hat)
             @test length(backtest(good, dfe; horizon=3, initial=40).folds.y_hat) == 9
-            # A cols property is enough, as in 0.1.0.
             prop = Forecaster(m; freq=Day(1),
                               features=FeatureSet(Lag(1), ThirdPartyExog.PropCols(:promo)))
             @test forecast(fit(prop, dfe), 3; new_data=future) ==
@@ -390,6 +418,13 @@ end
             bg = backtest(good, dfe; horizon=3, initial=40)
             @test isequal(bp.folds, bg.folds) && isequal(bp.metrics, bg.metrics)
         end
+        needs = Forecaster(TestModels.LinAR(1.0, 0.0); freq=Day(1),
+                           features=FeatureSet(Lag(1), ThirdPartyExog.NeedsPromo()))
+        fneeds = fit(needs, df)
+        @test_throws ArgumentError forecast(fneeds, 3)
+        nodata = "features contain Exogenous(:promo) but forecast() was called " *
+                 "without new_data"
+        @test_throws nodata forecast(fneeds, 3)
         echo = Forecaster(TestModels.EchoColumn(:promo_x2); freq=Day(1),
                           features=FeatureSet(Lag(1), ThirdPartyExog.Doubled([:promo])))
         @test forecast(fit(echo, dfe), 3; new_data=future).y_hat == [2.0, 4.0, 6.0]
@@ -398,8 +433,10 @@ end
         @test MachineLearningForecast.exogenous_columns(FeatureSet(Lag(1))) == Symbol[]
         fsp = FeatureSet(Lag(1), ThirdPartyExog.PropCols(:c))
         @test MachineLearningForecast.exogenous_columns(fsp) == [:c]
+        fsn = FeatureSet(Lag(1), ThirdPartyExog.NeedsPromo())
+        @test MachineLearningForecast.exogenous_columns(fsn) == [:promo]
         exogcols = MachineLearningForecast.exogenous_columns
         fsb = FeatureSet(Lag(1), ThirdPartyExog.BrokenCols(:c))
-        @test_throws ErrorException("boom in getproperty") exogcols(fsb)
+        @test_throws ErrorException("boom in inputcolumns") exogcols(fsb)
     end
 end

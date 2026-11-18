@@ -22,6 +22,9 @@ Every concrete feature implements four methods:
 - `featurevalues(f, y_hist, t_next, exog_row)`: a tuple of its values for one
   future row, used by recursive and direct forecasting.
 
+A feature that reads user columns also declares them through
+[`inputcolumns`](@ref) (an [`ExogenousFeature`](@ref) must).
+
 The batch and single-row methods compute the same function. Every
 `TargetFeature` uses only information strictly before the current row's
 target, so rolling and difference features require `lag ≥ 1`.
@@ -344,6 +347,29 @@ Exogenous(cols::Symbol...) = Exogenous(collect(Symbol, cols))
 
 outputnames(f::Exogenous) = f.cols
 minhistory(::ExogenousFeature) = 0
+
+"""
+    inputcolumns(f) -> Vector{Symbol}
+
+The user columns the feature `f` reads. `forecast` and `backtest` pick exactly
+these columns from `new_data` (or from the held-out rows). The default is
+`Symbol[]`, [`Exogenous`](@ref) returns its columns, and an
+[`ExogenousFeature`](@ref) of your own must define it, otherwise an
+`ArgumentError` is thrown. Any feature may define it.
+
+# Example
+```julia
+inputcolumns(Exogenous(:promo, :price))   # [:promo, :price]
+inputcolumns(Lag(1))                      # Symbol[]
+```
+"""
+inputcolumns(::AbstractFeature) = Symbol[]
+inputcolumns(f::Exogenous) = f.cols
+inputcolumns(f::ExogenousFeature) = throw(ArgumentError(
+    "$(typeof(f)) is an ExogenousFeature but defines no inputcolumns method. " *
+    "forecast and backtest read the columns it needs from new_data through " *
+    "inputcolumns(f). Define MachineLearningForecast.inputcolumns(f::" *
+    "$(nameof(typeof(f)))) = [...], a Vector{Symbol}."))
 
 function materialize!(out::ColumnAccumulator, f::Exogenous, y::AbstractVector{Float64},
                       t::AbstractVector, data::NamedTuple)

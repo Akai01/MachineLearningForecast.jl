@@ -155,12 +155,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the fix, instead of a bare `BoundsError` or `MethodError`. Any other error
   from the function, such as a `BoundsError` on a vector it captured, passes
   through unchanged. Valid custom features produce the same values as before.
-- A third-party `ExogenousFeature` without a `cols` field or property throws
-  an `ArgumentError` at `forecast` and `backtest` saying it must store its
-  input columns in `cols::Vector{Symbol}`, instead of a `FieldError` (an
-  `ErrorException` on Julia 1.10). A `cols` property defined through
-  `getproperty` still works, and any other error its getter throws passes
-  through unchanged. `CONTRIBUTING.md` now documents that requirement.
+- Features declare the user columns they read through `inputcolumns(f)`
+  instead of a `cols` field or property: `Exogenous` returns its columns,
+  every other built-in returns none, and a third-party `ExogenousFeature`
+  without an `inputcolumns` method throws an `ArgumentError` at `forecast` and
+  `backtest` saying what to define. A `cols` property no longer works.
 - Panel errors about one series' data name the series and give the row of the
   table passed to `fit` or `backtest`. A missing or non-finite target and a
   missing exogenous value were reported without the series and at a row

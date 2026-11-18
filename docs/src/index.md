@@ -68,6 +68,7 @@ MachineLearningForecast.ForecastStrategy
 FeatureSet
 MachineLearningForecast.outputnames
 MachineLearningForecast.minhistory
+MachineLearningForecast.inputcolumns
 MachineLearningForecast.targetcolumnmask
 Lag
 RollingMean

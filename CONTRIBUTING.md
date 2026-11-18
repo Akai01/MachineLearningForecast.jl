@@ -80,10 +80,11 @@ materialize!(out, f, y, t, tbl)         # batch/training path, vectorised
 featurevalues(f, y_hist, t_next, exog)  # single-row path, used when forecasting
 ```
 
-An `ExogenousFeature` must also expose its input columns as a `cols` property
-(normally a field `cols::Vector{Symbol}`). `forecast` and `backtest` read it to
-pick the columns from `new_data` (or from the held-out rows), and throw an
-`ArgumentError` for an `ExogenousFeature` without it.
+A feature whose inputs come from user columns (an `ExogenousFeature`) must
+define `inputcolumns(f)`, the `Vector{Symbol}` of columns it reads. `forecast`
+and `backtest` use it to pick them from `new_data`; an `ExogenousFeature`
+without it throws an `ArgumentError`. Any feature may define it; the default is
+`Symbol[]`.
 
 The two paths **must compute the same function**. A mismatch between them is a
 silent accuracy bug: training sees one thing, forecasting another. Add a test
