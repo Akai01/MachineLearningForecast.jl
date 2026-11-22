@@ -1,8 +1,7 @@
 module ThirdPartyExog
 
-using MachineLearningForecast: ExogenousFeature, TargetFeature, ColumnAccumulator
-import MachineLearningForecast: outputnames, minhistory, materialize!, featurevalues,
-    inputcolumns
+using MachineLearningForecast: ExogenousFeature, TargetFeature
+import MachineLearningForecast: outputnames, minhistory, featurevalues!, inputcolumns
 
 "Stores its input as `col` and declares no inputcolumns method."
 struct NoCols <: ExogenousFeature
@@ -39,21 +38,13 @@ struct NeedsPromo <: TargetFeature end
 inputcolumns(::NeedsPromo) = [:promo]
 outputnames(::NeedsPromo) = [:needs_promo]
 minhistory(::NeedsPromo) = 0
-function materialize!(out::ColumnAccumulator, f::NeedsPromo, y, t, data)
-    push!(out, only(outputnames(f)) => Vector{Union{Missing,Float64}}(zeros(length(y))))
-    return out
-end
-featurevalues(::NeedsPromo, y_hist, t_next, exog_row) = (0.0,)
+featurevalues!(out, ::NeedsPromo, ctx) = (out[1] = 0.0; nothing)
 
 const Ours = Union{NoCols,Doubled,PropCols,PropCols2,BrokenCols}
 _col(f::Union{NoCols,PropCols,PropCols2,BrokenCols}) = f.col
 _col(f::Doubled) = only(f.cols)
 outputnames(f::Ours) = [Symbol(_col(f), :_x2)]
-function materialize!(out::ColumnAccumulator, f::Ours, y, t, data)
-    push!(out, only(outputnames(f)) => Vector{Union{Missing,Float64}}(2 .* data[_col(f)]))
-    return out
-end
-featurevalues(f::Ours, y_hist, t_next, exog_row) = (2.0 * exog_row[_col(f)],)
+featurevalues!(out, f::Ours, ctx) = (out[1] = 2.0 * ctx.exog[_col(f)]; nothing)
 
 end
 
@@ -344,15 +335,11 @@ end
         t = collect(Date(2021, 3, 1):Day(1):Date(2021, 3, 10))
         # Calendar single-row values match Dates and the batch row.
         cal = Calendar(:dayofweek, :month, :weekofyear)
-        @test collect(MachineLearningForecast.featurevalues(cal, y, t[7], nothing)) ==
+        @test rowvalues(cal, y, t[7]) ==
               Float64[dayofweek(t[7]), month(t[7]), week(t[7])]
-        acc = MachineLearningForecast.ColumnAccumulator()
-        MachineLearningForecast.materialize!(acc, cal, y, t, (ds=t, y=y))
-        @test collect(MachineLearningForecast.featurevalues(cal, y[1:6], t[7], nothing)) ==
-              [col[7] for (_, col) in acc]
-        @test only(MachineLearningForecast.featurevalues(
-                       Diff(3; lag=2), y, t[1], nothing)) ==
-              y[10 + 1 - 2] - y[10 + 1 - 2 - 3]
+        acc = columns(cal, y, t, (ds=t, y=y))
+        @test rowvalues(cal, y[1:6], t[7]) == [col[7] for (_, col) in acc]
+        @test only(rowvalues(Diff(3; lag=2), y, t[1])) == y[10 + 1 - 2] - y[10 + 1 - 2 - 3]
 
         ds = collect(Date(2022, 1, 1):Day(1):Date(2022, 2, 19))
         d2 = (ds=ds, y=Float64.(1:50))
@@ -395,9 +382,11 @@ end
                   DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             for Bad in (ThirdPartyExog.NoCols, ThirdPartyExog.PropCols2)
                 bad = Forecaster(m; features=FeatureSet(Lag(1), Bad(:promo)), freq=Day(1))
-                f = fit(bad, dfe)                 # fitting never reads inputcolumns
-                for run in (() -> forecast(f, 3; new_data=future),
-                            () -> backtest(bad, dfe; horizon=3, initial=40))
+                # fit reads inputcolumns, so there is nothing to forecast.
+                for run in (() -> fit(bad, dfe),
+                            () -> backtest(bad, dfe; horizon=3, initial=40),
+                            () -> MachineLearningForecast.exogenous_columns(
+                                FeatureSet(Lag(1), Bad(:promo))))
                     @test_throws ArgumentError run()
                     name = nameof(Bad)
                     msg1 = "$name is an ExogenousFeature but defines no inputcolumns method"
@@ -420,7 +409,7 @@ end
         end
         needs = Forecaster(TestModels.LinAR(1.0, 0.0); freq=Day(1),
                            features=FeatureSet(Lag(1), ThirdPartyExog.NeedsPromo()))
-        fneeds = fit(needs, df)
+        fneeds = fit(needs, dfe)
         @test_throws ArgumentError forecast(fneeds, 3)
         nodata = "features contain Exogenous(:promo) but forecast() was called " *
                  "without new_data"

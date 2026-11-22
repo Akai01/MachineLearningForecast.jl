@@ -101,8 +101,9 @@ function build_training_frame(fs::FeatureSet, tbl::NamedTuple, target::Symbol,
     y = target_vector(tbl, target, rows)
     t = require_column(tbl, time, "time")
     out = ColumnAccumulator()
+    series = TrainingSeries(y, t, tbl, Int(step0))
     for f in fs
-        materialize!(out, f, y, t, tbl, step0)
+        materialize!(out, f, series)
     end
     mh = minhistory(fs)
     n = length(y)
@@ -112,7 +113,7 @@ function build_training_frame(fs::FeatureSet, tbl::NamedTuple, target::Symbol,
         "$(mh + 1) rows or reduce lags/windows."))
     keep = falses(n)
     keep[(mh + 1):n] .= true
-    # Only exogenous columns can hold interior missings.
+    # Missing inputs are stored as missing, so check here.
     for (name, col) in out
         for i in (mh + 1):n
             ismissing(col[i]) && throw(ArgumentError(

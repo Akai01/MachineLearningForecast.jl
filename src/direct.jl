@@ -27,13 +27,13 @@ function _forecast(f::FittedForecaster, s::Direct, h::Integer, grid, exog_rows)
         "$(s.max_horizon) but forecast(h=$h) was requested. Refit with " *
         "Direct($h) or use Recursive()."))
     spec = f.spec
-    colvecs, row = _prediction_row(f)
+    colvecs, row, bufs = _prediction_row(f)
+    st = only(getfield(f, :series))
     preds = Vector{Float64}(undef, h)
     for step in 1:h
-        # Fourier index continues the 0-based training index.
-        n_next = length(f.z_history) - 1 + step
         exog_row = exog_rows === nothing ? nothing : exog_rows[step]
-        _fill_row!(colvecs, spec.features, f.z_history, grid[step], n_next, exog_row)
+        ctx = _context(st, st.z_history, grid[step], step, exog_row)
+        _fill_row!(colvecs, bufs, spec.features, ctx)
         preds[step] = Float64(only(_predict(f.models[step], row)))
     end
     ŷ = untransform(spec.transform, preds, f.transform_state)

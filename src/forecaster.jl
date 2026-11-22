@@ -426,32 +426,37 @@ function _new_time(v, T::Type, time::Symbol, i::Integer)
     return v
 end
 
-function _fill_row!(colvecs::Vector{Vector{Float64}}, features::FeatureSet,
-                    y_hist::AbstractVector{Float64}, t_next, n_next::Integer,
-                    exog_row)
+_context(st::SeriesState, y_hist::Vector{Float64}, t_next, s::Integer, exog_row) =
+    FeatureContext(y_hist, t_next, st.step0 + length(st.z_history) - 1 + s, exog_row)
+
+function _fill_row!(colvecs::Vector{Vector{Float64}}, bufs::Vector{Vector{Float64}},
+                    features::FeatureSet, ctx::FeatureContext)
     j = 1
-    for feat in features
-        j = _fill_feature!(colvecs, j, feat, y_hist, t_next, n_next, exog_row)::Int
+    for (feat, buf) in zip(features, bufs)
+        j = _fill_feature!(colvecs, j, buf, feat, ctx)::Int
     end
     return nothing
 end
 
-# Barrier: the loop below compiles per feature type.
-function _fill_feature!(colvecs::Vector{Vector{Float64}}, j::Int, feat::AbstractFeature,
-                        y_hist, t_next, n_next, exog_row)
-    targ = _uses_step_index(feat) ? n_next : t_next
-    for v in featurevalues(feat, y_hist, targ, exog_row)
-        colvecs[j][1] = Float64(v)
-        j += 1
+# Barrier: compiles per feature and context type.
+function _fill_feature!(colvecs::Vector{Vector{Float64}}, j::Int, buf::Vector{Float64},
+                        feat::AbstractFeature, ctx::FeatureContext)
+    featurevalues!(buf, feat, ctx)
+    for q in eachindex(buf)
+        colvecs[j + q - 1][1] = buf[q]
     end
-    return j
+    return j + length(buf)
 end
 
+# Sized once: outputnames per row would allocate.
 function _prediction_row(f::FittedForecaster)
     colvecs = [Vector{Float64}(undef, 1) for _ in f.feature_names]
     row = NamedTuple{Tuple(f.feature_names)}(Tuple(colvecs))
-    return colvecs, row
+    return colvecs, row, _feature_buffers(f.spec.features)
 end
+
+_feature_buffers(features::FeatureSet) =
+    Vector{Float64}[Vector{Float64}(undef, length(outputnames(feat))) for feat in features]
 
 _forecast_table(spec::Forecaster, grid, preds::Vector{Float64}) =
     NamedTuple{(spec.time, :y_hat)}((grid, preds))

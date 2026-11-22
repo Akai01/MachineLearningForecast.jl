@@ -13,21 +13,26 @@ Root of the feature hierarchy. Concrete features are one of:
 - [`ExogenousFeature`](@ref): passed through from user data (must be provided
   for the future via `new_data`), i.e. [`Exogenous`](@ref).
 
-Every concrete feature implements four methods:
+Every concrete feature implements three methods:
 
 - `outputnames(f)`: the names of the columns it produces, a `Vector{Symbol}`.
 - `minhistory(f)`: the number of history rows it needs before it is defined.
-- `materialize!(out, f, y, t, data)`: pushes its `outputnames(f)` columns for
-  every training row onto `out`, with `missing` where it is undefined.
-- `featurevalues(f, y_hist, t_next, exog_row)`: a tuple of its values for one
-  future row, used by recursive and direct forecasting.
+- [`featurevalues!`](@ref)`(out, f, ctx)`: writes its values for the one row
+  that the [`FeatureContext`](@ref) `ctx` describes.
 
-A feature that reads user columns also declares them through
-[`inputcolumns`](@ref) (an [`ExogenousFeature`](@ref) must).
+Training, `forecast` and `backtest` all compute a feature through
+`featurevalues!`, so by default (unless the feature overrides `materialize!`) the
+training columns and the forecast-time values cannot disagree. Optionally a
+feature defines [`materialize!`](@ref) (a faster way to fill its training
+columns) and [`inputcolumns`](@ref) (the user columns it reads; an
+[`ExogenousFeature`](@ref) must).
 
-The batch and single-row methods compute the same function. Every
-`TargetFeature` uses only information strictly before the current row's
-target, so rolling and difference features require `lag ≥ 1`.
+`ctx.y` holds the target history strictly before the row's target: a
+`TargetFeature` never sees the current or a later target value, so rolling and
+difference features require `lag ≥ 1`. Under `Direct` the history is fixed at
+the forecast origin. A `TargetFeature` should read only `ctx.y`: under `Direct`,
+`ctx.t` and `ctx.step` describe the target row, while its training column comes
+from the origin row.
 """
 abstract type AbstractFeature end
 
@@ -39,6 +44,163 @@ abstract type TimeFeature <: AbstractFeature end
 
 "Features passed through from user data (must be provided for the future)."
 abstract type ExogenousFeature <: AbstractFeature end
+
+"""
+    FeatureContext(y, t, step, exog)
+
+The row a feature is asked about, passed to [`featurevalues!`](@ref). It is
+read-only: do not keep a reference to it or to `y`.
+
+- `y`: the target history strictly before the row's target (a `Vector` when
+  forecasting, a view in training). It is empty at the first row when
+  `minhistory(f) == 0`.
+- `t`: the timestamp of the row's target.
+- `step`: the 0-based step index of the row's target. It counts `freq` steps
+  from the first (transformed) training timestamp, and from the earliest
+  series' first timestamp on a panel.
+- `exog`: a `NamedTuple` of the user columns at the row (it may hold more than
+  `inputcolumns(f)` when forecasting, so index it by name). When `inputcolumns(f)` is
+  empty it may be `nothing` or a `NamedTuple` (forecasting with another exogenous
+  feature): do not read it then.
+
+# Example
+```julia
+using Dates
+ctx = MachineLearningForecast.FeatureContext([1.0, 2.0, 3.0], Date(2022, 1, 4), 3, nothing)
+ctx.y[end]   # 3.0
+```
+"""
+struct FeatureContext{Y<:AbstractVector{Float64},T,E}
+    y::Y
+    t::T
+    step::Int
+    exog::E
+end
+
+"""
+    TrainingSeries(y, t, data, step0)
+
+What [`materialize!`](@ref) reads: one series' training columns. `y` is the
+(transformed) target, `t` the time column, `data` the whole columntable (for
+the columns named by [`inputcolumns`](@ref)) and `step0` the step index of row
+1, so that row `i` has `ctx.step == step0 + i - 1`.
+
+# Example
+```julia
+using Dates
+s = MachineLearningForecast.TrainingSeries([1.0, 2.0], [Date(2022, 1, 1), Date(2022, 1, 2)],
+                                           (;), 0)
+s.step0   # 0
+```
+"""
+struct TrainingSeries{T<:AbstractVector,D<:NamedTuple}
+    y::Vector{Float64}
+    t::T
+    data::D
+    step0::Int
+end
+
+"""
+    featurevalues!(out, f, ctx)
+
+Write the values of feature `f` for the row that the
+[`FeatureContext`](@ref) `ctx` describes into `out`, a `Vector{Float64}` of
+`length(outputnames(f))` entries (write every one of them); the return value
+is ignored. This is the one method a feature must implement for its values:
+training, `forecast` and `backtest` all call it, so by default (unless the feature
+overrides [`materialize!`](@ref)) they cannot disagree.
+
+# Example
+```julia
+import MachineLearningForecast: outputnames, minhistory, featurevalues!
+
+struct LastTwo <: MachineLearningForecast.TargetFeature end
+outputnames(::LastTwo) = [:last_two]
+minhistory(::LastTwo) = 2
+featurevalues!(out, ::LastTwo, ctx) = (out[1] = ctx.y[end] + ctx.y[end-1]; nothing)
+```
+"""
+function featurevalues!(out, f::AbstractFeature, ctx)
+    throw(ArgumentError(
+        "$(typeof(f)) does not implement featurevalues!(out, f, ctx). The feature " *
+        "contract changed from featurevalues(f, y_hist, t_next, exog_row) and a " *
+        "vectorised materialize!(out, f, y, t, data) to one method that writes the " *
+        "values of the row ctx describes; define MachineLearningForecast." *
+        "featurevalues!(out, f::$(nameof(typeof(f))), ctx). See CONTRIBUTING.md."))
+end
+
+"""
+    materialize!(out, f, s::TrainingSeries)
+
+Push the training columns of feature `f` over the series `s` onto `out`
+(a vector of `name => column` pairs), with `missing` in the first
+`minhistory(f)` rows. The default calls [`featurevalues!`](@ref) for every row
+from `minhistory(f) + 1` on, so a feature gets this for free; it leaves a row
+`missing` when one of its [`inputcolumns`](@ref) is `missing` there. Define a
+method only for speed or to validate a column before any row is read, as
+[`Calendar`](@ref), [`Fourier`](@ref) and [`Exogenous`](@ref) do.
+
+# Example
+```julia
+using MachineLearningForecast
+using MachineLearningForecast: ColumnAccumulator, TrainingSeries, materialize!
+out = ColumnAccumulator()
+materialize!(out, Lag(1), TrainingSeries([1.0, 2.0, 3.0], 1:3, (;), 0))
+out   # [:y_lag_1 => [missing, 1.0, 2.0]]
+```
+"""
+function materialize!(out, f::AbstractFeature, s::TrainingSeries)
+    cols = inputcolumns(f)
+    for c in cols
+        _require_input_column(s.data, c)
+    end
+    columns = [Vector{Union{Missing,Float64}}(missing, length(s.y))
+               for _ in outputnames(f)]
+    source = isempty(cols) ? nothing :
+             NamedTuple{Tuple(cols)}(Tuple(s.data[c] for c in cols))
+    _materialize_rows!(columns, f, s, source)
+    for (name, col) in zip(outputnames(f), columns)
+        push!(out, name => col)
+    end
+    return out
+end
+
+function _require_input_column(data::NamedTuple, c::Symbol)
+    haskey(data, c) || throw(ArgumentError(
+        "features contain Exogenous(:$c) but column :$c is not present in the " *
+        "training data. Available columns: $(join(keys(data), ", ")). Add " *
+        "column :$c to the data, or remove it from the Exogenous feature."))
+    return nothing
+end
+
+# Barriers keep the context type concrete in the row loops.
+function _materialize_rows!(columns, f, s::TrainingSeries, ::Nothing)
+    buf = Vector{Float64}(undef, length(columns))
+    for i in (minhistory(f) + 1):length(s.y)
+        ctx = FeatureContext(view(s.y, 1:(i - 1)), s.t[i], s.step0 + i - 1, nothing)
+        _store_row!(columns, buf, f, ctx, i)
+    end
+    return nothing
+end
+
+function _materialize_rows!(columns, f, s::TrainingSeries, source::NamedTuple)
+    buf = Vector{Float64}(undef, length(columns))
+    for i in (minhistory(f) + 1):length(s.y)
+        exog = map(col -> col[i], source)
+        any(ismissing, values(exog)) && continue
+        ctx = FeatureContext(view(s.y, 1:(i - 1)), s.t[i], s.step0 + i - 1, exog)
+        _store_row!(columns, buf, f, ctx, i)
+    end
+    return nothing
+end
+
+function _store_row!(columns, buf, f, ctx, i)
+    featurevalues!(buf, f, ctx)
+    for q in eachindex(buf)
+        columns[q][i] = buf[q]
+    end
+    return nothing
+end
 
 """
     Lag(k)
@@ -65,19 +227,10 @@ end
 outputnames(f::Lag) = [Symbol("y_lag_", f.k)]
 minhistory(f::Lag) = f.k
 
-function materialize!(out::ColumnAccumulator, f::Lag, y::AbstractVector{Float64},
-                      t::AbstractVector, data::NamedTuple)
-    n = length(y)
-    col = Vector{Union{Missing,Float64}}(missing, n)
-    for i in (f.k + 1):n
-        col[i] = y[i - f.k]
-    end
-    push!(out, only(outputnames(f)) => col)
-    return out
+function featurevalues!(out::AbstractVector{Float64}, f::Lag, ctx::FeatureContext)
+    out[1] = ctx.y[end - f.k + 1]
+    return nothing
 end
-
-featurevalues(f::Lag, y_hist::AbstractVector, t_next, exog_row) =
-    (y_hist[end - f.k + 1],)
 
 for (T, stem, fun, minw, example) in (
         (:RollingMean, "rollmean", :(Statistics.mean), 1,
@@ -129,22 +282,11 @@ const RollingFeature = Union{RollingMean,RollingStd,RollingMin,RollingMax}
 
 minhistory(f::RollingFeature) = f.window + f.lag - 1
 
-function materialize!(out::ColumnAccumulator, f::RollingFeature, y::AbstractVector{Float64},
-                      t::AbstractVector, data::NamedTuple)
-    n = length(y)
-    g = _roll_fun(f)
-    col = Vector{Union{Missing,Float64}}(missing, n)
-    for i in (f.window + f.lag):n
-        hi = i - f.lag
-        col[i] = g(view(y, (hi - f.window + 1):hi))
-    end
-    push!(out, only(outputnames(f)) => col)
-    return out
-end
-
-function featurevalues(f::RollingFeature, y_hist::AbstractVector, t_next, exog_row)
-    hi = length(y_hist) - f.lag + 1
-    return (_roll_fun(f)(view(y_hist, (hi - f.window + 1):hi)),)
+function featurevalues!(out::AbstractVector{Float64}, f::RollingFeature,
+                        ctx::FeatureContext)
+    hi = length(ctx.y) - f.lag + 1
+    out[1] = _roll_fun(f)(view(ctx.y, (hi - f.window + 1):hi))
+    return nothing
 end
 
 """
@@ -176,20 +318,10 @@ Diff(k::Integer; lag::Integer=1) = Diff(k, lag)
 outputnames(f::Diff) = [Symbol("y_diff_", f.k, "_lag_", f.lag)]
 minhistory(f::Diff) = f.k + f.lag
 
-function materialize!(out::ColumnAccumulator, f::Diff, y::AbstractVector{Float64},
-                      t::AbstractVector, data::NamedTuple)
-    n = length(y)
-    col = Vector{Union{Missing,Float64}}(missing, n)
-    for i in (f.k + f.lag + 1):n
-        col[i] = y[i - f.lag] - y[i - f.lag - f.k]
-    end
-    push!(out, only(outputnames(f)) => col)
-    return out
-end
-
-function featurevalues(f::Diff, y_hist::AbstractVector, t_next, exog_row)
-    i = length(y_hist) + 1
-    return (y_hist[i - f.lag] - y_hist[i - f.lag - f.k],)
+function featurevalues!(out::AbstractVector{Float64}, f::Diff, ctx::FeatureContext)
+    i = length(ctx.y) + 1
+    out[1] = ctx.y[i - f.lag] - ctx.y[i - f.lag - f.k]
+    return nothing
 end
 
 const CALENDAR_PARTS = Dict{Symbol,Function}(
@@ -234,8 +366,8 @@ Calendar(parts::Symbol...) = Calendar(collect(Symbol, parts))
 outputnames(f::Calendar) = f.parts
 minhistory(::TimeFeature) = 0
 
-function materialize!(out::ColumnAccumulator, f::Calendar, y::AbstractVector{Float64},
-                      t::AbstractVector, data::NamedTuple)
+function materialize!(out::ColumnAccumulator, f::Calendar, s::TrainingSeries)
+    t = s.t
     for p in f.parts
         if p in (:hour, :minute)
             i = findfirst(v -> !(v isa Dates.AbstractDateTime), t)
@@ -249,8 +381,12 @@ function materialize!(out::ColumnAccumulator, f::Calendar, y::AbstractVector{Flo
     return out
 end
 
-featurevalues(f::Calendar, y_hist::AbstractVector, t_next, exog_row) =
-    Tuple(Float64(CALENDAR_PARTS[p](t_next))::Float64 for p in f.parts)
+function featurevalues!(out::AbstractVector{Float64}, f::Calendar, ctx::FeatureContext)
+    for (j, p) in enumerate(f.parts)
+        out[j] = Float64(CALENDAR_PARTS[p](ctx.t))::Float64
+    end
+    return nothing
+end
 
 """
     Fourier(period, order)
@@ -292,20 +428,11 @@ function outputnames(f::Fourier)
                 [Symbol("fourier_", p, "_cos_", k) for k in 1:f.order])
 end
 
-# Fourier gets the step index, not the time, as t_next.
-_uses_step_index(::AbstractFeature) = false
-_uses_step_index(::Fourier) = true
-
 # Reducing k * n first makes whole periods repeat bit for bit.
 _fourier_angle(f::Fourier, k::Integer, n::Integer) = 2π * mod(k * n, f.period) / f.period
 
-# A panel passes step0 to put every series on one calendar.
-materialize!(out::ColumnAccumulator, f::AbstractFeature, y, t, data, step0::Integer) =
-    materialize!(out, f, y, t, data)
-
-function materialize!(out::ColumnAccumulator, f::Fourier, y::AbstractVector{Float64},
-                      t::AbstractVector, data::NamedTuple, step0::Integer=0)
-    idx = step0:(step0 + length(y) - 1)
+function materialize!(out::ColumnAccumulator, f::Fourier, s::TrainingSeries)
+    idx = s.step0:(s.step0 + length(s.y) - 1)
     names = outputnames(f)
     θ = [_fourier_angle.(Ref(f), k, idx) for k in 1:f.order]
     append!(out, [names[k] => Vector{Union{Missing,Float64}}(sin.(θ[k]))
@@ -315,10 +442,14 @@ function materialize!(out::ColumnAccumulator, f::Fourier, y::AbstractVector{Floa
     return out
 end
 
-function featurevalues(f::Fourier, y_hist::AbstractVector, n::Integer, exog_row)
-    sins = ntuple(k -> sin(_fourier_angle(f, k, n)), f.order)
-    coss = ntuple(k -> cos(_fourier_angle(f, k, n)), f.order)
-    return (sins..., coss...)
+function featurevalues!(out::AbstractVector{Float64}, f::Fourier, ctx::FeatureContext)
+    n = ctx.step
+    for k in 1:f.order
+        θ = _fourier_angle(f, k, n)
+        out[k] = sin(θ)
+        out[f.order + k] = cos(θ)
+    end
+    return nothing
 end
 
 """
@@ -351,11 +482,12 @@ minhistory(::ExogenousFeature) = 0
 """
     inputcolumns(f) -> Vector{Symbol}
 
-The user columns the feature `f` reads. `forecast` and `backtest` pick exactly
-these columns from `new_data` (or from the held-out rows). The default is
-`Symbol[]`, [`Exogenous`](@ref) returns its columns, and an
-[`ExogenousFeature`](@ref) of your own must define it, otherwise an
-`ArgumentError` is thrown. Any feature may define it.
+The user columns the feature `f` reads. `forecast` and `backtest` pick exactly these columns
+from `new_data` (or from the held-out rows), and training reads them from the training data
+too, so they must be present there: `fit` throws otherwise (unless the feature overrides
+`materialize!`). The default is `Symbol[]`, [`Exogenous`](@ref) returns its columns, and an
+[`ExogenousFeature`](@ref) of your own must define it, otherwise an `ArgumentError` is
+thrown. Any feature may define it.
 
 # Example
 ```julia
@@ -371,14 +503,10 @@ inputcolumns(f::ExogenousFeature) = throw(ArgumentError(
     "inputcolumns(f). Define MachineLearningForecast.inputcolumns(f::" *
     "$(nameof(typeof(f)))) = [...], a Vector{Symbol}."))
 
-function materialize!(out::ColumnAccumulator, f::Exogenous, y::AbstractVector{Float64},
-                      t::AbstractVector, data::NamedTuple)
+function materialize!(out::ColumnAccumulator, f::Exogenous, s::TrainingSeries)
     for c in f.cols
-        haskey(data, c) || throw(ArgumentError(
-            "features contain Exogenous(:$c) but column :$c is not present in the " *
-            "training data. Available columns: $(join(keys(data), ", ")). Add " *
-            "column :$c to the data, or remove it from the Exogenous feature."))
-        push!(out, c => _exog_column(data[c], c))
+        _require_input_column(s.data, c)
+        push!(out, c => _exog_column(s.data[c], c))
     end
     return out
 end
@@ -400,13 +528,14 @@ function _to_float(v, name::Symbol)
         "Bool). Encode categorical columns numerically first."))
 end
 
-function featurevalues(f::Exogenous, y_hist::AbstractVector, t_next, exog_row)
-    return Tuple(begin
-        haskey(exog_row, c) || throw(ArgumentError(
+function featurevalues!(out::AbstractVector{Float64}, f::Exogenous, ctx::FeatureContext)
+    for (j, c) in enumerate(f.cols)
+        haskey(ctx.exog, c) || throw(ArgumentError(
             "new_data is missing exogenous column :$c required by Exogenous. " *
             "Provide it for every forecast timestamp."))
-        _to_float(exog_row[c], c)
-    end for c in f.cols)
+        out[j] = _to_float(ctx.exog[c], c)
+    end
+    return nothing
 end
 
 """
@@ -444,19 +573,11 @@ end
 outputnames(f::CustomFeature) = [f.name]
 minhistory(f::CustomFeature) = f.minhistory
 
-function materialize!(out::ColumnAccumulator, f::CustomFeature, y::AbstractVector{Float64},
-                      t::AbstractVector, data::NamedTuple)
-    n = length(y)
-    col = Vector{Union{Missing,Float64}}(missing, n)
-    for i in (f.minhistory + 1):n
-        col[i] = _custom_value(f, view(y, 1:(i - 1)), t[i])
-    end
-    push!(out, f.name => col)
-    return out
+function featurevalues!(out::AbstractVector{Float64}, f::CustomFeature,
+                        ctx::FeatureContext)
+    out[1] = _custom_value(f, ctx.y, ctx.t)
+    return nothing
 end
-
-featurevalues(f::CustomFeature, y_hist::AbstractVector, t_next, exog_row) =
-    (_custom_value(f, y_hist, t_next),)
 
 function _custom_value(f::CustomFeature, h::AbstractVector, t)
     v = try

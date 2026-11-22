@@ -70,26 +70,48 @@ These are load-bearing; please follow them:
 
 ## Adding a new feature type
 
-A feature is a subtype of `TargetFeature`, `TimeFeature` or `ExogenousFeature`,
-and must implement four methods:
+A feature is a subtype of `TargetFeature`, `TimeFeature` or `ExogenousFeature`. To
+extend the package, import the generic functions and implement three methods:
 
 ```julia
-outputnames(f)                          # Vector{Symbol}: the columns it produces
-minhistory(f)                           # Int: rows needed before it is defined
-materialize!(out, f, y, t, tbl)         # batch/training path, vectorised
-featurevalues(f, y_hist, t_next, exog)  # single-row path, used when forecasting
+import MachineLearningForecast: outputnames, minhistory, featurevalues!, inputcolumns
+
+outputnames(f)                  # Vector{Symbol}: the columns it produces
+minhistory(f)                   # Int: history rows needed before it is defined
+featurevalues!(out, f, ctx)     # write the values for the row ctx describes
 ```
 
-A feature whose inputs come from user columns (an `ExogenousFeature`) must
-define `inputcolumns(f)`, the `Vector{Symbol}` of columns it reads. `forecast`
-and `backtest` use it to pick them from `new_data`; an `ExogenousFeature`
-without it throws an `ArgumentError`. Any feature may define it; the default is
-`Symbol[]`.
+`ctx` is a `MachineLearningForecast.FeatureContext`:
 
-The two paths **must compute the same function**. A mismatch between them is a
-silent accuracy bug: training sees one thing, forecasting another. Add a test
-asserting the single-row value equals the materialised value at the same row —
-`test/test_validation.jl` has examples.
+- `ctx.y`: the target history strictly before the row's target (a `Vector` when
+  forecasting, a view in training: read it, do not keep it). It is empty at the first
+  row when `minhistory(f) = 0`. Under `Direct` the history is fixed at the forecast
+  origin, so `ctx.y` is the same for every horizon.
+- `ctx.t`: the row's timestamp; `ctx.step`: its 0-based step index (shared by all
+  series of a panel).
+- `ctx.exog`: a `NamedTuple` of the user's columns at the row. The values are the raw
+  user values (not converted to `Float64`: convert them yourself and reject what you
+  cannot use). At forecast time it may hold more columns than `inputcolumns(f)`, so
+  index it by name. When `inputcolumns(f)` is empty it may be `nothing` or a
+  `NamedTuple` (forecasting with another exogenous feature): do not read it then.
+
+`out` is preallocated with `length(outputnames(f))` entries: write every one of them as
+a `Float64`. The return value is ignored. If the feature reads user columns, also
+define `inputcolumns(f)`, the `Vector{Symbol}` of their names (the default is
+`Symbol[]`; an `ExogenousFeature` without it throws an `ArgumentError`). `forecast` and
+`backtest` use it to pick the columns from `new_data`.
+
+Training calls `featurevalues!` for every row, so by default (unless the feature
+overrides `materialize!`) batch and single-row values cannot diverge. Define
+`MachineLearningForecast.materialize!(out, f::MyFeature,
+s::MachineLearningForecast.TrainingSeries)` only for speed or to validate a column
+before any row is read (`Calendar`, `Fourier` and `Exogenous` do). Add a test that
+`featurevalues!` at row i equals the training column at row i, and a leakage test
+(changing `y` from row t on leaves the values at rows up to t unchanged):
+`test/test_features.jl` has examples.
+
+A `TargetFeature` should read only `ctx.y`: under `Direct`, `ctx.t` and `ctx.step`
+describe the target row, while its training column comes from the origin row.
 
 If your feature is a `TargetFeature`, it is anchored to the *feature* row; time
 and exogenous features are anchored to the *target* row. `Direct` fitting relies

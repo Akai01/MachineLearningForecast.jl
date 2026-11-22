@@ -12,6 +12,7 @@ import Aqua
 
 include("testmodels.jl")
 using .TestModels
+using .FeatureHelpers
 
 @testset "MachineLearningForecast" begin
     include("test_features.jl")

@@ -54,8 +54,7 @@
                         features=FeatureSet(Fourier(7, 1)), freq=Day(1))
         f = fit(fc, week)
         out = forecast(f, 7)
-        vals = [MachineLearningForecast.featurevalues(Fourier(7, 1), Float64[], n - 1 + s,
-                                                      nothing) for s in 1:7]
+        vals = [rowvalues(Fourier(7, 1), Float64[], Date(0), n - 1 + s) for s in 1:7]
         future = (fourier_7_0_sin_1=first.(vals), fourier_7_0_cos_1=last.(vals))
         MMI = MachineLearningForecast.MLJModelInterface
         tm = only(f.models)

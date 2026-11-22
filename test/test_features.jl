@@ -1,3 +1,92 @@
+module ContractFeatures
+
+using Dates
+using MachineLearningForecast: TargetFeature, TrainingSeries
+import MachineLearningForecast: outputnames, minhistory, featurevalues!, inputcolumns,
+    materialize!
+
+"Written only against the contract: the sum of the last two values."
+struct LagSum <: TargetFeature end
+outputnames(::LagSum) = [:ysum]
+minhistory(::LagSum) = 2
+featurevalues!(out, ::LagSum, ctx) = (out[1] = ctx.y[end] + ctx.y[end - 1]; nothing)
+
+"Written against the contract that featurevalues! and materialize! replaced."
+struct OldStyle <: TargetFeature end
+outputnames(::OldStyle) = [:old]
+minhistory(::OldStyle) = 1
+featurevalues(::OldStyle, y_hist, t_next, exog_row) = (y_hist[end],)
+function materialize!(out, ::OldStyle, y, t, data)
+    push!(out, :old => Vector{Union{Missing,Float64}}(y))
+    return out
+end
+
+"Reports what its context holds: history length, step index and day."
+struct Probe <: TargetFeature end
+outputnames(::Probe) = [:n_hist, :step_idx, :day]
+minhistory(::Probe) = 2
+function featurevalues!(out, ::Probe, ctx)
+    out[1] = length(ctx.y)
+    out[2] = ctx.step
+    out[3] = Dates.value(ctx.t - Date(2022, 1, 1))
+    return nothing
+end
+
+"Reads the user column :x and doubles it."
+struct NeedsX <: TargetFeature end
+outputnames(::NeedsX) = [:x2]
+minhistory(::NeedsX) = 0
+inputcolumns(::NeedsX) = [:x]
+featurevalues!(out, ::NeedsX, ctx) = (out[1] = 2.0 * ctx.exog[:x]; nothing)
+
+"Declares input columns and fails if a row is ever read."
+struct NeverRead <: TargetFeature
+    cols::Vector{Symbol}
+end
+outputnames(::NeverRead) = [:never]
+minhistory(::NeverRead) = 0
+inputcolumns(f::NeverRead) = f.cols
+featurevalues!(out, ::NeverRead, ctx) = error("read a row")
+
+"Has its own training columns, with `out` untyped as an extender writes it."
+struct OwnColumns <: TargetFeature end
+outputnames(::OwnColumns) = [:own]
+minhistory(::OwnColumns) = 0
+featurevalues!(out, ::OwnColumns, ctx) = (out[1] = -1.0; nothing)
+function materialize!(out, ::OwnColumns, s::TrainingSeries)
+    push!(out, :own => Vector{Union{Missing,Float64}}(fill(7.0, length(s.y))))
+    return out
+end
+
+"Reads :x and fails if it is ever handed a missing value."
+struct SawMissing <: TargetFeature end
+outputnames(::SawMissing) = [:x_x2]
+minhistory(::SawMissing) = 0
+inputcolumns(::SawMissing) = [:x]
+function featurevalues!(out, ::SawMissing, ctx)
+    ismissing(ctx.exog[:x]) && error("saw a missing input")
+    out[1] = 2.0 * ctx.exog[:x]
+    return nothing
+end
+
+end
+
+# At top level the module is a constant: a static call.
+function featurevalues_allocs(f, ctx)
+    buf = zeros(length(MachineLearningForecast.outputnames(f)))
+    call() = MachineLearningForecast.featurevalues!(buf, f, ctx)
+    call()
+    return @allocated call()
+end
+
+# Same reason: a top-level function calls a constant module.
+function materialize_allocs(f, ts)
+    call() = MachineLearningForecast.materialize!(
+        MachineLearningForecast.ColumnAccumulator(), f, ts)
+    call()
+    return @allocated call()
+end
+
 @testset "features" begin
     # A 10-point series with hand-computable feature values.
     y = Float64.([3, 1, 4, 1, 5, 9, 2, 6, 5, 3])
@@ -123,11 +212,7 @@
         @test MachineLearningForecast.minhistory(fs) == 4
     end
 
-    materialize(f, yv=y, data=df) = begin
-        out = MachineLearningForecast.ColumnAccumulator()
-        MachineLearningForecast.materialize!(out, f, yv, t, data)
-        (; out...)
-    end
+    materialize(f, yv=y, data=df) = (; columns(f, yv, t, data)...)
 
     @testset "Lag exact values" begin
         col = materialize(Lag(2)).y_lag_2
@@ -156,10 +241,9 @@
 
     @testset "Fourier values repeat exactly every whole period" begin
         for (f, p) in ((Fourier(7, 3), 7), (Fourier(365.25, 2), 1461))
-            v(n) = MachineLearningForecast.featurevalues(f, Float64[], n, nothing)
+            v(n) = rowvalues(f, Float64[], 0, n)
             @test all(v(n) == v(n + 1000p) for n in 0:(p - 1))
-            acc = MachineLearningForecast.ColumnAccumulator()
-            MachineLearningForecast.materialize!(acc, f, zeros(3p), 1:3p, (;))
+            acc = columns(f, zeros(3p), 1:3p, (;))
             @test all(c[i] == c[i + 2p] for (_, c) in acc, i in 1:p)
         end
     end
@@ -171,12 +255,9 @@
         tr = [DateTime(2021, 12, 20, 22, 15) + (i - 1) * Minute(1757) for i in 1:n]
         promo, price = randn(StableRNG(11), n), Float64.(rand(StableRNG(12), 1:9, n))
         data = (ds=tr, y=yr, promo=promo, price=price)
-        batch(f, yv, step0...) = begin
-            acc = MachineLearningForecast.ColumnAccumulator()
-            MachineLearningForecast.materialize!(acc, f, yv, tr, merge(data, (y=yv,)),
-                                                 step0...)
-            acc
-        end
+        batch(f, yv; step0=0) = columns(f, yv, tr, merge(data, (y=yv,)); step0)
+        row(f, yv, i, step) = rowvalues(f, yv[1:(i - 1)], tr[i], step,
+                                        (promo=promo[i], price=price[i]))
         feats = [Lag(1), Lag(3), Lag(7),
                  RollingMean(3), RollingMean(4; lag=2), RollingStd(2),
                  RollingStd(5; lag=3), RollingMin(3), RollingMin(2; lag=4),
@@ -194,20 +275,13 @@
             mh = MachineLearningForecast.minhistory(f)
             @test all(ismissing(c[i]) for (_, c) in acc, i in 1:mh)
             rows = (mh + 1):n
-            # Fourier takes the 0-based step index, not the time.
-            single = [collect(MachineLearningForecast.featurevalues(
-                          f, yr[1:(i - 1)], f isa Fourier ? i - 1 : tr[i],
-                          (promo=promo[i], price=price[i]))) for i in rows]
+            single = [row(f, yr, i, i - 1) for i in rows]
             @test single == [[c[i] for (_, c) in acc] for i in rows]
             # A panel's shared origin shifts only Fourier's index.
-            shifted = batch(f, yr, 5)
-            if f isa Fourier
-                @test [[c[i] for (_, c) in shifted] for i in rows] ==
-                      [collect(MachineLearningForecast.featurevalues(
-                           f, yr[1:(i - 1)], i + 4, nothing)) for i in rows]
-            else
-                @test isequal(shifted, acc)
-            end
+            shifted = batch(f, yr; step0=5)
+            @test [[c[i] for (_, c) in shifted] for i in rows] ==
+                  [row(f, yr, i, i + 4) for i in rows]
+            f isa Fourier || @test isequal(shifted, acc)
             f isa MachineLearningForecast.TargetFeature || continue
             # Leakage: rewriting y[t:end] must leave rows 1:t alone.
             @test all(1:n) do t
@@ -242,8 +316,8 @@
         @test out.fourier_7_0_sin_1[4] ≈ sin(2π * 3 / 7)
         @test out.fourier_7_0_cos_2[4] ≈ cos(2π * 2 * 3 / 7)
         # Same index at the boundary: no phase jump.
-        vals = MachineLearningForecast.featurevalues(f, y, 9, nothing)
-        @test collect(vals) ≈ [out[c][10] for c in MachineLearningForecast.outputnames(f)]
+        vals = rowvalues(f, y, t[10], 9)
+        @test vals ≈ [out[c][10] for c in MachineLearningForecast.outputnames(f)]
     end
 
     @testset "Exogenous materialization and errors" begin
@@ -259,24 +333,26 @@
         @test_throws ArgumentError materialize(Exogenous(:label), y, dfs)
         @test_throws "exogenous column :label has non-numeric value \"a\" (type String)" (
             materialize(Exogenous(:label), y, dfs))
-        @test_throws ArgumentError MachineLearningForecast.featurevalues(
-            Exogenous(:promo), y, t[1], (other=1.0,))
+        @test_throws ArgumentError rowvalues(Exogenous(:promo), y, t[1], 0, (other=1.0,))
         @test_throws "new_data is missing exogenous column :promo required by Exogenous. " *
                      "Provide it for every forecast timestamp." (
-            MachineLearningForecast.featurevalues(Exogenous(:promo), y, t[1], (other=1.0,)))
-        @test MachineLearningForecast.featurevalues(Exogenous(:promo), y, t[1],
-                                                    (promo=true,)) == (1.0,)
+            rowvalues(Exogenous(:promo), y, t[1], 0, (other=1.0,)))
+        @test rowvalues(Exogenous(:promo), y, t[1], 0, (promo=true,)) == [1.0]
     end
 
     @testset "forecast-row and Exogenous hot paths are type-stable" begin
         M = MachineLearningForecast
-        rt = Base.return_types(M.featurevalues, (Calendar, Vector{Float64}, Date, Nothing))
-        @test only(rt) <: Tuple{Vararg{Float64}}
+        rt = Base.return_types(M.featurevalues!,
+                               (Vector{Float64}, Calendar,
+                                M.FeatureContext{Vector{Float64},Date,Nothing}))
+        @test rt == [Nothing]
         fs = FeatureSet(Lag(1), RollingMean(3), Diff(1))
         cols = [zeros(1) for _ in 1:3]
+        bufs = [zeros(1) for _ in 1:3]
         yh = collect(1.0:10.0)
         tn = Date(2021, 3, 11)
-        fill_row() = M._fill_row!(cols, fs, yh, tn, 10, nothing)
+        ctx = M.FeatureContext(yh, tn, 10, nothing)
+        fill_row() = M._fill_row!(cols, bufs, fs, ctx)
         fill_row()
         @test @allocated(fill_row()) ≤ 64 * length(fs)
         @test [c[1] for c in cols] == [10.0, 9.0, 1.0]
@@ -284,8 +360,8 @@
         n = 1000
         mixed = (uid=fill("a", n), ds=tn .+ Day.(0:(n - 1)), y=ones(n),
                  promo=isodd.(1:n), qty=collect(1:n))
-        acc() = M.materialize!(M.ColumnAccumulator(), Exogenous(:promo), mixed.y,
-                               mixed.ds, mixed)
+        acc() = M.materialize!(M.ColumnAccumulator(), Exogenous(:promo),
+                               M.TrainingSeries(mixed.y, mixed.ds, mixed, 0))
         acc()
         @test @allocated(acc()) < 16n
         @test only(acc()) == (:promo => Float64.(isodd.(1:n)))
@@ -297,11 +373,11 @@
         @test all(ismissing, out.hist_mean[1:2])
         @test out.hist_mean[3] ≈ mean(y[1:2])
         @test out.hist_mean[10] ≈ mean(y[1:9])
-        @test MachineLearningForecast.featurevalues(f, y, t[1], nothing) == (mean(y),)
+        @test rowvalues(f, y, t[1]) == [mean(y)]
     end
 
     @testset "CustomFeature errors name the feature and the fix" begin
-        fv(f, h, tn) = MachineLearningForecast.featurevalues(f, h, tn, nothing)
+        fv(f, h, tn) = rowvalues(f, h, tn)
         short = CustomFeature(:s, h -> h[end - 2], 1)
         @test_throws ArgumentError materialize(short)
         @test_throws "CustomFeature(:s) indexed past its history at time 2021-03-02, " *
@@ -330,8 +406,8 @@
         end
         ok = CustomFeature(:s, h -> h[end - 2], 3)
         @test collect(skipmissing(materialize(ok).s)) == y[1:7]
-        @test fv(ok, y, t[1]) == (y[8],)
-        @test fv(CustomFeature(:i, length, 0), y, t[1]) === (10.0,)
+        @test fv(ok, y, t[1]) == [y[8]]
+        @test fv(CustomFeature(:i, length, 0), y, t[1]) == [10.0]
         for m in (EvoTreeRegressor(nrounds=5),
                   DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             bad_fc = Forecaster(m; features=FeatureSet(Lag(1), short), freq=Day(1))
@@ -406,5 +482,242 @@
                      "supported; impute or drop them" (
             MachineLearningForecast.build_training_frame(
                 FeatureSet(Lag(1), Exogenous(:promo)), dfm, :y, :ds))
+    end
+
+    @testset "feature contract" begin
+        M = MachineLearningForecast
+        CF = ContractFeatures
+        ds = collect(Date(2022, 1, 1):Day(1):Date(2022, 2, 19))
+        single = (ds=ds, y=Float64.(1:50))
+        ds_b = collect(Date(2022, 1, 11):Day(1):Date(2022, 2, 19))
+        panel = (unique_id=[fill("a", 50); fill("b", 40)], ds=[ds; ds_b],
+                 y=[Float64.(1:50); 3 .* Float64.(1:40)])
+        panel50 = (unique_id=[fill("a", 50); fill("b", 50)], ds=[ds; ds .+ Day(10)],
+                   y=[Float64.(1:50); 3 .* Float64.(1:50)])
+        spec(m, feats; strategy=Recursive(), id=nothing) =
+            Forecaster(m; features=FeatureSet(feats...), strategy, freq=Day(1), id)
+        echo(col, feats; kw...) = spec(TestModels.EchoColumn(col), feats; kw...)
+
+        @testset "the context holds what the constructor was given" begin
+            ctx = M.FeatureContext([1.0, 2.0], Date(2022, 1, 3), 7, (promo=1.0,))
+            @test ctx.y == [1.0, 2.0] && ctx.t == Date(2022, 1, 3)
+            @test ctx.step === 7 && ctx.exog == (promo=1.0,)
+            @test fieldnames(M.FeatureContext) == (:y, :t, :step, :exog)
+            @test !ismutabletype(M.FeatureContext{Vector{Float64},Date,Nothing})
+            s = M.TrainingSeries(single.y, ds, single, 3)
+            @test s.y === single.y && s.t === ds && s.data === single && s.step0 === 3
+        end
+
+        @testset "a third-party feature written only against the contract" begin
+            feats = [CF.LagSum()]
+            @test fit(echo(:ysum, feats), single) isa FittedForecaster
+            for (data, id) in ((single, nothing), (panel50, :unique_id))
+                rec = forecast(fit(echo(:ysum, feats; id), data), 3).y_hat
+                dfit = fit(echo(:ysum, feats; strategy=Direct(3), id), data)
+                dir = forecast(dfit, 3).y_hat
+                if id === nothing
+                    @test rec == [99.0, 149.0, 248.0]
+                    @test dir == [99.0, 99.0, 99.0]
+                else
+                    @test rec == [99.0, 149.0, 248.0, 297.0, 447.0, 744.0]
+                    @test dir == [99.0, 99.0, 99.0, 297.0, 297.0, 297.0]
+                end
+            end
+            for m in (EvoTreeRegressor(nrounds=5),
+                      DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+                for (data, id, nfold) in ((single, nothing, 9), (panel50, :unique_id, 18))
+                    for strategy in (Recursive(), Direct(3))
+                        fc = spec(m, feats; strategy, id)
+                        @test all(isfinite, forecast(fit(fc, data), 3).y_hat)
+                        bt = backtest(fc, data; horizon=3, windows=3)
+                        @test length(bt.folds.y_hat) == nfold
+                        @test all(isfinite, bt.folds.y_hat)
+                    end
+                end
+            end
+        end
+
+        @testset "LagSum: single-row value equals the training column; no leakage" begin
+            n = 30
+            yr = 10 .* randn(StableRNG(21), n)
+            tr = Date(2022, 1, 1) .+ Day.(0:(n - 1))
+            f = CF.LagSum()
+            col = only(columns(f, yr, tr, (;))).second
+            @test all(ismissing, col[1:2])
+            @test all(rowvalues(f, yr[1:(i - 1)], tr[i], i - 1) == [col[i]]
+                      for i in 3:n)
+            @test all(1:n) do t
+                y2 = copy(yr)
+                y2[t:end] .= 1e6 .* (1:(n - t + 1))
+                isequal(only(columns(f, y2, tr, (;))).second[1:t], col[1:t])
+            end
+        end
+
+        @testset "a feature written against the old contract fails clearly" begin
+            fc = spec(TestModels.LinAR(1.0, 0.0), [Lag(1), CF.OldStyle()])
+            @test_throws ArgumentError fit(fc, single)
+            @test_throws "OldStyle does not implement featurevalues!(out, f, ctx)" fit(
+                fc, single)
+            @test_throws "featurevalues(f, y_hist, t_next, exog_row)" fit(fc, single)
+            @test_throws "CONTRIBUTING.md" fit(fc, single)
+        end
+
+        @testset "the context carries history, time, step and exog on every path" begin
+            feats = [CF.Probe()]
+            nh(strategy; id=nothing, data=single) = forecast(
+                fit(echo(:n_hist, feats; strategy, id), data), 3).y_hat
+            st(strategy; id=nothing, data=single) = forecast(
+                fit(echo(:step_idx, feats; strategy, id), data), 3).y_hat
+            @test nh(Recursive()) == [50.0, 51.0, 52.0]
+            @test st(Recursive()) == [50.0, 51.0, 52.0]
+            @test nh(Direct(3)) == [50.0, 50.0, 50.0]
+            @test st(Direct(3)) == [50.0, 51.0, 52.0]
+            kw = (; id=:unique_id, data=panel)
+            @test nh(Recursive(); kw...) == [50.0, 51.0, 52.0, 40.0, 41.0, 42.0]
+            @test st(Recursive(); kw...) == [50.0, 51.0, 52.0, 50.0, 51.0, 52.0]
+            @test nh(Direct(3); kw...) == [50.0, 50.0, 50.0, 40.0, 40.0, 40.0]
+            @test st(Direct(3); kw...) == [50.0, 51.0, 52.0, 50.0, 51.0, 52.0]
+            pf = fit(echo(:day, feats; id=:unique_id), panel)
+            @test [s.step0 for s in pf.series] == [0, 10]
+            @test forecast(pf, 3).y_hat == [50.0, 51.0, 52.0, 50.0, 51.0, 52.0]
+            # Recursive pooled training columns: series a, then b.
+            keep(data; id=nothing) = fit(spec(TestModels.KeepTrain(), feats; id), data)
+            X = only(keep(single).models).fitresult.X
+            @test X.n_hist == Float64.(2:49) && X.step_idx == Float64.(2:49)
+            @test X.day == Float64.(2:49)
+            Xp = only(keep(panel; id=:unique_id).models).fitresult.X
+            @test Xp.n_hist == Float64.([2:49; 2:39])
+            @test Xp.step_idx == Float64.([2:49; 12:49])
+            @test Xp.day == Float64.([2:49; 12:49])
+        end
+
+        @testset "a feature reading user columns gets them in the context" begin
+            future = (ds=ds[end] .+ Day.(1:3), x=[1.0, 2.0, 3.0])
+            fitted = fit(echo(:x2, [CF.NeedsX()]), merge(single, (x=Float64.(1:50),)))
+            @test forecast(fitted, 3; new_data=future).y_hat == [2.0, 4.0, 6.0]
+            pdata = merge(panel, (x=Float64.(1:90),))
+            pfuture = (unique_id=repeat(["a", "b"], inner=3),
+                       ds=[ds[end] .+ Day.(1:3); ds[end] .+ Day.(1:3)],
+                       x=repeat([1.0, 2.0, 3.0], 2))
+            for strategy in (Recursive(), Direct(3))
+                pf = fit(echo(:x2, [CF.NeedsX()]; strategy, id=:unique_id), pdata)
+                @test forecast(pf, 3; new_data=pfuture).y_hat ==
+                      repeat([2.0, 4.0, 6.0], 2)
+            end
+            X = only(fit(spec(TestModels.KeepTrain(), [CF.NeedsX()]),
+                         merge(single, (x=Float64.(1:50),))).models).fitresult.X
+            @test X.x2 == 2.0 .* (1:50)
+        end
+
+        @testset "the predict-time table holds one row per step, in order" begin
+            m = TestModels.KeepPredict(Ref(Any[]))
+            fitted = fit(spec(m, [Lag(1), Fourier(7, 1)]), single)
+            @test isempty(m.calls[])                  # the prototype is untouched
+            forecast(fitted, 3)
+            calls = only(fitted.models).model.calls[]
+            @test length(calls) == 3
+            @test [only(c.y_lag_1) for c in calls] == [50.0, 0.0, 0.0]
+            @test [only(c.fourier_7_0_sin_1) for c in calls] ≈
+                  [sin(2π * mod(n, 7) / 7) for n in 50:52]
+        end
+
+        @testset "default materialize!: absent input columns" begin
+            tbl = (ds=single.ds, y=single.y, z=ones(50))
+            build(feat, data) = M.build_training_frame(FeatureSet(Lag(1), feat), data,
+                                                        :y, :ds)
+            for feat in (CF.NeverRead([:x]), CF.NeedsX())
+                @test_throws ArgumentError build(feat, tbl)
+                @test_throws "features contain Exogenous(:x) but column :x is not " *
+                             "present in the training data" build(feat, tbl)
+                @test_throws "Available columns: ds, y, z" build(feat, tbl)
+                @test_throws ArgumentError fit(spec(TestModels.LinAR(1.0, 0.0),
+                                                    [Lag(1), feat]), tbl)
+            end
+            two = CF.NeverRead([:x, :z])
+            @test_throws "column :x is not present" build(two, (ds=ds, y=single.y,
+                                                                z=ones(50)))
+            @test_throws "column :z is not present" build(two, (ds=ds, y=single.y,
+                                                                x=ones(50)))
+        end
+
+        @testset "default materialize!: missing inputs reach the row check" begin
+            x = Vector{Union{Missing,Float64}}(1.0:10.0)
+            x[5] = missing
+            tbl = (ds=single.ds[1:10], y=single.y[1:10], x=x)
+            @test_throws ArgumentError M.build_training_frame(
+                FeatureSet(Lag(1), CF.SawMissing()), tbl, :y, :ds, 101:110)
+            @test_throws "feature column :x_x2 has a missing value at row 105" (
+                M.build_training_frame(FeatureSet(Lag(1), CF.SawMissing()), tbl, :y, :ds,
+                                       101:110))
+            ok = M.build_training_frame(FeatureSet(Lag(1), CF.NeedsX()),
+                                        merge(tbl, (x=Float64.(1:10),)), :y, :ds)
+            @test ok[1].x2 == 2.0 .* (2:10)
+        end
+
+        @testset "default materialize! hands every feature the history it expects" begin
+            n = 12
+            yr, tr = Float64.(1:n), Date(2022, 1, 1) .+ Day.(0:(n - 1))
+            len = only(columns(CustomFeature(:len, length, 0), yr, tr, (;))).second
+            @test len == Float64.(0:(n - 1))
+            prev = only(columns(CustomFeature(:prev, h -> h[end], 1), yr, tr, (;))).second
+            @test all(ismissing, prev[1:1]) && prev[2:n] == yr[1:(n - 1)]
+            # Rows up to minhistory stay missing in every column.
+            col = only(columns(Lag(3), yr, tr, (;))).second
+            @test all(ismissing, col[1:3]) && col[4:n] == yr[1:(n - 3)]
+        end
+
+        @testset "a materialize! written untyped on out beats the default" begin
+            n = 12
+            yr, tr = Float64.(1:n), Date(2022, 1, 1) .+ Day.(0:(n - 1))
+            own = columns(CF.OwnColumns(), yr, tr, (;))
+            @test own == [:own => fill(7.0, n)]
+            X = only(fit(spec(TestModels.KeepTrain(), [CF.OwnColumns()]), single).models)
+            @test X.fitresult.X.own == fill(7.0, 50)
+            @test rowvalues(CF.OwnColumns(), yr, tr[1]) == [-1.0]
+        end
+
+        @testset "the default row loop allocates little per row" begin
+            n = 1000
+            yv, tv = Float64.(1:n), Date(2022, 1, 1) .+ Day.(0:(n - 1))
+            ts = M.TrainingSeries(yv, tv, (ds=tv, y=yv, x=Float64.(1:n)), 0)
+            @test materialize_allocs(Lag(1), ts) < 12n
+            @test materialize_allocs(CF.NeedsX(), ts) < 12n
+        end
+
+        @testset "single-row hot paths allocate no more than before" begin
+            yh, tn = collect(1.0:10.0), Date(2021, 3, 11)
+            ctx = M.FeatureContext(yh, tn, 10, nothing)
+            allocs(f) = featurevalues_allocs(f, ctx)
+            @test allocs(Lag(1)) == 0
+            @test allocs(RollingMean(3)) == 0
+            @test allocs(Diff(1)) == 0
+            @test allocs(Fourier(12, 1)) ≤ 96
+            @test allocs(Calendar(:month)) ≤ 128
+            Ctx = M.FeatureContext{Vector{Float64},Date,Nothing}
+            for f in (Lag(1), RollingStd(3), Diff(1), Fourier(7, 1),
+                      CustomFeature(:c, mean, 1))
+                @test Base.return_types(M.featurevalues!,
+                                        (Vector{Float64}, typeof(f), Ctx)) == [Nothing]
+            end
+            ExCtx = M.FeatureContext{Vector{Float64},Date,NamedTuple{(:a,),Tuple{Float64}}}
+            @test Base.return_types(M.featurevalues!,
+                                    (Vector{Float64}, Exogenous, ExCtx)) == [Nothing]
+        end
+
+        @testset "the context builders infer" begin
+            fitted = fit(spec(TestModels.LinAR(1.0, 0.0), [Lag(1), Calendar(:month)]),
+                         single)
+            st = only(getfield(fitted, :series))
+            ctx = @inferred M._context(st, collect(1.0:50.0), Date(2022, 2, 20), 1, nothing)
+            @test ctx isa M.FeatureContext{Vector{Float64},Date,Nothing}
+            @test ctx.step == 50
+            rt = Base.return_types(M._fill_row!,
+                                   (Vector{Vector{Float64}}, Vector{Vector{Float64}},
+                                    FeatureSet,
+                                    M.FeatureContext{Vector{Float64},Date,Nothing}))
+            @test rt == [Nothing]
+            @test Base.return_types(M._feature_buffers, (FeatureSet,)) ==
+                  [Vector{Vector{Float64}}]
+        end
     end
 end

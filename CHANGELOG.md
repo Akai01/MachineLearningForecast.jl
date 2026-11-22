@@ -155,11 +155,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the fix, instead of a bare `BoundsError` or `MethodError`. Any other error
   from the function, such as a `BoundsError` on a vector it captured, passes
   through unchanged. Valid custom features produce the same values as before.
+- **Feature contract.** A feature computes one row through
+  `featurevalues!(out, f, ctx)`, where `ctx` is a `FeatureContext` (the history
+  before the target row, its time, its step index and its exogenous values); the
+  training columns are derived from it, so by default (unless a feature
+  overrides `materialize!`) the batch and the single-row path cannot disagree.
+  The old `featurevalues(f, y_hist, t_next, exog_row)` and the vectorised
+  `materialize!(out, f, y, t, data)` are gone (a feature that still defines them
+  throws an `ArgumentError` saying what to implement); `materialize!(out, f,
+  s::TrainingSeries)` is an optional fast path. `Fourier` no longer needs
+  special handling anywhere. The user columns a feature declares through
+  `inputcolumns` are read from the training data too, so they must be present
+  there: `fit` throws otherwise. Forecasts and training matrices are unchanged.
 - Features declare the user columns they read through `inputcolumns(f)`
   instead of a `cols` field or property: `Exogenous` returns its columns,
   every other built-in returns none, and a third-party `ExogenousFeature`
-  without an `inputcolumns` method throws an `ArgumentError` at `forecast` and
-  `backtest` saying what to define. A `cols` property no longer works.
+  without an `inputcolumns` method throws an `ArgumentError` at `fit`, `forecast`
+  and `backtest` saying what to define. A `cols` property no longer works.
 - Panel errors about one series' data name the series and give the row of the
   table passed to `fit` or `backtest`. A missing or non-finite target and a
   missing exogenous value were reported without the series and at a row

@@ -122,8 +122,59 @@ MMI.predict(::MatrixMean, fitresult, Xnew) = fill(fitresult, size(MMI.matrix(Xne
 MMI.input_scitype(::Type{MatrixMean}) = MMI.Table(MMI.Continuous)
 MMI.target_scitype(::Type{MatrixMean}) = AbstractVector{MMI.Continuous}
 
+"""
+Keeps what it was trained on: `fitresult` is `(X=copy of the training columns,
+y=copy of the targets)`, and it predicts zeros. Read it back through
+`fitted.models[i].fitresult`.
+"""
+mutable struct KeepTrain <: MMI.Deterministic end
+MMI.fit(::KeepTrain, verbosity, X, y) =
+    ((X=map(copy, Tables.columntable(X)), y=copy(y)), nothing, NamedTuple())
+MMI.predict(::KeepTrain, fitresult, Xnew) = zeros(length(Tables.rows(Xnew)))
+MMI.input_scitype(::Type{KeepTrain}) = MMI.Table(MMI.Continuous)
+MMI.target_scitype(::Type{KeepTrain}) = AbstractVector{MMI.Continuous}
+
+"""
+Records a copy of every `Xnew` it is asked to predict on, in `calls[]`, and
+predicts zeros. `fit` trains a deep copy, so read the calls back through
+`fitted.models[i].model.calls[]`.
+"""
+mutable struct KeepPredict <: MMI.Deterministic
+    calls::Base.RefValue{Vector{Any}}
+end
+MMI.fit(::KeepPredict, verbosity, X, y) = (nothing, nothing, NamedTuple())
+function MMI.predict(m::KeepPredict, fitresult, Xnew)
+    push!(m.calls[], map(copy, Tables.columntable(Xnew)))
+    return zeros(length(Tables.rows(Xnew)))
+end
+MMI.input_scitype(::Type{KeepPredict}) = MMI.Table(MMI.Continuous)
+MMI.target_scitype(::Type{KeepPredict}) = AbstractVector{MMI.Continuous}
+
 "Declares no input scitype, so it is Unknown."
 mutable struct NoInputTrait <: MMI.Deterministic end
 MMI.target_scitype(::Type{NoInputTrait}) = AbstractVector{MMI.Continuous}
+
+end
+
+# Test-side views of the feature contract.
+module FeatureHelpers
+
+import MachineLearningForecast as M
+
+export rowvalues, columns
+
+"One row of `f`: its `featurevalues!` on a context built from the arguments."
+function rowvalues(f, y, t, step=0, exog=nothing)
+    out = fill(NaN, length(M.outputnames(f)))
+    M.featurevalues!(out, f, M.FeatureContext(y, t, step, exog))
+    return out
+end
+
+"The training columns of `f` over one series, as a `ColumnAccumulator`."
+function columns(f, y, t, data; step0=0)
+    out = M.ColumnAccumulator()
+    M.materialize!(out, f, M.TrainingSeries(y, t, data, step0))
+    return out
+end
 
 end

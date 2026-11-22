@@ -159,10 +159,11 @@ function _panel_batch(f::FittedForecaster, states, histories, step::Integer,
     names = f.feature_names
     cols = [Vector{Float64}(undef, length(active)) for _ in names]
     scratch = [Vector{Float64}(undef, 1) for _ in names]
+    bufs = _feature_buffers(spec.features)
     for (r, k) in enumerate(active)
-        n_next = states[k].step0 + length(states[k].z_history) - 1 + step
         ex = exog_rows === nothing ? nothing : exog_rows[k][step]
-        _fill_row!(scratch, spec.features, histories[k], grids[k][step], n_next, ex)
+        ctx = _context(states[k], histories[k], grids[k][step], step, ex)
+        _fill_row!(scratch, bufs, spec.features, ctx)
         for j in eachindex(cols)
             cols[j][r] = scratch[j][1]
         end
