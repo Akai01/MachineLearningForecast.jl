@@ -71,6 +71,8 @@ end
 
 end
 
+show_probe(h) = h[end]
+
 # At top level the module is a constant: a static call.
 function featurevalues_allocs(f, ctx)
     buf = zeros(length(MachineLearningForecast.outputnames(f)))
@@ -435,6 +437,51 @@ end
         end
     end
 
+    @testset "CustomFeature is typed by its function" begin
+        M = MachineLearningForecast
+        F = typeof(mean)
+        @test CustomFeature(:hm, mean, 1) isa CustomFeature{F}
+        @test isconcretetype(fieldtype(CustomFeature{F}, :f))
+        @test fieldtype(CustomFeature{F}, :f) === F
+        @test fieldtype(CustomFeature{F}, :minhistory) === Int
+        @test CustomFeature(:hm, mean, Int8(2)).minhistory === 2
+        @test CustomFeature(:a, mean, 1) == CustomFeature(:a, mean, 1)
+        @test hash(CustomFeature(:a, mean, 1)) == hash(CustomFeature(:a, mean, 1))
+        @test CustomFeature(:a, mean, 1) != CustomFeature(:a, maximum, 1)
+        @test CustomFeature(:a, mean, 1) != CustomFeature(:b, mean, 1)
+        @test CustomFeature(:a, mean, 1) != CustomFeature(:a, mean, 2)
+        @test CustomFeature(:a, x -> 1, 1) != CustomFeature(:a, x -> 1, 1)
+        g = x -> 1
+        @test CustomFeature(:a, g, 1) == CustomFeature(:a, g, 1)
+        @test hash(CustomFeature(:a, g, 1)) == hash(CustomFeature(:a, g, 1))
+        @test_throws MethodError CustomFeature(:f, mean, 1.5)
+        @test_throws MethodError CustomFeature(:f, 3, 1)
+        @test_throws MethodError CustomFeature("f", mean, 1)
+        @test_throws "CustomFeature minhistory must be ≥ 0, got -1. Pass the number of " *
+                     "history values f needs, or 0 if it needs none." (
+            CustomFeature(:f, mean, -1))
+        @test sprint(show, CustomFeature(:hm, mean, 1)) ==
+              "CustomFeature(:hm, Statistics.mean, 1)"
+        @test sprint(show, CustomFeature(:hm, show_probe, 2)) ==
+              "CustomFeature(:hm, $(sprint(show, show_probe)), 2)"
+        # A hidden type keeps its module prefix, as before.
+        @test startswith(
+            sprint(show, CustomFeature(:hm, mean, 1); context=:module => Core),
+            "MachineLearningForecast.CustomFeature(:hm, ")
+        @test sprint(show, FeatureSet(Lag(1), CustomFeature(:hm, mean, 1))) ==
+              "FeatureSet(Lag(1), CustomFeature(:hm, Statistics.mean, 1))"
+        ctx = M.FeatureContext(y[1:5], t[6], 5, nothing)
+        buf = zeros(1)
+        @test (@inferred M.featurevalues!(buf, CustomFeature(:hm, mean, 1), ctx)) ===
+              nothing
+        @test buf == [mean(y[1:5])]
+        # The BoundsError translation needs f to get ctx.y itself.
+        seen = Ref{Any}(nothing)
+        spy = CustomFeature(:spy, h -> (seen[] = h; 1.0), 0)
+        M.featurevalues!(buf, spy, ctx)
+        @test seen[] === ctx.y
+    end
+
     @testset "FeatureSet" begin
         fs = FeatureSet(Lag(1), Lag(7), Calendar(:month))
         @test length(fs) == 3
@@ -706,6 +753,7 @@ end
             @test allocs(Diff(1)) == 0
             @test allocs(Fourier(12, 1)) ≤ 96
             @test allocs(Calendar(:month)) ≤ 128
+            @test allocs(CustomFeature(:hm, mean, 1)) == 0
             Ctx = M.FeatureContext{Vector{Float64},Date,Nothing}
             for f in (Lag(1), RollingStd(3), Diff(1), Fourier(7, 1),
                       CustomFeature(:c, mean, 1))

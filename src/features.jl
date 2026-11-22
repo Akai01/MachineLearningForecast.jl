@@ -551,6 +551,10 @@ During recursive forecasting, `f` is called on the growing history vector
 (actuals followed by earlier predictions), so it sees exactly the same kind of
 input as during training.
 
+In training `f` is called once per row on the history before it, so a function
+that loops over the whole history makes `fit` O(n^2) in the series length; keep
+it cheap or use a built-in rolling feature.
+
 # Example
 ```julia
 using Statistics
@@ -558,16 +562,28 @@ using Statistics
 CustomFeature(:hist_mean, mean, 1)
 ```
 """
-struct CustomFeature <: TargetFeature
+struct CustomFeature{F<:Function} <: TargetFeature
     name::Symbol
-    f::Function
+    f::F
     minhistory::Int
-    function CustomFeature(name::Symbol, f::Function, minhistory::Integer)
+    function CustomFeature(name::Symbol, f::F, minhistory::Integer) where {F<:Function}
         minhistory ≥ 0 || throw(ArgumentError(
             "CustomFeature minhistory must be ≥ 0, got $minhistory. Pass the number " *
             "of history values f needs, or 0 if it needs none."))
-        new(name, f, Int(minhistory))
+        new{F}(name, f, Int(minhistory))
     end
+end
+
+# The default show would print the type parameter.
+function Base.show(io::IO, f::CustomFeature)
+    show(io, CustomFeature)
+    print(io, "(")
+    show(io, f.name)
+    print(io, ", ")
+    show(io, f.f)
+    print(io, ", ")
+    show(io, f.minhistory)
+    print(io, ")")
 end
 
 outputnames(f::CustomFeature) = [f.name]

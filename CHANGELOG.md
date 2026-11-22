@@ -197,6 +197,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   training frame from a table with many column types (for example a `String`
   id, a `Date`, and `Bool` and `Int` covariates) is several times faster.
   Forecasts are unchanged.
+- `CustomFeature` is parametric in its function (`CustomFeature{F}`), so the
+  call to it is statically dispatched; behaviour, equality and the printed form
+  are unchanged.
 
 ### Fixed
 
