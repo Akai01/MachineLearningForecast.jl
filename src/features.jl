@@ -24,15 +24,17 @@ Training, `forecast` and `backtest` all compute a feature through
 `featurevalues!`, so by default (unless the feature overrides `materialize!`) the
 training columns and the forecast-time values cannot disagree. Optionally a
 feature defines [`materialize!`](@ref) (a faster way to fill its training
-columns) and [`inputcolumns`](@ref) (the user columns it reads; an
-[`ExogenousFeature`](@ref) must).
+columns), [`inputcolumns`](@ref) (the user columns it reads; an
+[`ExogenousFeature`](@ref) must) and [`anchor`](@ref) (which row its columns
+describe under `Direct`; a feature that subtypes `AbstractFeature` directly must).
 
 `ctx.y` holds the target history strictly before the row's target: a
 `TargetFeature` never sees the current or a later target value, so rolling and
 difference features require `lag ≥ 1`. Under `Direct` the history is fixed at
-the forecast origin. A `TargetFeature` should read only `ctx.y`: under `Direct`,
-`ctx.t` and `ctx.step` describe the target row, while its training column comes
-from the origin row.
+the forecast origin. An `AtOrigin` feature (every `TargetFeature` by default)
+should read only `ctx.y`: under `Direct` its training column comes from the
+feature row, while `ctx.t` and `ctx.step` describe the feature row in training
+and the target row when forecasting. See [`anchor`](@ref).
 """
 abstract type AbstractFeature end
 
@@ -502,6 +504,82 @@ inputcolumns(f::ExogenousFeature) = throw(ArgumentError(
     "forecast and backtest read the columns it needs from new_data through " *
     "inputcolumns(f). Define MachineLearningForecast.inputcolumns(f::" *
     "$(nameof(typeof(f)))) = [...], a Vector{Symbol}."))
+
+"""
+    Anchor
+
+Abstract supertype of [`AtOrigin`](@ref) and [`AtTarget`](@ref): which row a
+feature's columns describe. See [`anchor`](@ref).
+
+# Example
+```julia
+anchor(Lag(1)) isa Anchor   # true
+```
+"""
+abstract type Anchor end
+
+"""
+    AtOrigin()
+
+The [`anchor`](@ref) of a feature whose columns describe the feature row, that
+is the target history up to the forecast origin (lags, rolling statistics).
+
+# Example
+```julia
+anchor(Lag(1))   # AtOrigin()
+```
+"""
+struct AtOrigin <: Anchor end
+
+"""
+    AtTarget()
+
+The [`anchor`](@ref) of a feature whose columns describe the row being
+predicted (calendar, Fourier and exogenous columns).
+
+# Example
+```julia
+anchor(Calendar(:month))   # AtTarget()
+```
+"""
+struct AtTarget <: Anchor end
+
+"""
+    anchor(f) -> Anchor
+
+Which row the columns of feature `f` describe, [`AtOrigin`](@ref) or
+[`AtTarget`](@ref). [`Direct`](@ref) fitting needs it: model `i` pairs the
+target `i` steps ahead with the `AtOrigin` columns of the feature row and with
+the `AtTarget` columns of the target row, which is what `forecast` feeds. A
+[`TargetFeature`](@ref) is `AtOrigin`; a [`TimeFeature`](@ref) or an
+[`ExogenousFeature`](@ref) is `AtTarget`. A feature of any other kind must
+define it, otherwise an `ArgumentError` is thrown when `Direct` fits.
+
+An `AtOrigin` feature may read only `ctx.y`: its training value comes from the
+feature row and its forecast value from the origin, while `ctx.t`, `ctx.step`
+and `ctx.exog` describe the context's row (the feature row in training, the
+target row when forecasting), so reading them would train on one thing and
+serve another. An `AtTarget` feature should not read `ctx.y`: under `Direct` it
+is trained on history up to the target row but served the history at the
+forecast origin. A feature that reads `ctx.t`, `ctx.step` or `ctx.exog` and not
+`ctx.y` is `AtTarget`: subtype `TimeFeature` or `ExogenousFeature`, or define
+`anchor(f) = AtTarget()`; one that reads both is correct only under `Recursive`.
+
+# Example
+```julia
+anchor(Lag(1))             # AtOrigin()
+anchor(Calendar(:month))   # AtTarget()
+```
+"""
+anchor(::TargetFeature) = AtOrigin()
+anchor(::TimeFeature) = AtTarget()
+anchor(::ExogenousFeature) = AtTarget()
+anchor(f::AbstractFeature) = throw(ArgumentError(
+    "$(typeof(f)) has no anchor. Direct fitting must know whether its columns " *
+    "describe the feature row (target history) or the target row (time, " *
+    "exogenous). Subtype TargetFeature, TimeFeature or ExogenousFeature, or define " *
+    "MachineLearningForecast.anchor(f::$(nameof(typeof(f)))) = " *
+    "MachineLearningForecast.AtOrigin() or MachineLearningForecast.AtTarget()."))
 
 function materialize!(out::ColumnAccumulator, f::Exogenous, s::TrainingSeries)
     for c in f.cols

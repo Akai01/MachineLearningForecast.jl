@@ -61,25 +61,31 @@ These are load-bearing; please follow them:
   implementing the MLJ model interface must work as a base model.
 - **Immutable specs, explicit fitted state.** `Forecaster` is immutable; `fit`
   returns a `FittedForecaster` and never mutates user data or model prototypes.
-- **No leakage.** Every `TargetFeature` may use only information strictly
-  before the current row's target. This is what the rolling/diff features'
-  `lag ≥ 1` requirement enforces, and it is covered by tests.
+- **No leakage.** Every `AtOrigin` feature (every `TargetFeature` by default)
+  may use only information strictly before the current row's target. This is
+  what the rolling/diff features' `lag ≥ 1` requirement enforces, and it is
+  covered by tests.
 - **Actionable errors.** Every user-facing validation throws an `ArgumentError`
   stating what was wrong, the offending value, and the fix. See the error
   message tests for the expected quality bar.
 
 ## Adding a new feature type
 
-A feature is a subtype of `TargetFeature`, `TimeFeature` or `ExogenousFeature`. To
-extend the package, import the generic functions and implement three methods:
+A feature is a subtype of `TargetFeature`, `TimeFeature` or `ExogenousFeature` (or of
+`AbstractFeature` directly, then it also defines `anchor`). To extend the package,
+import the generic functions and implement three methods:
 
 ```julia
-import MachineLearningForecast: outputnames, minhistory, featurevalues!, inputcolumns
+import MachineLearningForecast: outputnames, minhistory, featurevalues!, inputcolumns,
+    anchor
 
 outputnames(f)                  # Vector{Symbol}: the columns it produces
 minhistory(f)                   # Int: history rows needed before it is defined
 featurevalues!(out, f, ctx)     # write the values for the row ctx describes
+anchor(f)                       # AtOrigin() or AtTarget() (only for direct AbstractFeature subtypes)
 ```
+
+`AtOrigin` and `AtTarget` need the `MachineLearningForecast.` prefix or an import.
 
 `ctx` is a `MachineLearningForecast.FeatureContext`:
 
@@ -94,6 +100,8 @@ featurevalues!(out, f, ctx)     # write the values for the row ctx describes
   cannot use). At forecast time it may hold more columns than `inputcolumns(f)`, so
   index it by name. When `inputcolumns(f)` is empty it may be `nothing` or a
   `NamedTuple` (forecasting with another exogenous feature): do not read it then.
+
+A feature's `anchor` is `AtOrigin` or `AtTarget`; see below.
 
 `out` is preallocated with `length(outputnames(f))` entries: write every one of them as
 a `Float64`. The return value is ignored. If the feature reads user columns, also
@@ -110,12 +118,17 @@ before any row is read (`Calendar`, `Fourier` and `Exogenous` do). Add a test th
 (changing `y` from row t on leaves the values at rows up to t unchanged):
 `test/test_features.jl` has examples.
 
-A `TargetFeature` should read only `ctx.y`: under `Direct`, `ctx.t` and `ctx.step`
-describe the target row, while its training column comes from the origin row.
-
-If your feature is a `TargetFeature`, it is anchored to the *feature* row; time
-and exogenous features are anchored to the *target* row. `Direct` fitting relies
-on this split via `targetcolumnmask`, so getting the category right matters.
+A feature's `anchor` says which row its columns describe. A `TargetFeature` defaults to
+`AtOrigin` (the feature row: target history); a `TimeFeature` or `ExogenousFeature`
+defaults to `AtTarget` (the target row). `Direct` fitting shifts the two groups
+independently, so getting the anchor right matters. An `AtOrigin` feature may read only
+`ctx.y`: its training column comes from the feature row and its forecast value from the
+origin, while `ctx.t`, `ctx.step` and `ctx.exog` describe the context's row (the feature
+row in training, the target row when forecasting). An `AtTarget` feature should not read
+`ctx.y`: under `Direct` it is trained on history up to the target row but served the
+history at the forecast origin. A feature that reads `ctx.t`, `ctx.step` or `ctx.exog`
+and not `ctx.y` is `AtTarget`: subtype `TimeFeature` or `ExogenousFeature`, or define
+`anchor(f) = AtTarget()`; one that reads both is correct only under `Recursive`.
 
 ## Adding a target transform
 

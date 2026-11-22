@@ -85,6 +85,63 @@
         @test forecast(fit(fc_cal, dw), 4).y_hat ≈ Float64.(dayofweek.(fut_ds))
     end
 
+    @testset "Direct honours anchor, not the supertype" begin
+        P = AnchorProbes
+        n = 60
+        dd = (ds=collect(Date(2022, 1, 1):Day(1):Date(2022, 1, 1) + Day(n - 1)),
+              y=Float64.(1000 .+ (1:n)))
+        trained(feat) = [m.fitresult for m in fit(
+            Forecaster(TestModels.KeepTrain(); features=FeatureSet(feat),
+                       strategy=Direct(4), freq=Day(1)), dd).models]
+        for feat in (P.LagOrigin(), P.YOrigin())
+            for (i, r) in enumerate(trained(feat))
+                @test r.X.ylast == 1000 .+ (1:(n - i))
+                @test r.y == 1000 .+ ((1 + i):n)
+                @test r.y .- r.X.ylast == fill(float(i), length(r.y))
+            end
+        end
+        lag1 = trained(Lag(1))
+        for (a, b) in zip(trained(P.YOrigin()), lag1)
+            @test a.X.ylast == b.X.y_lag_1 && a.y == b.y
+        end
+        for (i, r) in enumerate(trained(P.LagAtTarget()))
+            @test r.X.ylast == 1000 .+ (i:(n - 1))
+            @test r.y == 1001 .+ (i:(n - 1))
+            @test r.y .- r.X.ylast == fill(1.0, length(r.y))
+        end
+        # Calendar keys recur, so the lookup finds the key.
+        dw = (ds=dd.ds, y=Float64.(dayofweek.(dd.ds)))
+        fc_dow = Forecaster(TestModels.PairLookup(:dayofweek);
+                            features=FeatureSet(P.DowTarget()),
+                            strategy=Direct(4), freq=Day(1))
+        fut_ds = collect(dw.ds[end] + Day(1):Day(1):dw.ds[end] + Day(4))
+        @test forecast(fit(fc_dow, dw), 4).y_hat == Float64.(dayofweek.(fut_ds))
+    end
+
+    @testset "a feature without an anchor fits under Recursive, not Direct" begin
+        P = AnchorProbes
+        fs = FeatureSet(P.NoAnchor())
+        msg = "NoAnchor has no anchor. Direct fitting must know whether its columns " *
+              "describe the feature row (target history) or the target row (time, " *
+              "exogenous)."
+        fix = "or define MachineLearningForecast.anchor(f::NoAnchor) = " *
+              "MachineLearningForecast.AtOrigin() or MachineLearningForecast.AtTarget()."
+        rec = Forecaster(TestModels.EchoColumn(:ylast); features=fs, freq=Day(1))
+        @test forecast(fit(rec, df), 3).y_hat == [50.0, 50.0, 50.0]
+        dir = Forecaster(TestModels.EchoColumn(:ylast); features=fs,
+                         strategy=Direct(3), freq=Day(1))
+        @test_throws ArgumentError fit(dir, df)
+        @test_throws msg fit(dir, df)
+        @test_throws fix fit(dir, df)
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+            @test all(isfinite, forecast(
+                fit(Forecaster(m; features=fs, freq=Day(1)), df), 3).y_hat)
+            @test_throws msg fit(Forecaster(m; features=fs, strategy=Direct(3),
+                                            freq=Day(1)), df)
+        end
+    end
+
     @testset "Direct(1): one machine and horizon 1" begin
         @test_throws MethodError Direct(2.5)
         fc = Forecaster(TestModels.EchoColumn(:y_lag_1); features=FeatureSet(Lag(1)),

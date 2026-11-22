@@ -178,3 +178,34 @@ function columns(f, y, t, data; step0=0)
 end
 
 end
+
+module AnchorProbes
+
+using Dates
+import MachineLearningForecast as M
+import MachineLearningForecast: outputnames, minhistory, featurevalues!, anchor
+
+"The last value of the history; anchored at the origin by its supertype."
+struct LagOrigin <: M.TargetFeature end
+"The same value as `LagOrigin`, anchored at the origin by `anchor`."
+struct YOrigin <: M.AbstractFeature end
+"The same value, but anchored at the target row against its supertype."
+struct LagAtTarget <: M.TargetFeature end
+"The day of week of the target row."
+struct DowTarget <: M.AbstractFeature end
+"A feature of the abstract type with no anchor."
+struct NoAnchor <: M.AbstractFeature end
+
+const Ylast = Union{LagOrigin,YOrigin,LagAtTarget,NoAnchor}
+outputnames(::Ylast) = [:ylast]
+minhistory(::Ylast) = 1
+featurevalues!(out, ::Ylast, ctx) = (out[1] = ctx.y[end]; nothing)
+anchor(::YOrigin) = M.AtOrigin()
+anchor(::LagAtTarget) = M.AtTarget()
+
+outputnames(::DowTarget) = [:dayofweek]
+minhistory(::DowTarget) = 0
+featurevalues!(out, ::DowTarget, ctx) = (out[1] = dayofweek(ctx.t); nothing)
+anchor(::DowTarget) = M.AtTarget()
+
+end

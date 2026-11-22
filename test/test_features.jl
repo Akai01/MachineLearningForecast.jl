@@ -297,7 +297,8 @@ end
             @test [[c[i] for (_, c) in shifted] for i in rows] ==
                   [row(f, yr, i, i + 4) for i in rows]
             f isa Fourier || @test isequal(shifted, acc)
-            f isa MachineLearningForecast.TargetFeature || continue
+            MachineLearningForecast.anchor(f) isa MachineLearningForecast.AtOrigin ||
+                continue
             # Leakage: rewriting y[t:end] must leave rows 1:t alone.
             @test all(1:n) do t
                 y2 = copy(yr)
@@ -779,6 +780,40 @@ end
             @test rt == [Nothing]
             @test Base.return_types(M._feature_buffers, (FeatureSet,)) ==
                   [Vector{Vector{Float64}}]
+        end
+
+        @testset "anchor and anchors" begin
+            AtOrigin, AtTarget = M.AtOrigin, M.AtTarget
+            P = AnchorProbes
+            @test all(M.anchor(f) == AtOrigin() for f in
+                      (Lag(1), RollingMean(3), RollingStd(3), RollingMin(3),
+                       RollingMax(3), Diff(2), CustomFeature(:c, mean, 1), P.LagOrigin()))
+            @test all(M.anchor(f) == AtTarget() for f in
+                      (Calendar(:month), Fourier(7, 2), Exogenous(:a), P.DowTarget()))
+            @test M.anchor(P.YOrigin()) == AtOrigin()
+            @test M.anchor(P.LagAtTarget()) == AtTarget()
+            @test AtOrigin <: M.Anchor && AtTarget <: M.Anchor && !(AtOrigin <: AtTarget)
+            fs = FeatureSet(Lag(1), Calendar(:month, :year), Fourier(7, 2), Exogenous(:a),
+                            CustomFeature(:c, mean, 1))
+            got = M.anchors(fs)
+            @test got isa Vector{M.Anchor}
+            @test got == [AtOrigin(), AtTarget(), AtTarget(), AtTarget(), AtTarget(),
+                          AtTarget(), AtTarget(), AtTarget(), AtOrigin()]
+            @test length(got) == length(M.outputnames(fs))
+            fs2 = FeatureSet(Fourier(7, 2), Lag(1), Calendar(:month, :year), Lag(2))
+            @test M.anchors(fs2) == [fill(AtTarget(), 4); AtOrigin(); AtTarget();
+                                     AtTarget(); AtOrigin()]
+            @test !isdefined(M, :targetcolumnmask)
+
+            msg = "NoAnchor has no anchor. Direct fitting must know whether its columns " *
+                  "describe the feature row (target history) or the target row (time, " *
+                  "exogenous). Subtype TargetFeature, TimeFeature or ExogenousFeature, " *
+                  "or define MachineLearningForecast.anchor(f::NoAnchor) = " *
+                  "MachineLearningForecast.AtOrigin() or " *
+                  "MachineLearningForecast.AtTarget()."
+            @test_throws ArgumentError M.anchor(P.NoAnchor())
+            @test_throws msg M.anchor(P.NoAnchor())
+            @test_throws msg M.anchors(FeatureSet(Lag(1), P.NoAnchor()))
         end
     end
 end

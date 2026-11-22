@@ -126,7 +126,7 @@ end
 
 # Shift within each series, as in single-series Direct.
 function _panel_models(fc::Forecaster, s::Direct, frames)
-    istarget = targetcolumnmask(fc.features)
+    anch = anchors(fc.features)
     X = _vcat_frames([f[2] for f in frames])
     y = reduce(vcat, [f[3] for f in frames])
     lens = [length(f[3]) for f in frames]
@@ -146,8 +146,8 @@ function _panel_models(fc::Forecaster, s::Direct, frames)
             "not enough data for Direct($(s.max_horizon)): no series has enough " *
             "rows to train the step-$i model. Shorten max_horizon, provide longer " *
             "series, or reduce lags/windows."))
-        Xi = NamedTuple{keys(X)}(ntuple(c -> values(X)[c][istarget[c] ? from : to],
-                                        length(X)))
+        Xi = NamedTuple{keys(X)}(ntuple(
+            c -> values(X)[c][_gather_index(anch[c], from, to)], length(X)))
         _train(fc.model, Xi, y[to])
     end
 end

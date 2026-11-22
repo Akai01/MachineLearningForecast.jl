@@ -172,6 +172,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every other built-in returns none, and a third-party `ExogenousFeature`
   without an `inputcolumns` method throws an `ArgumentError` at `fit`, `forecast`
   and `backtest` saying what to define. A `cols` property no longer works.
+- Which row a feature's columns belong to under `Direct` is a trait,
+  `anchor(f)`, instead of an `isa TargetFeature` test: `TargetFeature` defaults
+  to `AtOrigin`, `TimeFeature` and `ExogenousFeature` to `AtTarget`, a feature
+  of any other kind must define it or `Direct` throws an `ArgumentError`.
+  `targetcolumnmask` is replaced by `anchors`. Results are unchanged.
 - Panel errors about one series' data name the series and give the row of the
   table passed to `fit` or `backtest`. A missing or non-finite target and a
   missing exogenous value were reported without the series and at a row

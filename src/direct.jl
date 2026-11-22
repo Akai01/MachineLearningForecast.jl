@@ -8,13 +8,12 @@ function _fit(fc::Forecaster, s::Direct, tbl::NamedTuple)
         "set's $mh history rows, only $nX training rows remain, but the target " *
         "must be shifted up to $(s.max_horizon - 1) steps. Provide at least " *
         "$(mh + s.max_horizon) rows, reduce max_horizon, or reduce lags/windows."))
-    istarget = targetcolumnmask(fc.features)
+    anch = anchors(fc.features)
     colnames = keys(X)
     models = map(1:s.max_horizon) do i
-        # Time/exogenous columns use the target row, as forecast does.
+        # AtTarget columns use the target row, as forecast does.
         Xi = NamedTuple{colnames}(ntuple(
-            c -> istarget[c] ? values(X)[c][1:(nX - i + 1)] : values(X)[c][i:nX],
-            length(colnames)))
+            c -> _shifted(anch[c], values(X)[c], i, nX), length(colnames)))
         yi = y[i:nX]
         _train(fc.model, Xi, yi)
     end

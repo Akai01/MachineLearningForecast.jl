@@ -321,6 +321,54 @@
         @test forecast(fit(fc_cal, dw), 4).y_hat ≈ repeat(Float64.(dayofweek.(fut_ds)), 3)
     end
 
+    @testset "panel Direct honours anchor, not the supertype" begin
+        P = AnchorProbes
+        # Slope 1 keeps y - ylast equal across series.
+        a = Float64.(1000 .+ (1:60))
+        ra = (unique_id=fill("a", 60), ds=collect(Date(2022, 1, 1):Day(1):Date(2022, 3, 1)),
+              y=a)
+        rb = (unique_id=fill("b", 40),
+              ds=collect(Date(2022, 1, 11):Day(1):Date(2022, 2, 19)), y=a[1:40] .+ 500)
+        rag = map(vcat, ra, rb)
+        trained(feat) = [m.fitresult for m in fit(
+            mk(TestModels.KeepTrain(), FeatureSet(feat); strat=Direct(4)), rag).models]
+        origin(base, n, i) = (base .+ (1:(n - i)), base .+ ((1 + i):n))
+        target(base, n, i) = (base .+ (i:(n - 1)), base .+ ((1 + i):n))
+        for feat in (P.LagOrigin(), P.YOrigin())
+            for (i, r) in enumerate(trained(feat))
+                (xa, ya), (xb, yb) = origin(1000, 60, i), origin(1500, 40, i)
+                @test r.X.ylast == [xa; xb] && r.y == [ya; yb]
+                @test r.y .- r.X.ylast == fill(float(i), length(r.y))
+            end
+        end
+        for (i, r) in enumerate(trained(P.LagAtTarget()))
+            (xa, ya), (xb, yb) = target(1000, 60, i), target(1500, 40, i)
+            @test r.X.ylast == [xa; xb] && r.y == [ya; yb]
+            @test r.y .- r.X.ylast == fill(1.0, length(r.y))
+        end
+        dw = (unique_id=rag.unique_id, ds=rag.ds, y=Float64.(dayofweek.(rag.ds)))
+        fc_dow = mk(TestModels.PairLookup(:dayofweek), FeatureSet(P.DowTarget());
+                    strat=Direct(4))
+        fut_ds = Date(2022, 3, 2) .+ Day.(0:3)
+        got = forecast(fit(fc_dow, dw), 4).y_hat
+        @test got == Float64.(dayofweek.([fut_ds; Date(2022, 2, 20) .+ Day.(0:3)]))
+
+        fs = FeatureSet(P.NoAnchor())
+        err = "NoAnchor has no anchor. Direct fitting must know whether its columns"
+        fix = "or define MachineLearningForecast.anchor(f::NoAnchor) = " *
+              "MachineLearningForecast.AtOrigin() or MachineLearningForecast.AtTarget()."
+        @test_throws ArgumentError fit(mk(TestModels.KeepTrain(), fs; strat=Direct(3)), rag)
+        @test_throws err fit(mk(TestModels.KeepTrain(), fs; strat=Direct(3)), rag)
+        @test_throws fix fit(mk(TestModels.KeepTrain(), fs; strat=Direct(3)), rag)
+        rec = fit(mk(TestModels.EchoColumn(:ylast), fs), rag)
+        @test forecast(rec, 2).y_hat == [1060.0, 1060.0, 1540.0, 1540.0]
+        for m in (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+            @test all(isfinite, forecast(fit(mk(m, fs), rag), 2).y_hat)
+            @test_throws err fit(mk(m, fs; strat=Direct(3)), rag)
+        end
+    end
+
     @testset "panel backtest rejects metrics with the same name" begin
         fcd = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
         mkm(k) = (a, b) -> k * mae(a, b)

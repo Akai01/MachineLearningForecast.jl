@@ -57,23 +57,28 @@ rows are dropped from the training frame.
 minhistory(fs::FeatureSet) = maximum(minhistory.(fs.features); init=0)
 
 """
-    targetcolumnmask(fs::FeatureSet) -> Vector{Bool}
+    anchors(fs::FeatureSet) -> Vector{Anchor}
 
-Mask over [`outputnames`](@ref)`(fs)`: `true` where the column is produced by a
-[`TargetFeature`](@ref) (so it describes the target's own history and is
-anchored to the *feature* row), `false` for time/exogenous columns (which are
-anchored to the *target* row). `Direct` fitting needs this to shift the two
-groups independently — see `src/direct.jl`.
+The [`anchor`](@ref) of every column of [`outputnames`](@ref)`(fs)`, in the same
+order: [`AtOrigin`](@ref) columns describe the target's own history and belong to
+the *feature* row, [`AtTarget`](@ref) columns (time, exogenous) belong to the *target*
+row. `Direct` fitting shifts the two groups independently, see `src/direct.jl`.
+
+# Example
+```julia
+anchors(FeatureSet(Lag(1), Calendar(:month, :year)))
+# Anchor[AtOrigin(), AtTarget(), AtTarget()]
+```
 """
-function targetcolumnmask(fs::FeatureSet)
-    mask = Bool[]
+function anchors(fs::FeatureSet)
+    out = Anchor[]
     for f in fs
-        istarget = f isa TargetFeature
+        a = anchor(f)
         for _ in outputnames(f)
-            push!(mask, istarget)
+            push!(out, a)
         end
     end
-    return mask
+    return out
 end
 
 "The user columns the features read, from `inputcolumns` (empty if none)."

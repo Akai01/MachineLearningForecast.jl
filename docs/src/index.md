@@ -73,7 +73,11 @@ MachineLearningForecast.FeatureContext
 MachineLearningForecast.featurevalues!
 MachineLearningForecast.materialize!
 MachineLearningForecast.TrainingSeries
-MachineLearningForecast.targetcolumnmask
+MachineLearningForecast.Anchor
+MachineLearningForecast.AtOrigin
+MachineLearningForecast.AtTarget
+MachineLearningForecast.anchor
+MachineLearningForecast.anchors
 Lag
 RollingMean
 RollingStd

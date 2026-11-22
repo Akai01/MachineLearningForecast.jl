@@ -367,6 +367,14 @@ end
         @test !MachineLearningForecast.needs_ytrain(mae)
     end
 
+    @testset "features of the three families have their default anchor" begin
+        anchor = MachineLearningForecast.anchor
+        @test anchor(ThirdPartyExog.NeedsPromo()) isa MachineLearningForecast.AtOrigin
+        for f in (ThirdPartyExog.NoCols(:promo), ThirdPartyExog.Doubled([:promo]))
+            @test anchor(f) isa MachineLearningForecast.AtTarget
+        end
+    end
+
     @testset "features declare their input columns through inputcolumns" begin
         dfe = (ds=df.ds, y=df.y, promo=Float64.(1:50))
         future = (ds=collect(df.ds[end] + Day(1):Day(1):df.ds[end] + Day(3)),

@@ -33,11 +33,12 @@ v1 simplification: at forecast time, the direct models condition their
 target-history features on the training-end history, while exogenous and time
 features vary per step.
 
-Model `i` predicts the target `i` steps ahead. At fit time its target-history
+Model `i` predicts the target `i` steps ahead. At fit time its `AtOrigin`
 features (lags, rolling statistics, differences, custom) come from the feature
-row `j`, and its time and exogenous features come from the target row `j+i-1`,
-which is what `forecast` feeds at step `i`. Taking both from row `j` would be a
-train/serve skew that silently degrades every step after the first.
+row `j`, and its `AtTarget` features (time and exogenous) come from the target
+row `j+i-1`, which is what `forecast` feeds at step `i`; see [`anchor`](@ref).
+Taking both from row `j` would be a train/serve skew that silently degrades
+every step after the first.
 
 # Example
 ```julia
@@ -60,3 +61,8 @@ Direct() = throw(ArgumentError(
 "Number of models a strategy fits."
 nmodels(::Recursive) = 1
 nmodels(s::Direct) = s.max_horizon
+
+_shifted(::AtOrigin, col, i, n) = col[1:(n - i + 1)]
+_shifted(::AtTarget, col, i, n) = col[i:n]
+_gather_index(::AtOrigin, from, to) = from
+_gather_index(::AtTarget, from, to) = to
