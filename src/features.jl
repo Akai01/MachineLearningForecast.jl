@@ -56,8 +56,8 @@ read-only: do not keep a reference to it or to `y`.
   `minhistory(f) == 0`.
 - `t`: the timestamp of the row's target.
 - `step`: the 0-based step index of the row's target. It counts `freq` steps
-  from the first (transformed) training timestamp, and from the earliest
-  series' first timestamp on a panel.
+  from the first (transformed) training timestamp, and from the earliest usable
+  series' first (transformed) timestamp on a panel.
 - `exog`: a `NamedTuple` of the user columns at the row (it may hold more than
   `inputcolumns(f)` when forecasting, so index it by name). When `inputcolumns(f)` is
   empty it may be `nothing` or a `NamedTuple` (forecasting with another exogenous
@@ -392,11 +392,11 @@ end
     Fourier(period, order)
 
 Fourier seasonal terms `sin(2πkn/period)`, `cos(2πkn/period)` for `k = 1:order`,
-where `n` is an integer step index (0-based from the first training timestamp,
+where `n` is an integer step index (0-based from the first (transformed) training timestamp,
 incremented by 1 per `freq` step). The index continues seamlessly into the
 forecast horizon, so there is no phase jump at the train/forecast boundary. In a
-panel, `n` counts from the earliest series' first training timestamp, so every
-series has the same Fourier values on the same date.
+panel, `n` counts from the earliest usable series' first (transformed) training
+timestamp, so every series has the same Fourier values on the same date.
 
 `period` is expressed in units of `freq` steps, e.g. `365.25` for annual
 seasonality with daily data. `order` K produces 2K columns

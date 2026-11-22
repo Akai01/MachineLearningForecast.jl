@@ -94,7 +94,9 @@ design matrix. Returns `X` (a columntable of the feature columns only, all
 rows), and `keep::BitVector` (the kept-row mask over the original rows). The
 first `minhistory(fs)` rows are dropped because at least one target feature is
 undefined there. Errors report row `i` of `tbl` as row `rows[i]` of the user's
-table. `step0` is the [`Fourier`](@ref) step index of the first row.
+table. `step0` is the step index (`ctx.step`, see [`FeatureContext`](@ref)) of the
+first row of `tbl`: row `i` has step `step0 + i - 1`. A panel passes it so that every
+series shares one calendar.
 """
 function build_training_frame(fs::FeatureSet, tbl::NamedTuple, target::Symbol,
                               time::Symbol, rows=1:nrows(tbl); step0::Integer=0)

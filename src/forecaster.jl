@@ -153,11 +153,12 @@ Everything `forecast` needs about one series: its id (`nothing` for a
 single-series forecaster), the training target history that lag and rolling
 features are computed from, the first and last training timestamps, and the
 number of training rows. `z_history` is the history after the spec's
-[`TargetTransform`](@ref), which lag and rolling features and the Fourier
-step index use, and `transform_state` is what [`untransform`](@ref) needs;
-without a transform, `z_history` is `y_history`. `step0` is the Fourier step
-index of the first `z_history` value: `0` for a single series, and in a panel
-the steps from the earliest series' first value.
+[`TargetTransform`](@ref), which lag and rolling features and the step index
+use, and `transform_state` is what [`untransform`](@ref) needs; without a
+transform, `z_history` is `y_history`. `step0` is the context's step index
+(`ctx.step`, see [`FeatureContext`](@ref)) of the first `z_history` value: `0`
+for a single series, and in a panel the steps from the earliest usable series'
+first (transformed) timestamp.
 
 Read them off a fitted panel forecaster via `f.series`; for a single-series
 forecaster the same values are reachable directly as `f.y_history`, `f.t_last`,

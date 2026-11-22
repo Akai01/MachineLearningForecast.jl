@@ -482,6 +482,105 @@
         @test out.y_hat ≈ [cos(2π * (month(d) - 1) / 12) for d in out.ds]
     end
 
+    @testset "Fourier phase is a property of the date (Recursive, Direct(3))" begin
+        o = Date(2022, 1, 1)
+        day(d) = Float64(Dates.value(d - o))
+        phase(d) = sin(2π * mod(Dates.value(d - o), 7) / 7)
+        function ragged(spans)
+            ds = [collect(d0:Day(1):d0 + Day(n - 1)) for (d0, n) in spans]
+            ids = reduce(vcat, [fill("s$k", n) for (k, (_, n)) in enumerate(spans)])
+            return (unique_id=ids, ds=reduce(vcat, ds), y=day.(reduce(vcat, ds)))
+        end
+        spans = [(o, 50), (Date(2022, 1, 4), 50), (Date(2022, 1, 11), 40)]
+        # The origin skips short series.
+        short = [(Date(2021, 12, 20), 3); spans]
+        for (sp, feats, mh) in ((spans, [Fourier(7, 2)], 0),
+                                (short, [Lag(5), Fourier(7, 2)], 5)),
+            strat in (Recursive(), Direct(3))
+            data = ragged(sp)
+            mk2(model) = Forecaster(model; features=FeatureSet(feats...), strategy=strat,
+                                    freq=Day(1), id=:unique_id)
+            fitit(model) = length(sp) == 4 ?
+                (@test_logs (:warn, r"skipping 1 series with fewer than 6 rows") fit(
+                    mk2(model), data)) : fit(mk2(model), data)
+            out = forecast(fitit(TestModels.EchoColumn(:fourier_7_0_sin_1)), 3)
+            @test out.y_hat ≈ phase.(out.ds)
+            for d in unique(out.ds)
+                vals = out.y_hat[out.ds .== d]
+                @test all(==(first(vals)), vals)
+            end
+            # Direct anchors time columns to the target row.
+            fitted = fitit(TestModels.KeepTrain())
+            for m in fitted.models
+                X, y = m.fitresult.X, m.fitresult.y
+                @test X.fourier_7_0_sin_1 ≈ sin.(2π .* mod.(y, 7) ./ 7)
+                @test X.fourier_7_0_cos_2 ≈ cos.(2π .* mod.(2 .* y, 7) ./ 7)
+            end
+            strat isa Recursive || continue
+            # Rows are ordered by series.
+            X, y = only(fitted.models).fitresult.X, only(fitted.models).fitresult.y
+            r2 = (50 - mh + 1):(2 * (50 - mh))
+            d2 = Date(2022, 1, 4) .+ Day.(mh:49)
+            @test y[r2] == day.(d2)
+            @test X.fourier_7_0_sin_1[r2] ≈ phase.(d2)
+        end
+    end
+
+    @testset "Fourier under a row-consuming transform, on a panel" begin
+        n = 50
+        ds = collect(Date(2022, 1, 1):Day(1):Date(2022, 1, 1) + Day(n - 1))
+        ds2 = ds .+ Day(3)
+        data = (unique_id=[fill("a", n); fill("b", n)], ds=[ds; ds2],
+                y=[20 .+ Float64.(1:n); 30 .+ 2 .* Float64.(1:n)])
+        sin7(steps) = sin.(2π .* mod.(steps, 7) ./ 7)
+        cos7(steps) = cos.(2π .* mod.(steps, 7) ./ 7)
+        spec(m, strat) = Forecaster(m; features=FeatureSet(Fourier(7, 1)), strategy=strat,
+                                    freq=Day(1), id=:unique_id, transform=LogRatio(3))
+        # Row steps count from the transformed table.
+        keep = fit(spec(TestModels.KeepTrain(), Recursive()), data)
+        @test [s.step0 for s in keep.series] == [0, 3]
+        X = only(keep.models).fitresult.X
+        steps = [0:46; 3:49]
+        @test X.fourier_7_0_sin_1[1] == 0.0 && X.fourier_7_0_cos_1[1] == 1.0
+        @test X.fourier_7_0_sin_1 ≈ sin7(steps) && X.fourier_7_0_cos_1 ≈ cos7(steps)
+        for (h, m) in enumerate(fit(spec(TestModels.KeepTrain(), Direct(3)), data).models)
+            hs = [(h - 1):46; (3 + h - 1):49]
+            @test m.fitresult.X.fourier_7_0_sin_1 ≈ sin7(hs)
+        end
+        # Each series continues after its own transformed rows.
+        for strat in (Recursive(), Direct(3))
+            fitted = fit(spec(TestModels.KeepPredict(Ref(Any[])), strat), data)
+            forecast(fitted, 3)
+            calls = reduce(vcat, [m.model.calls[] for m in fitted.models])
+            @test length(calls) == 3
+            for (s, c) in enumerate(calls)
+                @test c.fourier_7_0_sin_1 ≈ sin7([46 + s, 49 + s])
+                @test c.fourier_7_0_cos_1 ≈ cos7([46 + s, 49 + s])
+            end
+        end
+    end
+
+    @testset "Fourier on Month(1) freq, ragged panel" begin
+        o = Date(2020, 3, 1)
+        spans = [(o, 30), (Date(2020, 8, 1), 24), (Date(2021, 1, 1), 20)]
+        ms = [collect(d0:Month(1):d0 + Month(n - 1)) for (d0, n) in spans]
+        ids = reduce(vcat, [fill("m$k", n) for (k, (_, n)) in enumerate(spans)])
+        data = (unique_id=ids, ds=reduce(vcat, ms), y=ones(sum(last, spans)))
+        phase(d) = sin(2π * mod(12 * (year(d) - 2020) + month(d) - 3, 12) / 12)
+        for strat in (Recursive(), Direct(3))
+            fc = Forecaster(TestModels.EchoColumn(:fourier_12_0_sin_1);
+                            features=FeatureSet(Fourier(12, 1)), strategy=strat,
+                            freq=Month(1), id=:unique_id)
+            out = forecast(fit(fc, data), 3)
+            @test length(out.ds) == 9
+            @test out.y_hat ≈ phase.(out.ds)
+            for d in unique(out.ds)
+                vals = out.y_hat[out.ds .== d]
+                @test all(==(first(vals)), vals)
+            end
+        end
+    end
+
     @testset "ragged start dates: fit, forecast, Direct and backtest" begin
         starts = [Date(2022, 1, 1), Date(2022, 1, 11), Date(2022, 1, 21)]
         rag = makepanel(lens=(60, 50, 40), starts=starts)     # all end on 2022-03-01

@@ -248,6 +248,19 @@ end
         end
     end
 
+    @testset "Fourier training columns equal the row values bit for bit" begin
+        for f in (Fourier(7, 3), Fourier(365.25, 3), Fourier(2.5, 1), Fourier(Inf, 2),
+                  Fourier(12, 2)), step0 in (0, 5, 1000)
+            p = isfinite(f.period) ? ceil(Int, 3 * f.period) : 3
+            for n in (p, 1000)
+                acc = columns(f, zeros(n), 1:n, (;); step0)
+                @test first.(acc) == MachineLearningForecast.outputnames(f)
+                @test all(isequal(c[i], rowvalues(f, Float64[], 0, step0 + i - 1)[j])
+                          for (j, (_, c)) in enumerate(acc), i in 1:n)
+            end
+        end
+    end
+
     @testset "every feature: single-row value equals the batch value" begin
         n = 30
         yr = 10 .* randn(StableRNG(10), n)

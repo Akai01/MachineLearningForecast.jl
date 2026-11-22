@@ -108,4 +108,50 @@
                                                               y=tiny.y[1:3]))
         end
     end
+
+    @testset "Fourier under a row-consuming transform" begin
+        # Row steps count from the transformed table.
+        sin7(steps) = sin.(2π .* mod.(steps, 7) ./ 7)
+        cos7(steps) = cos.(2π .* mod.(steps, 7) ./ 7)
+        spec(m, feats, strat) = Forecaster(m; features=FeatureSet(feats...),
+                                           strategy=strat, freq=Day(1),
+                                           transform=Difference(1))
+        X = only(fit(spec(TestModels.KeepTrain(), [Fourier(7, 1)], Recursive()),
+                     df).models).fitresult.X
+        @test length(X.fourier_7_0_sin_1) == 49
+        @test X.fourier_7_0_sin_1[1] == 0.0 && X.fourier_7_0_cos_1[1] == 1.0
+        @test X.fourier_7_0_sin_1 ≈ sin7(0:48) && X.fourier_7_0_cos_1 ≈ cos7(0:48)
+        # Dropped history rows skip their steps.
+        X2 = only(fit(spec(TestModels.KeepTrain(), [Lag(2), Fourier(7, 1)], Recursive()),
+                      df).models).fitresult.X
+        @test X2.fourier_7_0_sin_1 ≈ sin7(2:48)
+        # Direct anchors time columns to the target row.
+        for (h, m) in enumerate(fit(spec(TestModels.KeepTrain(), [Fourier(7, 1)],
+                                         Direct(3)), df).models)
+            @test m.fitresult.X.fourier_7_0_sin_1 ≈ sin7((h - 1):48)
+        end
+        # The forecast continues after the transformed rows.
+        for strat in (Recursive(), Direct(3))
+            fitted = fit(spec(TestModels.KeepPredict(Ref(Any[])), [Fourier(7, 1)], strat),
+                         df)
+            forecast(fitted, 3)
+            calls = reduce(vcat, [m.model.calls[] for m in fitted.models])
+            @test [only(c.fourier_7_0_sin_1) for c in calls] ≈ sin7(49:51)
+            @test [only(c.fourier_7_0_cos_1) for c in calls] ≈ cos7(49:51)
+        end
+    end
+
+    @testset "Fourier on Month(1) freq" begin
+        ms = collect(Date(2020, 1, 1):Month(1):Date(2020, 1, 1) + Month(39))
+        mdf = (ds=ms, y=Float64.(1:40))
+        phase(d) = sin(2π * mod(12 * (year(d) - 2020) + month(d) - 1, 12) / 12)
+        for strat in (Recursive(), Direct(3))
+            fc = Forecaster(TestModels.EchoColumn(:fourier_12_0_sin_1);
+                            features=FeatureSet(Fourier(12, 1)), strategy=strat,
+                            freq=Month(1))
+            out = forecast(fit(fc, mdf), 3)
+            @test out.ds == ms[end] .+ Month.(1:3)
+            @test out.y_hat ≈ phase.(out.ds)
+        end
+    end
 end
