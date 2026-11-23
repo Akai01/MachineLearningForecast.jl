@@ -307,9 +307,13 @@ Notes:
 
 ## Metrics
 
-`mae`, `rmse`, `mape`, `smape`, `mase` — all `(y, ŷ) -> Float64`, lower is
+`mae`, `rmse`, `mape`, `smape`, `mase`, `rmsse` — all `(y, ŷ) -> Float64`, lower is
 better. `mape` and `smape` return fractions (0.10 = 10%);
-`mase(y, ŷ; y_train, m=1)` scales by the in-sample seasonal-naive error.
+`mase(y, ŷ; y_train, m=1)` scales by the in-sample seasonal-naive error;
+`rmsse(y, ŷ; y_train, m=1)` is its squared-error counterpart, the RMSE divided by the
+root of the in-sample mean squared seasonal-naive error (M5's RMSSE, except that M5
+starts the scale at the first non-zero value, while `rmsse` uses the whole training
+window).
 In `backtest`, unscaled metrics pool the fold's rows; scaled metrics are per series,
 weighted by scored points; the overall row is the unweighted mean over folds.
 Scaled metrics follow Hyndman & Koehler (2006): each series' errors are divided by that
@@ -318,7 +322,8 @@ scored points, our choice). Unscaled metrics are pooled across series, so on a p
 they are dominated by the large-scale series; use a scaled metric to compare series of
 different scale. On intermittent series (many zeros), MAE-based measures, including
 MASE, can favour forecasts close to zero; the M5 competition used a squared-error
-scaled measure (RMSSE) for this reason (Makridakis, Spiliotis & Assimakopoulos 2022).
+scaled measure (RMSSE) for this reason (Makridakis, Spiliotis & Assimakopoulos 2022);
+use `rmsse` for such series.
 
 ## Error messages
 
@@ -356,7 +361,7 @@ Reindex your data or resample before fitting.
        horizon=28, initial=730)
   ```
 
-  The other 39 exports are collision-free. Note that MachineLearningForecast's `mae`/`rmse`
+  The other 40 exports are collision-free. Note that MachineLearningForecast's `mae`/`rmse`
   are plain functions of two vectors, whereas MLJ's are measure objects — they
   are not interchangeable, which is exactly why the choice must be explicit.
 - **Multiple dispatch over configuration flags**: strategies, features, and

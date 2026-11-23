@@ -242,8 +242,9 @@ end
     @testset "export surface is pinned" begin
         # The README quotes these counts; keep them honest.
         exports = setdiff(names(MachineLearningForecast), [:MachineLearningForecast])
-        @test length(exports) == 43
+        @test length(exports) == 44
         @test :Forecaster in exports && :tune in exports && :mase in exports
+        @test :rmsse in exports
         @test :TransformChain in exports && :untransform in exports
     end
 

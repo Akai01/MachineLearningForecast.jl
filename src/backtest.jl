@@ -136,7 +136,7 @@ series can change from fold to fold.
 
 `metrics` is a tuple of callables `(y, ŷ) -> Float64` (e.g. [`mae`](@ref),
 [`rmse`](@ref), [`smape`](@ref)). Scaled metrics that also need the fold's
-training target — [`mase`](@ref), or your own, declared via
+training target — [`mase`](@ref), [`rmsse`](@ref), or your own, declared via
 [`needs_ytrain`](@ref) — are called as `metric(y, ŷ; y_train=...)` with that
 fold's training window supplied automatically (on a panel, each series' own, so a
 scale never mixes series).

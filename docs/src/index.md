@@ -121,6 +121,7 @@ rmse
 mape
 smape
 mase
+rmsse
 MachineLearningForecast.needs_ytrain
 ```
 

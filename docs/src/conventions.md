@@ -58,14 +58,17 @@ fitting, because a fill that uses later values, such as interpolation, leaks.
 metrics are per series, weighted by scored points; the overall row is the
 unweighted mean over folds. Scaled metrics are those that
 [`needs_ytrain`](@ref MachineLearningForecast.needs_ytrain) marks, such as
-[`mase`](@ref). Scaled metrics follow Hyndman & Koehler (2006): each series'
-errors are divided by that series' own training-window naive error, then
-averaged over series (here weighted by scored points, our choice). Unscaled
-metrics are pooled across series, so on a panel they are dominated by the
-large-scale series; use a scaled metric to compare series of different scale.
+[`mase`](@ref) and [`rmsse`](@ref). Scaled metrics follow Hyndman & Koehler
+(2006): each series' errors are divided by that series' own training-window
+naive error, then averaged over series (here weighted by scored points, our
+choice). One series with a constant training window has a zero scale, which
+makes that fold's score, and so the overall score, `Inf`. Unscaled metrics are
+pooled across series, so on a panel they are dominated by the large-scale
+series; use a scaled metric to compare series of different scale.
 On intermittent series (many zeros), MAE-based measures, including MASE, can
 favour forecasts close to zero; the M5 competition used a squared-error scaled
-measure (RMSSE) for this reason (Makridakis, Spiliotis & Assimakopoulos 2022).
+measure (RMSSE) for this reason (Makridakis, Spiliotis & Assimakopoulos 2022);
+use [`rmsse`](@ref) for such series.
 
 **Tuning base models with MLJ.** If you tune the base model with MLJ's
 `TunedModel`, prefer `TimeSeriesCV` to `CV()`. Plain K-fold CV trains on rows

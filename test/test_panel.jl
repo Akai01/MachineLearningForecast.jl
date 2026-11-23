@@ -449,6 +449,51 @@
               [3.0, (5 * 3.0 + 2 * 1.5) / 7]
     end
 
+    @testset "rmsse is per series and point-weighted on a panel" begin
+        # b's scale differs; b ends 2 days into the last fold.
+        function wiggly(lb)
+            ids = String[]; ds = Date[]; y = Float64[]
+            for (id, lv, n, f) in (("a", 100.0, 55, 1.0), ("b", 5.0, 52, lb))
+                for i in 1:n
+                    push!(ids, id); push!(ds, Date(2022, 1, 1) + Day(i - 1))
+                    push!(y, f * (lv + i + 3 * sin(i) + (i % 7)))
+                end
+            end
+            return (unique_id=ids, ds=ds, y=y)
+        end
+        function manual(pd, r)
+            vals = Float64[]
+            for k in sort(unique(r.folds.fold))
+                tot = 0.0; cnt = 0
+                for id in unique(pd.unique_id)
+                    sel = (r.folds.fold .== k) .& (r.folds.unique_id .== id)
+                    any(sel) || continue
+                    tr = pd.y[(pd.unique_id .== id) .& (pd.ds .<= r.folds.origin[sel][1])]
+                    sc = mean(abs2(tr[i] - tr[i - 1]) for i in 2:length(tr))
+                    tot += sum(sel) * rmse(r.folds.y[sel], r.folds.y_hat[sel]) / sqrt(sc)
+                    cnt += sum(sel)
+                end
+                push!(vals, tot / cnt)
+            end
+            return vals
+        end
+        score(model, pd) = backtest(mk(model, FeatureSet(Lag(1))), pd; horizon=5,
+                                    initial=40, step=5, metrics=(rmsse,))
+        for m in (TestModels.LinAR(1.0, 0.0), EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+            pd = wiggly(1.0)
+            r = score(m, pd)
+            vals = r.metrics.value[r.metrics.fold .> 0]
+            @test length(vals) == 3
+            @test vals ≈ manual(pd, r)
+            @test r.metrics.value[r.metrics.fold .== 0] ≈ [mean(vals)]
+        end
+        # Naive is equivariant, so a rescaled series is a no-op.
+        naive = TestModels.LinAR(1.0, 0.0)
+        @test score(naive, wiggly(1000.0)).metrics.value ≈
+              score(naive, wiggly(1.0)).metrics.value
+    end
+
     @testset "windows counts each series' folds back from its own end" begin
         pd = makepanel(lens=(40, 30, 35),
                        starts=[Date(2022, 1, 1), Date(2022, 1, 10), Date(2022, 1, 3)])

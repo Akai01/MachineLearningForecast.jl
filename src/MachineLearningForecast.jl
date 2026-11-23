@@ -21,7 +21,7 @@ interface: any MLJ `Deterministic` regressor is a valid base model, and a
   for expanding-window cross-validation; [`tune`](@ref) for pipeline tuning
   with an extensible ask/tell [`TuningStrategy`](@ref) interface.
 - Metrics: [`mae`](@ref), [`rmse`](@ref), [`mape`](@ref), [`smape`](@ref),
-  [`mase`](@ref).
+  [`mase`](@ref), [`rmsse`](@ref).
 """
 module MachineLearningForecast
 
@@ -38,7 +38,7 @@ export Forecaster, FittedForecaster, fit, forecast, backtest, BacktestResult,
        FeatureSet, Lag, RollingMean, RollingStd, RollingMin, RollingMax,
        Diff, Calendar, Fourier, Exogenous, CustomFeature,
        Recursive, Direct,
-       mae, rmse, mape, smape, mase,
+       mae, rmse, mape, smape, mase, rmsse,
        tune, TuneResult, TuningStrategy, GridSearch, RandomSearch, ask, tell!,
        SeriesState, nseries,
        TargetTransform, fit_transform, untransform, NoTransform, MeanScale, LastScale,

@@ -64,6 +64,29 @@
         @test res.folds.y_hat == dfe.promo[91:93]
     end
 
+    @testset "rmsse is scaled by each fold's training window" begin
+        yw = [i + 3 * sin(i) + (i % 7) for i in 1:n]
+        dw = (ds=t, y=yw)
+        for m in (TestModels.LinAR(1.0, 0.0), EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+            fcr = Forecaster(m; features=fs, strategy=Recursive(), freq=Day(1))
+            res = backtest(fcr, dw; horizon=5, initial=60, step=10,
+                           metrics=(rmse, rmsse))
+            mt = res.metrics
+            folds = sort(unique(res.folds.fold))
+            for k in folds
+                sel = res.folds.fold .== k
+                o = findfirst(==(res.folds.origin[findfirst(sel)]), t)
+                tr = yw[1:o]
+                sc = mean(abs2(tr[i] - tr[i - 1]) for i in 2:o)
+                got = only(mt.value[(mt.fold .== k) .& (mt.metric .== :rmsse)])
+                @test got ≈ rmse(res.folds.y[sel], res.folds.y_hat[sel]) / sqrt(sc)
+            end
+            vals = mt.value[(mt.fold .> 0) .& (mt.metric .== :rmsse)]
+            @test only(mt.value[(mt.fold .== 0) .& (mt.metric .== :rmsse)]) ≈ mean(vals)
+        end
+    end
+
     @testset "argument validation" begin
         @test_throws ArgumentError backtest(fc, df; horizon=0, initial=50)
         @test_throws "backtest horizon must be ≥ 1, got 0. Pass the number of steps each " *

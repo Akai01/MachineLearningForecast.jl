@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `rmsse(y, ŷ; y_train, m=1)`: the root mean squared scaled error, the RMSE
+  divided by the root of the in-sample mean squared (seasonal) naive error
+  (M5's RMSSE, except that M5 computes the scale only from the first non-zero
+  value on, while `rmsse` uses the whole training window). It declares `needs_ytrain`, so
+  `backtest` and `tune` score it per series like `mase`; zero scale warns and
+  returns `Inf`.
 - A documentation page, "Leakage and conventions": what the package guarantees
   against leakage; the conventions behind forecasts and backtest scores (`Lag`
   under `Direct`, realised covariates in a backtest, the series scored in a
