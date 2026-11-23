@@ -90,6 +90,13 @@ MMI.predict(::NaNModel, fitresult, Xnew) = fill(NaN, length(Tables.rows(Xnew)))
 MMI.input_scitype(::Type{NaNModel}) = MMI.Table(MMI.Continuous)
 MMI.target_scitype(::Type{NaNModel}) = AbstractVector{MMI.Continuous}
 
+"Has a `missing` and a `NaN` default hyperparameter, to render them."
+mutable struct Hyper <: MMI.Deterministic
+    a::Union{Missing,Float64}
+    b::Float64
+end
+Hyper(; a=missing, b=NaN) = Hyper(a, b)
+
 "Mean model whose `clean!` resets an invalid `k` to 1, with a warning message."
 mutable struct Clamped <: MMI.Deterministic
     k::Int

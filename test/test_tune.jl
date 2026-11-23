@@ -82,11 +82,73 @@ end
         @test result.best.features == FeatureSet(Lag(1))
         bad = (features=[FeatureSet(Lag(200)), FeatureSet(Lag(300))],)
         err = try tune(base, df; grid=bad, horizon=14, initial=90) catch e; e end
-        @test err isa ErrorException && occursin("all 2 tuning candidates failed", err.msg)
-        @test_throws "all 2 tuning candidates failed to evaluate. Fix the errors listed " *
-                     "below and run tune again; if every candidate fails the same way, " *
-                     "check horizon, initial and the grid against the data. Errors:\n" *
-                     "  - ArgumentError: " tune(base, df; grid=bad, horizon=14, initial=90)
+        @test err isa ArgumentError
+        @test_throws "all 2 tuning candidates failed to evaluate, so there is nothing " *
+                     "to rank. Fix the first error listed below, or check horizon, " *
+                     "initial and the grid (or the tuner's candidates) against the data. " *
+                     "Candidates:\n" *
+                     "  candidate 1 (features=FeatureSet(Lag(200))): ArgumentError: " tune(
+            base, df; grid=bad, horizon=14, initial=90)
+        @test occursin("\n  candidate 2 (features=FeatureSet(Lag(300))): ArgumentError: ",
+                       err.msg)
+        @test !occursin("... and", err.msg)
+    end
+
+    @testset "all candidates failing lists them, capped at 5" begin
+        for m in (DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
+                  EvoTreeRegressor(nrounds=5))
+            fcm = Forecaster(m; features=FeatureSet(Lag(1)), freq=Day(1))
+            bad = (features=[FeatureSet(Lag(200 + k)) for k in 1:7],)
+            err = try tune(fcm, df; grid=bad, horizon=14, initial=90) catch e; e end
+            @test err isa ArgumentError
+            @test occursin("all 7 tuning candidates failed to evaluate", err.msg)
+            lines = split(err.msg, '\n')
+            @test length(lines) == 1 + 5 + 1
+            for k in 1:5
+                @test startswith(lines[1 + k],
+                                 "  candidate $k (features=FeatureSet(Lag($(200 + k)))): ")
+            end
+            @test lines[end] == "  ... and 2 more"
+            @test !occursin("Lag(206)", err.msg)
+            # Exactly the cap: all listed and no tail.
+            five = (features=[FeatureSet(Lag(200 + k)) for k in 1:5],)
+            err = try tune(fcm, df; grid=five, horizon=14, initial=90) catch e; e end
+            @test length(split(err.msg, '\n')) == 1 + 5
+            @test occursin("candidate 5 (features=FeatureSet(Lag(205))): ", err.msg)
+            @test !occursin("... and", err.msg)
+        end
+        # Two override keys, a model rendered by _short, 2 learners.
+        grid = (features=[FeatureSet(Lag(200)), FeatureSet(Lag(300))],
+                model=[DecisionTreeRegressor(max_depth=2), EvoTreeRegressor(nrounds=5)])
+        err = try tune(base, df; grid=grid, horizon=14, initial=90) catch e; e end
+        @test err isa ArgumentError && occursin("all 4 tuning candidates", err.msg)
+        @test occursin("\n  candidate 1 (features=FeatureSet(Lag(200)), model=" *
+                       "DecisionTreeRegressor(max_depth=2)): ArgumentError: ", err.msg)
+        @test occursin("\n  candidate 4 (features=FeatureSet(Lag(300)), " *
+                       "model=EvoTreeRegressor(nrounds=5)): ArgumentError: ", err.msg)
+        # Candidate 1 shows its whole error, indented under its line.
+        boom = CustomFeature(:boom, h -> error("\nfirst line\nsecond line"), 1)
+        run_boom(fs) = try tune(base, df; grid=(features=fs,), horizon=14,
+                                initial=90) catch e; e end
+        err = run_boom([FeatureSet(boom)])
+        @test err isa ArgumentError
+        @test occursin(r"\n  candidate 1 \(features=[^\n]*\): [^\n]*first line\n" *
+                       r"    second line$", err.msg)
+        # Later candidates show only their first non-empty line.
+        err = run_boom([FeatureSet(Lag(200)), FeatureSet(boom)])
+        @test occursin(r"\n  candidate 2 \(features=[^\n]*\): [^\n]*first line$",
+                       err.msg)
+        @test !occursin("second line", err.msg)
+        tuner = ThirdPartyTuning.Midpoint([(model=TestModels.NaNModel(),)])
+        err = try tune(base, df; tuner=tuner, horizon=14, initial=90) catch e; e end
+        @test err isa ArgumentError && occursin("candidate 3 (model=NaNModel()): ", err.msg)
+    end
+
+    @testset "_short renders missing and NaN hyperparameters" begin
+        short = MachineLearningForecast._short
+        @test short(TestModels.Hyper()) == "Hyper(a=missing, b=NaN)"
+        @test short(TestModels.Hyper(; b=2.0)) == "Hyper(b=2.0)"
+        @test short(TestModels.Hyper(; a=1.0)) == "Hyper(a=1.0)"
     end
 
     @testset "a non-finite score fails the candidate, never wins" begin
@@ -123,7 +185,7 @@ end
         # Lag(200) needs more history than initial=90 allows.
         bad = [(features=FeatureSet(Lag(200)),) for _ in 1:1]
         tuner = ThirdPartyTuning.Midpoint(bad)
-        @test_throws ErrorException tune(base, df; tuner=tuner, horizon=14, initial=90)
+        @test_throws ArgumentError tune(base, df; tuner=tuner, horizon=14, initial=90)
         @test length(tuner.told) == 3
         @test all(x -> x[2] === missing, tuner.told)
 
@@ -304,7 +366,7 @@ end
             rs = run((features=[FeatureSet(Lag(1)), Lag(1)],);
                      tuner=RandomSearch(1; rng=StableRNG(3)))
             @test rs.table.mean_score == ref.table.mean_score
-            @test_throws ErrorException run((features=[Lag(1)],))
+            @test_throws ArgumentError run((features=[Lag(1)],))
             @test_throws msg run((features=[Lag(1)],))
         end
         @test_throws "such as FeatureSet(Lag(1), Lag(7))" tune(
@@ -464,7 +526,7 @@ end
         # Each candidate fails on the data, so tune raises.
         for (data, msg) in bad
             run() = tune(base, data; grid=grid, horizon=1, initial=8)
-            @test_throws ErrorException run()
+            @test_throws ArgumentError run()
             @test_throws "all 2 tuning candidates failed to evaluate" run()
             @test_throws msg run()
         end

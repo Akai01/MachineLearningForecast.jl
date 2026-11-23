@@ -98,6 +98,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Breaking: when every `tune` candidate fails, `tune` throws an `ArgumentError`**
+  (it was an `ErrorException`). The message lists "candidate i (overrides): error"
+  for the first five candidates, with the first error in full and the first line
+  of each other error, then "... and N more", and says to fix the first error
+  or check `horizon`, `initial`, the grid and the tuner's candidates. Partial
+  failures are unchanged: errors are recorded in the table's `:error` column.
 - **Breaking: `ask` is now `ask!`, and four names are no longer exported.** The
   tuning-strategy function that returns the next candidate is `ask!`, since it
   advances the strategy's state; there is no `ask` any more. `ask!`, `tell!`,
@@ -266,9 +272,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `got DataType`. A panel `backtest` fold with nothing to score says that no
   series trained up to its origin has data after it, instead of suggesting a
   `freq` grid mismatch.
-- When every `tune` candidate fails, the `ErrorException` says to fix the
-  listed errors, and to check `horizon`, `initial` and the grid if every
-  candidate fails the same way.
 - Forecasting allocates less per step: each feature fills the forecast row
   through a function barrier, and `Calendar` returns a concretely typed tuple.
   `Exogenous` converts its columns in a type-stable loop, so building the
@@ -281,6 +284,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Displaying a `TuneResult` no longer throws for a model with a `missing`
+  hyperparameter, and a `NaN` hyperparameter left at its default is no longer
+  shown as changed.
 - `Lag(true)` built `Lag(1)` (a `Bool` is an integer to Julia). `Lag` now
   refuses a `Bool` with the whole-number `ArgumentError`.
   The other step counts and orders did the same and now refuse a `Bool` too:
@@ -372,9 +378,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   0.1002, and the examples load what they use (`Statistics` for `mean`,
   `Random` for `Xoshiro` in place of the test-only `StableRNG`, `Dates` for
   `Day`, `EvoTrees` for `EvoTreeRegressor`).
-- The `tune` docstring and the README say that `tune` throws an
-  `ErrorException` listing the errors when every candidate fails, and the
-  README that a non-finite mean score counts as a failure.
+- The README says that a non-finite mean score counts as a tuning failure.
 - The docs site's leakage warning now matches the README's and links the
   README. The README's `SeriesState`
   link is fixed, and it calls Tables.jl the only table dependency rather than

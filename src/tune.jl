@@ -231,7 +231,7 @@ function _short(x)
     fs = collect(fieldnames(T))
     proto = try T() catch; nothing end
     changed = proto === nothing ? fs :
-              [f for f in fs if getfield(x, f) != getfield(proto, f)]
+              [f for f in fs if !isequal(getfield(x, f), getfield(proto, f))]
     isempty(changed) && (changed = fs)
     shown = first(changed, 3)
     body = join(("$f=$(getfield(x, f))" for f in shown), ", ")
@@ -285,8 +285,9 @@ and `windows`; `windows` counts each series' folds back from its own end (see
   recorded as `missing` (and reported to the strategy via [`tell!`](@ref)),
   the message stored in the result table's `:error` column, and the candidate
   excluded from ranking. A non-finite mean score (`NaN` or `Inf`) counts as a
-  failure. If every candidate fails, `tune` throws an `ErrorException` listing
-  the distinct error messages.
+  failure. If every candidate fails, `tune` throws an `ArgumentError` listing
+  the first five candidates with their overrides, the first error in full and
+  the first line of each other error, then the number left out.
 
 Returns a [`TuneResult`](@ref) with the score table, the best spec, and the
 best spec refit on all of `data`. Ties are broken by first-seen order.
@@ -357,18 +358,30 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
 
     table = _tune_table(cands, means, stds, errors)
     ok = findall(!ismissing, means)
-    if isempty(ok)
-        msgs = join(unique(skipmissing(errors)), "\n  - ")
-        throw(ErrorException(
-            "all $(length(cands)) tuning candidates failed to evaluate. Fix the " *
-            "errors listed below and run tune again; if every candidate fails the " *
-            "same way, check horizon, initial and the grid against the data. " *
-            "Errors:\n  - $msgs"))
-    end
+    isempty(ok) && throw(ArgumentError(_all_failed_message(cands, errors)))
     best_idx = ok[argmin([means[i] for i in ok])]
     best = reconstruct(fc; cands[best_idx]...)
     best_fitted = fit(best, tbl)
     return TuneResult(table, best, best_fitted)
+end
+
+# Capped so a large grid does not bury the first errors.
+const MAX_LISTED_FAILURES = 5
+
+function _all_failed_message(cands, errors)
+    n = length(cands)
+    lines = String[]
+    for i in 1:min(n, MAX_LISTED_FAILURES)
+        overrides = join(("$k=$(_short(v))" for (k, v) in pairs(cands[i])), ", ")
+        err = split(strip(errors[i]), '\n')
+        push!(lines, "  candidate $i ($overrides): " * err[1])
+        i == 1 && append!(lines, "    " .* err[2:end])
+    end
+    n > MAX_LISTED_FAILURES && push!(lines, "  ... and $(n - MAX_LISTED_FAILURES) more")
+    return "all $n tuning candidates failed to evaluate, so there is nothing to " *
+           "rank. Fix the first error listed below, or check horizon, initial and " *
+           "the grid (or the tuner's candidates) against the data. Candidates:\n" *
+           join(lines, "\n")
 end
 
 function _evaluate_candidate(fc, cand, tbl, horizon, scheme, metric)
