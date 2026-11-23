@@ -88,6 +88,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`Forecaster` has one constructor, `Forecaster(model; features, freq, ...)`.**
+  The eight-argument positional constructor is gone. `features` that is not a
+  `FeatureSet`, and a `freq` that is not a positive `Dates.Period`, now throw an
+  `ArgumentError` when the `Forecaster` is built (before, a wrong `features`
+  or `freq` type was a `TypeError` and a non-positive `freq` failed only at
+  `fit`). `tune` rebuilds candidates through the same constructor and accepts
+  only the keys `:model`, `:features`, `:strategy` and `:transform`. The
+  data-shape fields `:freq`, `:target`, `:time` and `:id` are no longer valid
+  grid keys or candidate overrides: a grid with one of them throws, and an
+  `ask` candidate with one fails that candidate, with a message saying the
+  field describes the data and cannot be tuned (a name that is not a field is
+  still reported as unknown). The `FeatureSet` error text for a bad
+  `:features` candidate no longer starts with "tune candidate key".
 - Documentation wording. The `Direct` docstring and the README no longer call
   the origin-anchored target history a "v1 simplification", and say what it
   means for `Lag` (`y[t0-k+1]`, not `y[target-k]`, at horizon `h`). The

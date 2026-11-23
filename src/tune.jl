@@ -17,8 +17,8 @@ an ask/tell loop:
 
 - [`ask`](@ref)`(s::MyStrategy) -> Union{NamedTuple,Nothing}` — return the next
   candidate: a NamedTuple of `Forecaster` field overrides (keys among `:model`,
-  `:features`, `:strategy`, `:freq`, `:target`, `:time`, `:id`, `:transform`), drawn from
-  your search space. Return `nothing` to signal termination.
+  `:features`, `:strategy`, `:transform`), drawn from your search space. Return
+  `nothing` to signal termination.
 - [`tell!`](@ref)`(s::MyStrategy, candidate, score)` — receive the result of
   evaluating `candidate`: a `Float64` backtest score (lower is better), or
   `missing` if the candidate failed to evaluate.
@@ -87,9 +87,8 @@ RandomSearch(n::Integer; rng::Random.AbstractRNG=Random.default_rng()) =
 
 Ask a [`TuningStrategy`](@ref) for its next candidate: a NamedTuple of
 [`Forecaster`](@ref) field overrides (keys among `:model`, `:features`,
-`:strategy`, `:freq`, `:target`, `:time`, `:id`, `:transform`). Return `nothing` to
-signal that the
-search is finished. Part of the public tuning-extension API — implement it for
+`:strategy`, `:transform`). Return `nothing` to signal that the search is
+finished. Part of the public tuning-extension API — implement it for
 your own strategy subtypes; see [`TuningStrategy`](@ref) for the full contract.
 
 # Example
@@ -140,12 +139,7 @@ function _validate_grid(grid)
         "grid must be a NamedTuple of Forecaster field names to candidate value " *
         "lists, got $(typeof(grid)). Use e.g. grid=(model=[m1, m2], " *
         "strategy=[Recursive(), Direct(28)])."))
-    valid = fieldnames(Forecaster)
-    bad = setdiff(keys(grid), valid)
-    isempty(bad) || throw(ArgumentError(
-        "grid has unknown key$(length(bad) == 1 ? "" : "s") " *
-        "$(join(":" .* string.(bad), ", ")); valid keys are " *
-        "$(join(":" .* string.(valid), ", "))."))
+    _check_tunable(keys(grid), "grid has", "key", "grid key")
     for (k, v) in pairs(grid)
         (v isa Union{AbstractVector,Tuple}) && !isempty(v) || throw(ArgumentError(
             "grid key :$k must map to a nonempty vector or tuple of candidate " *
@@ -185,28 +179,6 @@ function _sequence(t::Union{GridSearch,RandomSearch}, grid)
         "grid=(model=[...], features=[...], ...) to tune."))
     _validate_grid(grid)
     return CandidateQueue(candidates(t, grid))
-end
-
-# Explicit constructor call avoids a Setfield dependency.
-function reconstruct(fc::Forecaster; kwargs...)
-    bad = setdiff(keys(kwargs), fieldnames(Forecaster))
-    isempty(bad) || throw(ArgumentError(
-        "cannot reconstruct Forecaster with unknown field$(length(bad) == 1 ? "" : "s") " *
-        "$(join(":" .* string.(bad), ", ")); valid fields are " *
-        "$(join(":" .* string.(fieldnames(Forecaster)), ", "))."))
-    fs = get(kwargs, :features, fc.features)
-    fs isa FeatureSet || throw(ArgumentError(
-        "tune candidate key :features must be a FeatureSet such as " *
-        "FeatureSet(Lag(1), Lag(7)), got $(repr(fs)). Wrap the features in " *
-        "FeatureSet(...)."))
-    return Forecaster(get(kwargs, :model, fc.model),
-                      fs,
-                      get(kwargs, :strategy, fc.strategy),
-                      get(kwargs, :freq, fc.freq),
-                      get(kwargs, :target, fc.target),
-                      get(kwargs, :time, fc.time),
-                      get(kwargs, :id, fc.id),
-                      get(kwargs, :transform, fc.transform))
 end
 
 """
@@ -288,7 +260,8 @@ mean of `metric` across folds (lower is better). Pass exactly one of `initial`
 and `windows`; `windows` counts each series' folds back from its own end, which
 lets `tune` work on panels whose series span different calendar periods.
 
-- `grid`: NamedTuple mapping `Forecaster` field names to candidate value lists.
+- `grid`: NamedTuple mapping `Forecaster` field names (`model`, `features`,
+  `strategy`, `transform`) to candidate value lists.
   Required for the batch strategies ([`GridSearch`](@ref), the Cartesian
   product; [`RandomSearch`](@ref), `n` uniform draws). A sequential
   user-defined [`TuningStrategy`](@ref) owns its own space and may ignore it.

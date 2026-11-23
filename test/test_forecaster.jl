@@ -35,6 +35,45 @@
             features=FeatureSet(Lag(1)), freq=Day(1))
     end
 
+    @testset "Forecaster has no positional constructor" begin
+        m = TestModels.LinAR(1.0, 0.0)
+        fs = FeatureSet(Lag(1))
+        @test_throws MethodError Forecaster(m, fs, Recursive(), Day(1), :y, :ds,
+                                            nothing, NoTransform())
+        @test_throws MethodError Forecaster(m, fs, Recursive(), Day(1), :y, :ds)
+        fc = Forecaster(m; features=fs, freq=Day(1))
+        @test (fc.strategy, fc.target, fc.time, fc.id, fc.transform) ==
+              (Recursive(), :y, :ds, nothing, NoTransform())
+    end
+
+    @testset "features must be a FeatureSet, freq a positive Period" begin
+        for m in (TestModels.LinAR(1.0, 0.0), DecisionTreeRegressor(max_depth=2),
+                  EvoTreeRegressor(nrounds=5))
+            @test_throws ArgumentError Forecaster(m; features=[Lag(1)], freq=Day(1))
+            @test_throws "features must be a FeatureSet such as FeatureSet(Lag(1), " *
+                         "Lag(7)), got $(repr([Lag(1)])). Wrap the features in " *
+                         "FeatureSet(...)." Forecaster(
+                m; features=[Lag(1)], freq=Day(1))
+            @test_throws "got Lag(1). Wrap" Forecaster(m; features=Lag(1), freq=Day(1))
+            for bad in (Day(0), Day(-1), Month(0), Month(-2))
+                @test_throws ArgumentError Forecaster(m; features=FeatureSet(Lag(1)),
+                                                      freq=bad)
+                @test_throws "freq must be a positive period, got $bad. Pass e.g. " *
+                             "freq=Day(1) or freq=Month(1)." Forecaster(
+                    m; features=FeatureSet(Lag(1)), freq=bad)
+            end
+            for bad in (1, "day", Day(1) + Hour(1))
+                @test_throws ArgumentError Forecaster(m; features=FeatureSet(Lag(1)),
+                                                      freq=bad)
+                @test_throws "freq must be a Dates.Period such as Day(1) or Month(1), " *
+                             "got $(repr(bad)); a sum such as Day(1) + Hour(1) is not " *
+                             "accepted. Pass e.g. freq=Day(1)." Forecaster(
+                    m; features=FeatureSet(Lag(1)), freq=bad)
+            end
+            @test Forecaster(m; features=FeatureSet(Lag(1)), freq=Hour(6)).freq == Hour(6)
+        end
+    end
+
     @testset "a Probabilistic model forecasts the mean of its prediction" begin
         @test_logs Forecaster(TestModels.ProbLinAR(0.8, 2.0); features=FeatureSet(Lag(1)),
                               freq=Day(1))

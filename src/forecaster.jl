@@ -17,7 +17,8 @@ Immutable forecasting specification.
 - `features`: a [`FeatureSet`](@ref) describing the design matrix.
 - `strategy`: a [`ForecastStrategy`](@ref) — [`Recursive`](@ref) (default) or
   [`Direct`](@ref).
-- `freq`: the series frequency as a `Dates.Period`, e.g. `Day(1)`, `Month(1)`.
+- `freq`: the series frequency as a positive `Dates.Period`, e.g. `Day(1)`,
+  `Month(1)`; a sum such as `Day(1) + Hour(1)` is not accepted.
 - `target`: name of the target column (default `:y`).
 - `time`: name of the time column (default `:ds`), of a type supporting
   `+` with `freq` (`Date`, `DateTime`).
@@ -62,11 +63,20 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol},X<:TargetTransf
     time::Symbol
     id::I
     transform::X
-    function Forecaster(model::M, features::FeatureSet, strategy::S, freq::Period,
-                        target::Symbol, time::Symbol, id::I=nothing,
-                        transform::X=NoTransform()) where {M,S<:ForecastStrategy,
-                                                         I<:Union{Nothing,Symbol},
-                                                         X<:TargetTransform}
+    function Forecaster(model; features, strategy::ForecastStrategy=Recursive(), freq,
+                        target::Symbol=:y, time::Symbol=:ds,
+                        id::Union{Nothing,Symbol}=nothing,
+                        transform::TargetTransform=NoTransform())
+        features isa FeatureSet || throw(ArgumentError(
+            "features must be a FeatureSet such as FeatureSet(Lag(1), Lag(7)), got " *
+            "$(repr(features)). Wrap the features in FeatureSet(...)."))
+        freq isa Period || throw(ArgumentError(
+            "freq must be a Dates.Period such as Day(1) or Month(1), got " *
+            "$(repr(freq)); a sum such as Day(1) + Hour(1) is not accepted. Pass e.g. " *
+            "freq=Day(1)."))
+        freq > zero(freq) || throw(ArgumentError(
+            "freq must be a positive period, got $freq. Pass e.g. freq=Day(1) or " *
+            "freq=Month(1)."))
         model isa Type && model <: MLJModelInterface.Model && throw(ArgumentError(
             "model must be an MLJ model instance, got the type $(nameof(model)). Pass " *
             "an instance instead, e.g. $(nameof(model))()."))
@@ -131,15 +141,41 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol},X<:TargetTransf
                 "results ($(join(":" .* string.(RESERVED_OUTPUT_NAMES), ", "))). " *
                 "Rename the id column in your data."))
         end
-        new{M,S,I,X}(model, features, strategy, freq, target, time, id, transform)
+        return new{typeof(model),typeof(strategy),typeof(id),typeof(transform)}(
+            model, features, strategy, freq, target, time, id, transform)
     end
 end
 
-function Forecaster(model; features::FeatureSet, strategy::ForecastStrategy=Recursive(),
-                    freq::Period, target::Symbol=:y, time::Symbol=:ds,
-                    id::Union{Nothing,Symbol}=nothing,
-                    transform::TargetTransform=NoTransform())
-    return Forecaster(model, features, strategy, freq, target, time, id, transform)
+"""
+Fields `reconstruct` (and so `tune`) may override. The data-shape fields
+(`freq`, `target`, `time`, `id`) stay fixed: they describe the data, not the
+model.
+"""
+const TUNABLE_FIELDS = (:model, :features, :strategy, :transform)
+
+"""
+Throw unless every key in `ks` is tunable. A name that is not a field is
+unknown; a field outside `TUNABLE_FIELDS` describes the data.
+"""
+function _check_tunable(ks, lead, noun, subject)
+    list(v) = join(":" .* string.(v), ", ")
+    unknown = setdiff(ks, fieldnames(Forecaster))
+    isempty(unknown) || throw(ArgumentError(
+        "$lead unknown $noun$(length(unknown) == 1 ? "" : "s") $(list(unknown)); " *
+        "valid $(noun)s are $(list(TUNABLE_FIELDS))."))
+    data = setdiff(ks, TUNABLE_FIELDS)
+    isempty(data) || throw(ArgumentError(
+        "$subject$(length(data) == 1 ? "" : "s") $(list(data)) " *
+        "$(length(data) == 1 ? "describes" : "describe") the data and cannot be " *
+        "tuned; tunable $(noun)s are $(list(TUNABLE_FIELDS))."))
+    return nothing
+end
+
+# Loops fieldnames so a new field is never dropped.
+function reconstruct(fc::Forecaster; kwargs...)
+    _check_tunable(keys(kwargs), "cannot reconstruct Forecaster with", "field", "field")
+    vals = (; (f => get(kwargs, f, getfield(fc, f)) for f in fieldnames(Forecaster))...)
+    return Forecaster(vals.model; (f => v for (f, v) in pairs(vals) if f !== :model)...)
 end
 
 "Is this a panel (multi-series) specification?"

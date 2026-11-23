@@ -26,6 +26,14 @@ end
 ask(s::Fixed) = s.out
 tell!(::Fixed, candidate, score) = nothing
 
+"Proposes each candidate of `list` once, in order."
+mutable struct Replay <: TuningStrategy
+    list::Vector{NamedTuple}
+    i::Int
+end
+ask(s::Replay) = s.i < length(s.list) ? s.list[s.i += 1] : nothing
+tell!(::Replay, candidate, score) = nothing
+
 end
 
 @testset "tune" begin
@@ -250,7 +258,7 @@ end
     end
 
     @testset "a features value that is not a FeatureSet fails only its candidate" begin
-        msg = "ArgumentError: tune candidate key :features must be a FeatureSet such as " *
+        msg = "ArgumentError: features must be a FeatureSet such as " *
               "FeatureSet(Lag(1), Lag(7)), got Lag(1). Wrap the features in " *
               "FeatureSet(...)."
         for m in (DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
@@ -274,6 +282,102 @@ end
         end
         @test_throws "such as FeatureSet(Lag(1), Lag(7))" tune(
             base, df; grid=(features=[Lag(1)],), horizon=14, initial=90)
+    end
+
+    @testset "reconstruct round-trips every field and applies each change" begin
+        MLF = MachineLearningForecast
+        alt = (model=EvoTreeRegressor(nrounds=7), features=FeatureSet(Lag(3)),
+               strategy=Direct(2), freq=Hour(1), target=:v, time=:t, id=:uid,
+               transform=LastScale(3))
+        # A new field must be added here, or this test fails.
+        @test Set(keys(alt)) == Set(fieldnames(Forecaster))
+        @test Set(MLF.TUNABLE_FIELDS) ⊆ Set(fieldnames(Forecaster))
+        for m in (TestModels.LinAR(1.0, 0.0),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
+                  EvoTreeRegressor(nrounds=5)),
+            id in (nothing, :unique_id)
+            fc = Forecaster(m; features=FeatureSet(Lag(1), Lag(2)), strategy=Direct(3),
+                            freq=Month(1), target=:z, time=:when, id,
+                            transform=LastScale(12))
+            same = MLF.reconstruct(fc)
+            @test same isa Forecaster
+            for f in fieldnames(Forecaster)
+                @test getfield(same, f) === getfield(fc, f)
+            end
+            for f in fieldnames(Forecaster)
+                if f in MLF.TUNABLE_FIELDS
+                    changed = MLF.reconstruct(fc; f => alt[f])
+                    for g in fieldnames(Forecaster)
+                        @test getfield(changed, g) === (g === f ? alt[f] : getfield(fc, g))
+                    end
+                else
+                    @test_throws ArgumentError MLF.reconstruct(fc; f => alt[f])
+                end
+            end
+            both = MLF.reconstruct(fc; model=alt.model, strategy=alt.strategy)
+            @test both.model === alt.model && both.strategy === alt.strategy
+            @test both.features === fc.features && both.transform === fc.transform
+            # The prototype is never mutated.
+            @test fc.strategy == Direct(3) && fc.model === m
+        end
+    end
+
+    @testset "reconstruct rejects keys that are not tunable" begin
+        MLF = MachineLearningForecast
+        fc = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                        freq=Day(1))
+        tunable = ":model, :features, :strategy, :transform"
+        @test_throws ArgumentError MLF.reconstruct(fc; bogus=1)
+        @test_throws "cannot reconstruct Forecaster with unknown field :bogus; valid " *
+                     "fields are $tunable." MLF.reconstruct(fc; bogus=1)
+        for key in (:freq, :target, :time, :id)
+            @test_throws ArgumentError MLF.reconstruct(fc; NamedTuple{(key,)}((1,))...)
+            @test_throws "field :$key describes the data and cannot be tuned; " *
+                         "tunable fields are $tunable." (
+                MLF.reconstruct(fc; NamedTuple{(key,)}((1,))...))
+        end
+        @test_throws "fields :freq, :id describe the data and cannot be tuned; " *
+                     "tunable fields are" MLF.reconstruct(fc; freq=Day(2), id=:u)
+        # A name that is not a field is reported as unknown, alone.
+        @test_throws "unknown field :bogus; valid fields are" (
+            MLF.reconstruct(fc; bogus=1, freq=Day(2)))
+        @test_throws "unknown fields :bogus, :other; valid fields are" (
+            MLF.reconstruct(fc; bogus=1, other=2))
+        @test_throws "grid key :freq describes the data and cannot be tuned; tunable " *
+                     "keys are $tunable." tune(
+            fc, (ds=t, y=y); grid=(freq=[Day(1), Day(2)],), horizon=14, initial=90)
+        @test_throws "grid keys :target, :id describe the data and cannot be tuned" tune(
+            fc, (ds=t, y=y); grid=(target=[:y], id=[:u]), horizon=14, initial=90)
+        @test_throws "grid has unknown key :bogus; valid keys are $tunable." tune(
+            fc, (ds=t, y=y); grid=(bogus=[1],), horizon=14, initial=90)
+    end
+
+    @testset "an ask candidate with a data field fails only that candidate" begin
+        for m in (DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
+                  EvoTreeRegressor(nrounds=5))
+            fcm = Forecaster(m; features=FeatureSet(Lag(1)), freq=Day(1))
+            msg = "ArgumentError: field :freq describes the data and cannot be tuned; " *
+                  "tunable fields are :model, :features, :strategy, :transform."
+            r = tune(fcm, df; tuner=ThirdPartyTuning.Replay(
+                         NamedTuple[(freq=Day(2),), (strategy=Recursive(),)], 0),
+                     max_evals=2, horizon=14, initial=90)
+            @test ncand(r) == 2
+            @test ismissing(r.table.mean_score[1]) && r.table.error[1] == msg
+            @test ismissing(r.table.error[2]) && isfinite(r.table.mean_score[2])
+            @test r.best.freq == Day(1) && r.best.strategy == Recursive()
+        end
+    end
+
+    @testset "reconstruct re-runs the constructor checks" begin
+        fc = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                        freq=Day(1))
+        @test_throws "the feature set produces a column named :y, which is the target " *
+                     "column" MachineLearningForecast.reconstruct(
+            fc; features=FeatureSet(Lag(1), Exogenous(:y)))
+        @test_throws "model must be an MLJ model instance" (
+            MachineLearningForecast.reconstruct(fc; model="not a model"))
+        @test_throws "got Lag(1). Wrap the features" MachineLearningForecast.reconstruct(
+            fc; features=Lag(1))
     end
 
     @testset "metric must be one function, checked before any fit" begin
