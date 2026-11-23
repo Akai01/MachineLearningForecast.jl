@@ -7,14 +7,15 @@ forecasts of `z` back. Its state is fitted on that series' own training history
 only, so it never sees the forecast window, and [`backtest`](@ref) refits it in
 every fold.
 
-A transform implements two methods, public but not exported, so import them
-first:
+A transform implements two methods and may declare a third, public but not
+exported, so import them first:
 
 ```julia
-import MachineLearningForecast: fit_transform, untransform
+import MachineLearningForecast: fit_transform, untransform, dropped_rows
 
 fit_transform(t, y)        # -> (z, state); z may be shorter, aligned to y's end
 untransform(t, ẑ, state)   # -> the forecasts of y for the forecasts ẑ of z
+dropped_rows(t)            # -> the rows z is shorter by (optional, default 0)
 ```
 
 Features are computed on `z`, and the first `length(y) - length(z)` training
@@ -62,6 +63,37 @@ untransform(LastScale(3), [1.5, 1.5], state)   # [9.0, 9.0]
 ```
 """
 function untransform end
+
+"""
+    dropped_rows(t::TargetTransform) -> Int
+
+How many rows `fit_transform(t, y)` removes from the start of a series: `z` has
+`length(y) - dropped_rows(t)` values when `y` is longer than that. An optional
+part of the [`TargetTransform`](@ref) contract, `0` by default. Declare it when
+your transform shortens the series. `fit` then checks each series, as the user
+gave it, against the feature set's history rows plus `dropped_rows(t)` before it
+calls `fit_transform`, so `fit_transform` never sees a series that is about to be
+skipped, and a panel skips its short series instead of failing on them. A
+transform that drops rows without declaring them is checked after it ran, as
+before. It is not exported, so import it:
+`import MachineLearningForecast: dropped_rows`.
+
+`Difference(l)` drops `l` rows and `LogRatio(w)` drops `w`, as lag-`m`
+differencing loses its first `m` observations; a chain drops the sum of its
+parts (Box, Jenkins, Reinsel and Ljung 2015, ch. 4).
+
+# Example
+```julia
+import MachineLearningForecast: dropped_rows
+
+dropped_rows(Difference(12))                                  # 12
+dropped_rows(TransformChain(Difference(1), Difference(12)))   # 13
+dropped_rows(LastScale(3))                                    # 0
+```
+"""
+function dropped_rows end
+
+dropped_rows(::TargetTransform) = 0
 
 """
     NoTransform()
@@ -226,6 +258,8 @@ struct LogRatio <: TargetTransform
     end
 end
 
+dropped_rows(t::LogRatio) = t.window
+
 function fit_transform(t::LogRatio, y::AbstractVector{Float64})
     i = findfirst(≤(0), y)
     i === nothing || throw(ArgumentError(
@@ -272,6 +306,8 @@ struct Difference <: TargetTransform
     end
 end
 
+dropped_rows(t::Difference) = t.lag
+
 fit_transform(t::Difference, y::AbstractVector{Float64}) =
     (y[(t.lag + 1):end] .- y[1:(end - t.lag)], y[max(1, end - t.lag + 1):end])
 
@@ -306,6 +342,8 @@ struct TransformChain{T<:Tuple} <: TargetTransform
         return new{typeof(ts)}(ts)
     end
 end
+
+dropped_rows(c::TransformChain) = sum(dropped_rows, c.transforms)
 
 function fit_transform(c::TransformChain, y::AbstractVector{Float64})
     states = Any[]

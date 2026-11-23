@@ -147,6 +147,51 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol},X<:TargetTransf
 end
 
 """
+    minhistory(fc::Forecaster) -> Int
+
+The number of rows a series must have more than for `fc` to train on it: the
+feature set's [`minhistory`](@ref MachineLearningForecast.minhistory) plus the
+rows the target transform [drops](@ref MachineLearningForecast.dropped_rows).
+`fit` skips a panel series with this many rows or fewer, and a `backtest`
+`initial` must exceed it.
+
+# Example
+```julia
+import MachineLearningForecast: minhistory
+
+fc = Forecaster(model; features=FeatureSet(Lag(1)), freq=Day(1),
+                transform=TransformChain(Difference(12), LastScale(3)))
+minhistory(fc)   # 13: one history row plus the 12 the transform drops
+```
+"""
+minhistory(fc::Forecaster) = minhistory(fc.features) + dropped_rows(fc.transform)
+
+# Both too-short errors say this the same way.
+function _needs_clause(fc::Forecaster, what)
+    mh, d = minhistory(fc.features), dropped_rows(fc.transform)
+    d == 0 && return "the feature set needs $mh history rows before the first usable " *
+                     what
+    return "the feature set needs $mh history rows and the transform drops $d, so a " *
+           "series needs at least $(mh + d + 1) rows"
+end
+
+_transform_hint(fc::Forecaster) = iszero(dropped_rows(fc.transform)) ? "" :
+                                  " or the transform's lag/window"
+
+_reduce_hint(fc::Forecaster) = "lags/windows" * _transform_hint(fc)
+
+# Backtest texts must say what the transform adds.
+function _history_name(fc::Forecaster)
+    d = dropped_rows(fc.transform)
+    return d == 0 ? "the feature set's minimum history" :
+           "the feature set's minimum history plus the $d rows the transform drops"
+end
+
+_history_who(fc::Forecaster) = iszero(dropped_rows(fc.transform)) ?
+                               "the feature set needs" :
+                               "the feature set and transform need"
+
+"""
 Fields `reconstruct` (and so `tune`) may override. The data-shape fields
 (`freq`, `target`, `time`, `id`) stay fixed: they describe the data, not the
 model.
@@ -253,11 +298,15 @@ end
 function _collect(f, xs)
     out = [f(first(xs))]
     for i in 2:length(xs)
-        v = f(xs[i])
-        typeof(v) <: eltype(out) ||
-            (out = Vector{Base.promote_typejoin(eltype(out), typeof(v))}(out))
-        push!(out, v)
+        out = _push_widen!(out, f(xs[i]))
     end
+    return out
+end
+
+function _push_widen!(out, v)
+    typeof(v) <: eltype(out) ||
+        (out = Vector{Base.promote_typejoin(eltype(out), typeof(v))}(out))
+    push!(out, v)
     return out
 end
 
@@ -308,16 +357,20 @@ function _warn_short_series(fc::Forecaster{M,S,Symbol}, s, frames, lens) where {
     return nothing
 end
 
-_direct_rows_error(fc::Forecaster{M,S,Nothing}, s, nmax) where {M,S} = ArgumentError(
-    "not enough data for Direct($(s.max_horizon)): after dropping the feature set's " *
-    "$(minhistory(fc.features)) history rows, only $nmax training rows remain, but the " *
-    "target must be shifted up to $(s.max_horizon - 1) steps. Provide at least " *
-    "$(minhistory(fc.features) + s.max_horizon) rows, reduce max_horizon, or reduce " *
-    "lags/windows.")
+function _direct_rows_error(fc::Forecaster{M,S,Nothing}, s, nmax) where {M,S}
+    d = dropped_rows(fc.transform)
+    drop = d == 0 ? "" : "the transform's $d rows and "
+    return ArgumentError(
+        "not enough data for Direct($(s.max_horizon)): after dropping $(drop)the " *
+        "feature set's $(minhistory(fc.features)) history rows, only $nmax training " *
+        "rows remain, but the target must be shifted up to $(s.max_horizon - 1) " *
+        "steps. Provide at least $(minhistory(fc) + s.max_horizon) rows, reduce " *
+        "max_horizon, or reduce $(_reduce_hint(fc)).")
+end
 _direct_rows_error(fc::Forecaster{M,S,Symbol}, s, nmax) where {M,S} = ArgumentError(
     "not enough data for Direct($(s.max_horizon)): no series has enough rows to train " *
     "the step-$(nmax + 1) model. Shorten max_horizon, provide longer series, or reduce " *
-    "lags/windows.")
+    "$(_reduce_hint(fc)).")
 
 _predict(t::TrainedModel, X) = MLJModelInterface.predict(
     t.model, t.fitresult, MLJModelInterface.reformat(t.model, X)...)
@@ -439,7 +492,20 @@ function _prepare_series(fc::Forecaster, id, sub::NamedTuple, rows)
     end
 end
 
-_usable_series(::Forecaster{M,S,Nothing}, prepared) where {M,S} = prepared
+# Check the raw length before a transform can fail.
+function _prepare_all(fc::Forecaster{M,S,Nothing}, groups) where {M,S}
+    id, sub, rows = only(groups)
+    n = nrows(sub)
+    if n ≤ minhistory(fc)
+        # Report a bad target first, as before.
+        target_vector(sub, fc.target, rows)
+        throw(ArgumentError(
+            "not enough data: $(_needs_clause(fc, "training row")), but the data has " *
+            "only $n rows. Provide at least $(minhistory(fc) + 1) rows or reduce " *
+            "$(_reduce_hint(fc))."))
+    end
+    return [_prepare_series(fc, id, sub, rows)], Tuple{Any,Int}[]
+end
 
 # A transform can empty a single series: no origin.
 _fit_origin(::Forecaster{M,S,Nothing}, usable) where {M,S} = nothing
@@ -458,8 +524,8 @@ end
 
 function _fit_spec(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
     groups = _series_groups(fc, tbl, base)
-    prepared = _collect(g -> _prepare_series(fc, g...), groups)
-    usable = _usable_series(fc, prepared)
+    usable, short = _prepare_all(fc, groups)
+    _warn_short(fc, short)
     origin = _fit_origin(fc, usable)
     frames = _collect(p -> _fit_series(fc, p, origin), usable)
     models = _train_models(fc, fc.strategy, frames)

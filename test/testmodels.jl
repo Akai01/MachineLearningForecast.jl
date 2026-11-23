@@ -225,6 +225,44 @@ MachineLearningForecast.untransform(::VaryingState, z::AbstractVector{Float64},
 MachineLearningForecast.untransform(::VaryingState, z::AbstractVector{Float64},
                                     m::Float64) = z .+ m
 
+"""
+A transform that drops its first `k` rows and declares it with `dropped_rows`.
+It refuses a series of `k` rows or fewer, as `LastScale` does on an empty
+series, so a test sees whether `fit_transform` ran on a series that should be
+skipped.
+"""
+struct FussyDrop <: MachineLearningForecast.TargetTransform
+    k::Int
+end
+function MachineLearningForecast.fit_transform(t::FussyDrop, y::AbstractVector{Float64})
+    length(y) > t.k || throw(ArgumentError(
+        "FussyDrop($(t.k)) was given $(length(y)) rows"))
+    return y[(t.k + 1):end], nothing
+end
+MachineLearningForecast.untransform(::FussyDrop, z::AbstractVector{Float64},
+                                    ::Nothing) = collect(z)
+MachineLearningForecast.dropped_rows(t::FussyDrop) = t.k
+
+"A transform that drops its first `k` rows without declaring it."
+struct QuietDrop <: MachineLearningForecast.TargetTransform
+    k::Int
+end
+MachineLearningForecast.fit_transform(t::QuietDrop, y::AbstractVector{Float64}) =
+    (y[(t.k + 1):end], nothing)
+MachineLearningForecast.untransform(::QuietDrop, z::AbstractVector{Float64},
+                                    ::Nothing) = collect(z)
+
+"A transform that drops `k` rows but declares only `d` of them."
+struct UnderDeclared <: MachineLearningForecast.TargetTransform
+    k::Int
+    d::Int
+end
+MachineLearningForecast.fit_transform(t::UnderDeclared, y::AbstractVector{Float64}) =
+    (y[(t.k + 1):end], nothing)
+MachineLearningForecast.untransform(::UnderDeclared, z::AbstractVector{Float64},
+                                    ::Nothing) = collect(z)
+MachineLearningForecast.dropped_rows(t::UnderDeclared) = t.d
+
 end
 
 # Test-side views of the feature contract.

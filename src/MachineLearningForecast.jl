@@ -14,8 +14,9 @@ interface: any MLJ `Deterministic` regressor is a valid base model, and a
   [`NoTransform`](@ref), [`MeanScale`](@ref), [`LastScale`](@ref),
   [`Deseasonalize`](@ref), [`LogRatio`](@ref), [`Difference`](@ref),
   [`TransformChain`](@ref); your own subtype [`TargetTransform`](@ref) implements
-  [`fit_transform`](@ref) and [`untransform`](@ref) (public, not exported:
-  `import MachineLearningForecast: fit_transform, untransform`).
+  [`fit_transform`](@ref), [`untransform`](@ref) and, if it shortens the series,
+  [`dropped_rows`](@ref) (public, not exported:
+  `import MachineLearningForecast: fit_transform, untransform, dropped_rows`).
 - Panel (multi-series) forecasting: set `id` on [`Forecaster`](@ref) to fit
   one global model across many series ([`nseries`](@ref), [`SeriesState`](@ref)).
 - [`fit`](@ref) / [`forecast`](@ref) as a functional pair; [`backtest`](@ref)

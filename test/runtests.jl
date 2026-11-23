@@ -24,6 +24,7 @@ using .FeatureHelpers
     include("test_validation.jl")
     include("test_panel.jl")
     include("test_transforms.jl")
+    include("test_dropped_rows.jl")
     include("test_integration.jl")
     include("test_leakage.jl")
 

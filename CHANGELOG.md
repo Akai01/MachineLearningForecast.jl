@@ -8,6 +8,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `dropped_rows(t)`, an optional public trait of a `TargetTransform` (not
+  exported, like `fit_transform` and `untransform`): the number of rows the
+  transform removes from the start of a series, `0` by default. `Difference(l)`
+  drops `l`, `LogRatio(w)` drops `w`, a `TransformChain` the sum of its parts.
+  A custom transform that shortens the series declares it.
+- `minhistory(fc)` for a `Forecaster`: the feature set's `minhistory` plus
+  `dropped_rows(fc.transform)`: a series needs more rows than this. `fit`,
+  `backtest` and the `Direct` row checks use it.
 - `rmsse(y, ŷ; y_train, m=1)`: the root mean squared scaled error, the RMSE
   divided by the root of the in-sample mean squared (seasonal) naive error
   (M5's RMSSE, except that M5 computes the scale only from the first non-zero
@@ -101,6 +109,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The "too short" errors and the panel skip warning count the rows you gave, not
+  the rows left after the transform, and say how many rows the transform drops:
+  `fit` ("not enough data", "no series has enough rows to train on",
+  "skipping ... series with fewer than ... rows"), `backtest` (`initial` and
+  `windows`, single series and panel) and the single-series `Direct` row check.
+  Without a row-dropping transform the texts are unchanged.
 - A single series is fitted through the same code as a panel of one series; fits
   are unchanged. A panel `Direct` fit that has too few rows to train every step
   model now throws before it trains any of them (the message is unchanged).
@@ -300,6 +314,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A panel with a series too short for a row-dropping transform (for example
+  `TransformChain(Difference(12), LastScale(3))` and a 10-row series) aborted
+  the whole fit with a `NaN` scale error. The series is now skipped with the
+  usual warning, because `fit` checks the length you gave against
+  `minhistory(fc)` before it calls `fit_transform`. A single series of 12 or 13
+  rows gets the "not enough data" error, not the `NaN` or "only 1 rows" one. A
+  custom transform that drops rows without declaring `dropped_rows` is checked
+  after the transform, as before. For the same reason a transform that would
+  throw on a short series (`MeanScale` on a zero-mean series, `LogRatio` on
+  non-positive values) no longer aborts a panel fit when that series is skipped.
 - `fitted.y_history`, `.t_last`, `.t_start`, `.n_train`, `.z_history` and
   `.transform_state` throw on every panel `FittedForecaster`, including a panel
   fitted with `id=` on a single series, as the `FittedForecaster` docstring says;

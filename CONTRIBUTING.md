@@ -133,15 +133,24 @@ and not `ctx.y` is `AtTarget`: subtype `TimeFeature` or `ExogenousFeature`, or d
 
 ## Adding a target transform
 
-A transform is a subtype of `TargetTransform` and implements two methods, which are
-public but not exported, so import them:
+A transform is a subtype of `TargetTransform` and implements two methods, and
+declares a third when it shortens the series. They are public but not exported, so
+import them:
 
 ```julia
-import MachineLearningForecast: fit_transform, untransform
+import MachineLearningForecast: fit_transform, untransform, dropped_rows
 
 fit_transform(t, y)        # -> (z, state): z may be shorter, aligned to y's end
 untransform(t, ẑ, state)   # -> the forecasts of y for the forecasts ẑ of z
+dropped_rows(t)            # -> how many rows z is shorter by (default 0)
 ```
+
+`dropped_rows` lets `fit` skip a series too short for the transform before it calls
+`fit_transform`; without it, such a series is checked after the transform ran.
+It must equal `length(y) - length(z)` exactly for a series longer than it:
+declaring too many silently skips series that could train, and declaring too few
+falls back to the check after the transform. Test that equality, as
+`test/test_dropped_rows.jl` does for the built-ins.
 
 `fit_transform` sees one series' training history only, and its `state` must
 hold everything `untransform` needs. Add a test that `untransform` recovers a

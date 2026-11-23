@@ -136,8 +136,10 @@ fc = Forecaster(EvoTreeRegressor(); freq=Month(1), id=:unique_id,
 | `TransformChain(t...)` | apply in order, undo in reverse |
 
 Your own transform subtypes `TargetTransform` and implements
-`fit_transform(t, y) -> (z, state)` and `untransform(t, ẑ, state)`. Both are public
-but not exported: `import MachineLearningForecast: fit_transform, untransform`.
+`fit_transform(t, y) -> (z, state)` and `untransform(t, ẑ, state)`, and, when it
+shortens the series, declares `dropped_rows(t)` (default 0). All three are public
+but not exported: `import MachineLearningForecast: fit_transform, untransform,
+dropped_rows`.
 
 ## Strategies
 

@@ -469,7 +469,11 @@
             fct = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
                              freq=Day(1), transform=tr)
             tbl = (ds=collect(d1:Day(1):d1 + Day(k - 1)), y=Float64.(1:k))
-            @test_throws "the data has only 0 rows" fit(fct, tbl)
+            @test_throws("the feature set needs 1 history rows and the transform " *
+                         "drops $k, so a series needs at least $(k + 2) rows, but " *
+                         "the data has only $k rows. Provide at least $(k + 2) rows " *
+                         "or reduce lags/windows or the transform's lag/window.",
+                         fit(fct, tbl))
         end
         model = TestModels.LinAR(0.5, 1.0)
         tbl = (ds=collect(d1:Day(1):d1 + Day(19)), y=Float64.(1:20))

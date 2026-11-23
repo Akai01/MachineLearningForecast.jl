@@ -62,30 +62,43 @@ end
 _series_groups(fc::Forecaster{M,S,Symbol}, tbl::NamedTuple,
                base=1:nrows(tbl)) where {M,S} = panel_groups(fc, tbl, base)
 
-# Skip short series so the rest can still train.
-function _usable_series(fc::Forecaster{M,S,Symbol}, prepared) where {M,S}
-    mh = minhistory(fc.features)
-    usable = eltype(prepared)[]
+# One pass in table order names the first bad series.
+function _prepare_all(fc::Forecaster{M,S,Symbol}, groups) where {M,S}
+    mh = minhistory(fc)
+    usable = nothing
     short = Tuple{Any,Int}[]
-    for p in prepared
-        n = nrows(p.tz)
-        n ≤ mh ? push!(short, (p.id, n)) : push!(usable, p)
+    for (id, sub, rows) in groups
+        if nrows(sub) ≤ mh
+            # The raw length rules it out, so no transform sees it.
+            _in_series(() -> target_vector(sub, fc.target, rows), fc, id)
+            push!(short, (id, nrows(sub)))
+            continue
+        end
+        p = _prepare_series(fc, id, sub, rows)
+        if nrows(p.tz) ≤ minhistory(fc.features)
+            push!(short, (id, nrows(p.tz)))
+        else
+            usable = usable === nothing ? [p] : _push_widen!(usable, p)
+        end
     end
-    if isempty(usable)
-        throw(ArgumentError(
-            "no series has enough rows to train on: the feature set needs $mh " *
-            "history rows before the first usable row, and the longest series has " *
-            "$(maximum(last, short; init=0)). Provide longer series or reduce " *
-            "lags/windows."))
-    end
-    if !isempty(short)
-        names = join((string(fc.id, "=", repr(k), " (", n, " rows)")
-                      for (k, n) in first(short, 5)), ", ")
-        more = length(short) > 5 ? ", …" : ""
-        @warn "skipping $(length(short)) series with fewer than $(mh + 1) rows, " *
-              "which is the minimum the feature set needs: $names$more"
-    end
-    return usable
+    usable === nothing && throw(ArgumentError(
+        "no series has enough rows to train on: $(_needs_clause(fc, "row")), and " *
+        "the longest series has $(maximum(last, short; init=0)). Provide longer " *
+        "series or reduce $(_reduce_hint(fc))."))
+    return usable, short
+end
+
+function _warn_short(fc::Forecaster, short)
+    isempty(short) && return nothing
+    d = dropped_rows(fc.transform)
+    names = join((string(fc.id, "=", repr(k), " (", n, " rows)")
+                  for (k, n) in first(short, 5)), ", ")
+    more = length(short) > 5 ? ", …" : ""
+    need = _history_who(fc) * (d == 0 ? "" : " ($(minhistory(fc.features)) history " *
+                                             "rows plus $d dropped by the transform)")
+    @warn "skipping $(length(short)) series with fewer than $(minhistory(fc) + 1) " *
+          "rows, which is the minimum $need: $names$more"
+    return nothing
 end
 
 _fit_origin(fc::Forecaster{M,S,Symbol}, usable) where {M,S} =
@@ -209,14 +222,15 @@ function _steps_by_id(ids::AbstractVector)
 end
 
 # One cutoff per series and fold: the last timestamp it trains on.
-function _panel_cuts(s::FromStart, fc, groups, t_all, horizon, mh)
+function _panel_cuts(s::FromStart, fc, groups, t_all, horizon)
+    mh = minhistory(fc)
     grid = sort!(unique(t_all))
     ngrid = length(grid)
     s.initial > mh || throw(ArgumentError(
-        "backtest initial=$(s.initial) must exceed the feature set's minimum history " *
+        "backtest initial=$(s.initial) must exceed $(_history_name(fc)) " *
         "($mh timestamps) so the first training window has at least one usable row. " *
         "For a panel, initial counts distinct timestamps, not rows. Pass " *
-        "initial=$(mh + 1) or more, or reduce lags/windows."))
+        "initial=$(mh + 1) or more, or reduce $(_reduce_hint(fc))."))
     origins = s.initial:s.step:(ngrid - horizon)
     isempty(origins) && throw(ArgumentError(
         "no complete backtest folds: the panel spans $ngrid distinct timestamps, " *
@@ -226,14 +240,15 @@ function _panel_cuts(s::FromStart, fc, groups, t_all, horizon, mh)
     return [Dict(key => grid[o] for key in keys_) for o in origins]
 end
 
-function _panel_cuts(s::FromEnd, fc, groups, t_all, horizon, mh)
+function _panel_cuts(s::FromEnd, fc, groups, t_all, horizon)
+    mh = minhistory(fc)
     longest = maximum(nrows(sub) for (_, sub, _) in groups)
     first = longest - horizon - (s.windows - 1) * s.step
     first > mh || throw(ArgumentError(
         "backtest windows=$(s.windows) with step=$(s.step) and horizon=$horizon " *
         "would train its first fold on at most $first rows of the longest series " *
-        "($longest rows), but the feature set needs more than $mh. Reduce windows, " *
-        "step or horizon, or provide longer series."))
+        "($longest rows), but $(_history_who(fc)) more than $mh. Reduce windows, " *
+        "step or horizon$(_transform_hint(fc)), or provide longer series."))
     # A series too short for a fold sits that fold out.
     return [Dict(key => sub[fc.time][c] for (key, sub, _) in groups
                  for c in (nrows(sub) - horizon - (s.windows - w) * s.step,) if c ≥ 1)
@@ -258,7 +273,7 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, scheme, metri
     ids = tbl[fc.id]
     t_all = tbl[fc.time]
     y_all = target_vector(tbl, fc.target)
-    cuts = _panel_cuts(scheme, fc, groups, t_all, horizon, minhistory(fc.features))
+    cuts = _panel_cuts(scheme, fc, groups, t_all, horizon)
     exogcols = exogenous_columns(fc.features)
 
     actual = Dict{Tuple{Any,Any},Float64}()

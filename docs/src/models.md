@@ -206,7 +206,10 @@ puts the season back. [`fit_transform`](@ref MachineLearningForecast.fit_transfo
 with `Deseasonalize(12)` does the adjustment, with the same seasonal indices as
 step 2 of the transform, since they do not depend on the level, and
 [`untransform`](@ref MachineLearningForecast.untransform) the inverse. Neither is
-exported, so the code imports them.
+exported, so the code imports them. A transform of your own that drops rows,
+as `LogRatio` and `Difference` do, declares them with
+[`dropped_rows`](@ref MachineLearningForecast.dropped_rows), so that `fit` skips
+a series too short for it instead of failing on it.
 
 ```julia
 import MachineLearningForecast: fit_transform, untransform

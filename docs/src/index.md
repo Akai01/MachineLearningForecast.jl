@@ -102,6 +102,7 @@ ExogenousFeature
 TargetTransform
 MachineLearningForecast.fit_transform
 MachineLearningForecast.untransform
+MachineLearningForecast.dropped_rows
 NoTransform
 MeanScale
 LastScale

@@ -81,11 +81,12 @@ end
 _scheme_kwargs(s::FromStart) = (initial=s.initial, step=s.step)
 _scheme_kwargs(s::FromEnd) = (windows=s.windows, step=s.step)
 
-function _origins(s::FromStart, n, horizon, mh)
+function _origins(s::FromStart, n, horizon, fc)
+    mh = minhistory(fc)
     s.initial > mh || throw(ArgumentError(
-        "backtest initial=$(s.initial) must exceed the feature set's minimum history " *
+        "backtest initial=$(s.initial) must exceed $(_history_name(fc)) " *
         "($mh rows) so the first training window has at least one usable row. " *
-        "Pass initial=$(mh + 1) or more, or reduce lags/windows."))
+        "Pass initial=$(mh + 1) or more, or reduce $(_reduce_hint(fc))."))
     origins = s.initial:s.step:(n - horizon)
     isempty(origins) && throw(ArgumentError(
         "no complete backtest folds: data has $n rows, but the first fold needs " *
@@ -94,12 +95,14 @@ function _origins(s::FromStart, n, horizon, mh)
     return origins
 end
 
-function _origins(s::FromEnd, n, horizon, mh)
+function _origins(s::FromEnd, n, horizon, fc)
+    mh = minhistory(fc)
     first = n - horizon - (s.windows - 1) * s.step
     first > mh || throw(ArgumentError(
         "backtest windows=$(s.windows) with step=$(s.step) and horizon=$horizon " *
-        "would train its first fold on $first of the $n rows, but the feature set " *
-        "needs more than $mh. Reduce windows, step or horizon, or provide more data."))
+        "would train its first fold on $first of the $n rows, but $(_history_who(fc)) " *
+        "more than $mh. Reduce windows, step or horizon$(_transform_hint(fc)), or " *
+        "provide more data."))
     return first:s.step:(n - horizon)
 end
 
@@ -203,7 +206,7 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, scheme,
     t_all = require_column(tbl, fc.time, "time")
     validate_time_column(t_all, fc.time, fc.freq)
     y_all = target_vector(tbl, fc.target)
-    origins = _origins(scheme, nrows(tbl), horizon, minhistory(fc.features))
+    origins = _origins(scheme, nrows(tbl), horizon, fc)
     exogcols = exogenous_columns(fc.features)
 
     T = eltype(t_all)
