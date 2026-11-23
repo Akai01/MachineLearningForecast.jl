@@ -2,6 +2,7 @@
 module TestModels
 
 using MLJModelInterface
+import MachineLearningForecast
 using Tables
 import Statistics
 const MMI = MLJModelInterface
@@ -160,6 +161,19 @@ MMI.target_scitype(::Type{KeepPredict}) = AbstractVector{MMI.Continuous}
 "Declares no input scitype, so it is Unknown."
 mutable struct NoInputTrait <: MMI.Deterministic end
 MMI.target_scitype(::Type{NoInputTrait}) = AbstractVector{MMI.Continuous}
+
+"""
+A transform whose state type varies per series: a series starting above 50 is
+left as is (`z === y`, state `nothing`), any other is shifted down by 5
+(state `5.0`).
+"""
+struct VaryingState <: MachineLearningForecast.TargetTransform end
+MachineLearningForecast.fit_transform(::VaryingState, y::AbstractVector{Float64}) =
+    y[1] > 50 ? (y, nothing) : (y .- 5.0, 5.0)
+MachineLearningForecast.untransform(::VaryingState, z::AbstractVector{Float64},
+                                    ::Nothing) = collect(z)
+MachineLearningForecast.untransform(::VaryingState, z::AbstractVector{Float64},
+                                    m::Float64) = z .+ m
 
 end
 

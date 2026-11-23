@@ -62,7 +62,8 @@ minhistory(fs::FeatureSet) = maximum(minhistory.(fs.features); init=0)
 The [`anchor`](@ref) of every column of [`outputnames`](@ref)`(fs)`, in the same
 order: [`AtOrigin`](@ref) columns describe the target's own history and belong to
 the *feature* row, [`AtTarget`](@ref) columns (time, exogenous) belong to the *target*
-row. `Direct` fitting shifts the two groups independently, see `src/direct.jl`.
+row. `Direct` fitting shifts the two groups independently, see `_train_models` in
+`src/forecaster.jl`.
 
 # Example
 ```julia

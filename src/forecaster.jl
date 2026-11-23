@@ -219,6 +219,13 @@ struct SeriesState
     step0::Int
 end
 
+"What fit builds per series: its state and its training rows."
+struct SeriesFrame{D<:NamedTuple}
+    state::SeriesState
+    X::D
+    y::Vector{Float64}
+end
+
 """
     TrainedModel{M,R}
 
@@ -241,6 +248,61 @@ function _train(prototype::MLJModelInterface.Model, X, y)
                                             MLJModelInterface.reformat(model, X, y)...)
     return TrainedModel(model, fitresult)
 end
+
+# A comprehension costs ~50 ms of first-call compile.
+function _collect(f, xs)
+    out = [f(first(xs))]
+    for i in 2:length(xs)
+        v = f(xs[i])
+        typeof(v) <: eltype(out) ||
+            (out = Vector{Base.promote_typejoin(eltype(out), typeof(v))}(out))
+        push!(out, v)
+    end
+    return out
+end
+
+# One series: its frame as is, no copy.
+_stack_frames(::Forecaster{M,S,Nothing}, frames) where {M,S} =
+    (only(frames).X, only(frames).y)
+_stack_frames(::Forecaster{M,S,Symbol}, frames) where {M,S} =
+    (_vcat_frames([fr.X for fr in frames]), reduce(vcat, [fr.y for fr in frames]))
+
+# One series: ranges, no index vectors.
+_pair_index(::Forecaster{M,S,Nothing}, lens, i) where {M,S} =
+    (1:(only(lens) - i + 1), i:only(lens))
+_pair_index(::Forecaster{M,S,Symbol}, lens, i) where {M,S} = _pair_vectors(lens, i)
+
+function _train_models(fc::Forecaster, ::Recursive, frames)
+    X, y = _stack_frames(fc, frames)
+    return [_train(fc.model, X, y)]
+end
+
+function _train_models(fc::Forecaster, s::Direct, frames)
+    lens = _collect(fr -> length(fr.y), frames)
+    nmax = maximum(lens)
+    nmax ≥ s.max_horizon || throw(_direct_rows_error(fc, s, nmax))
+    anch = anchors(fc.features)
+    X, y = _stack_frames(fc, frames)
+    return map(1:s.max_horizon) do i
+        from, to = _pair_index(fc, lens, i)
+        cols = Vector{Vector{Float64}}(undef, length(X))
+        for c in eachindex(cols)
+            cols[c] = values(X)[c][_gather_index(anch[c], from, to)]
+        end
+        _train(fc.model, NamedTuple{keys(X)}(Tuple(cols)), y[to])
+    end
+end
+
+_direct_rows_error(fc::Forecaster{M,S,Nothing}, s, nmax) where {M,S} = ArgumentError(
+    "not enough data for Direct($(s.max_horizon)): after dropping the feature set's " *
+    "$(minhistory(fc.features)) history rows, only $nmax training rows remain, but the " *
+    "target must be shifted up to $(s.max_horizon - 1) steps. Provide at least " *
+    "$(minhistory(fc.features) + s.max_horizon) rows, reduce max_horizon, or reduce " *
+    "lags/windows.")
+_direct_rows_error(fc::Forecaster{M,S,Symbol}, s, nmax) where {M,S} = ArgumentError(
+    "not enough data for Direct($(s.max_horizon)): no series has enough rows to train " *
+    "the step-$(nmax + 1) model. Shorten max_horizon, provide longer series, or reduce " *
+    "lags/windows.")
 
 _predict(t::TrainedModel, X) = MLJModelInterface.predict(
     t.model, t.fitresult, MLJModelInterface.reformat(t.model, X)...)
@@ -288,13 +350,15 @@ const _SERIES_PROPS = (:y_history, :t_last, :t_start, :n_train, :z_history,
 
 function Base.getproperty(f::FittedForecaster, name::Symbol)
     name in _SERIES_PROPS || return getfield(f, name)
-    st = getfield(f, :series)
-    length(st) == 1 || throw(ArgumentError(
-        "`fitted.$name` is single-series state, but this forecaster was fit on " *
-        "$(length(st)) series. Use `fitted.series` for the per-series states, " *
-        "each of which has .id, .y_history, .t_last, .t_start and .n_train."))
-    return getfield(only(st), name)
+    return _series_prop(getfield(f, :spec), f, name)
 end
+
+_series_prop(::Forecaster{M,S,Nothing}, f, name) where {M,S} =
+    getfield(only(getfield(f, :series)), name)
+_series_prop(::Forecaster{M,S,Symbol}, f, name) where {M,S} = throw(ArgumentError(
+    "`fitted.$name` is single-series state, but this forecaster was fit on " *
+    "$(nseries(f)) series. Use `fitted.series` for the per-series states, " *
+    "each of which has .id, .y_history, .t_last, .t_start and .n_train."))
 
 Base.propertynames(f::FittedForecaster, private::Bool=false) =
     (fieldnames(FittedForecaster)..., _SERIES_PROPS...)
@@ -342,18 +406,54 @@ function fit(fc::Forecaster, data)
     return _fit_spec(fc, tbl)
 end
 
-function _fit_spec(fc::Forecaster{M,S,Nothing}, tbl::NamedTuple) where {M,S}
+# One series: strict, one group, no copy.
+function _series_groups(fc::Forecaster{M,S,Nothing}, tbl::NamedTuple,
+                        base=1:nrows(tbl)) where {M,S}
     t = require_column(tbl, fc.time, "time")
-    validate_time_column(t, fc.time, fc.freq)
-    y = target_vector(tbl, fc.target)
-    tz, z, state = _transform_table(fc, tbl, y)
-    st = SeriesState(nothing, y, t[end], t[1], length(t), z, state, 0)
-    rows = (length(y) - nrows(tz) + 1):length(y)
-    return FittedForecaster(fc, _fit(fc, fc.strategy, tz, rows), [st],
-                            outputnames(fc.features))
+    validate_time_column(t, fc.time, fc.freq, base)
+    return [(nothing, tbl, base)]
 end
 
-_fit_spec(fc::Forecaster{M,S,Symbol}, tbl::NamedTuple) where {M,S} = _fit_panel(fc, tbl)
+_in_series(f, ::Forecaster{M,S,Nothing}, key) where {M,S} = f()
+
+function _prepare_series(fc::Forecaster, id, sub::NamedTuple, rows)
+    return _in_series(fc, id) do
+        yraw = target_vector(sub, fc.target, rows)
+        tz, z, state = _transform_table(fc, sub, yraw)
+        return (; id, t=sub[fc.time], rows, yraw, tz, z, state)
+    end
+end
+
+_usable_series(::Forecaster{M,S,Nothing}, prepared) where {M,S} = prepared
+
+# A transform can empty a single series: no origin.
+_fit_origin(::Forecaster{M,S,Nothing}, usable) where {M,S} = nothing
+_step0(fc, tz, ::Nothing) = 0
+_step0(fc, tz, origin) = _steps_between(origin, tz[fc.time][1], fc.freq)
+
+function _fit_series(fc::Forecaster, p, origin)
+    step0 = _step0(fc, p.tz, origin)
+    X, y, _ = _in_series(fc, p.id) do
+        build_training_frame(fc.features, p.tz, fc.target, fc.time,
+                             p.rows[(length(p.yraw) - nrows(p.tz) + 1):end]; step0)
+    end
+    state = SeriesState(p.id, p.yraw, p.t[end], p.t[1], length(p.t), p.z, p.state, step0)
+    return SeriesFrame(state, X, y)
+end
+
+function _fit_spec(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
+    groups = _series_groups(fc, tbl, base)
+    prepared = _collect(g -> _prepare_series(fc, g...), groups)
+    usable = _usable_series(fc, prepared)
+    origin = _fit_origin(fc, usable)
+    frames = _collect(p -> _fit_series(fc, p, origin), usable)
+    models = _train_models(fc, fc.strategy, frames)
+    states = SeriesState[]
+    for fr in frames
+        push!(states, fr.state)
+    end
+    return FittedForecaster(fc, models, states, outputnames(fc.features))
+end
 
 _training_frame(fc::Forecaster, tbl::NamedTuple, rows) =
     build_training_frame(fc.features, tbl, fc.target, fc.time, rows)

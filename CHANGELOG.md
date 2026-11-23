@@ -98,6 +98,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- A single series is fitted through the same code as a panel of one series; fits
+  are unchanged. A panel `Direct` fit that has too few rows to train every step
+  model now throws before it trains any of them (the message is unchanged).
 - **Breaking: the `forecast` keyword `new_data` is now `future`.**
   `forecast(fitted, h; future=table)` takes the future-known covariates;
   `new_data=` is no longer accepted (no alias, no deprecation). The
@@ -289,6 +292,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `fitted.y_history`, `.t_last`, `.t_start`, `.n_train`, `.z_history` and
+  `.transform_state` throw on every panel `FittedForecaster`, including a panel
+  fitted with `id=` on a single series, as the `FittedForecaster` docstring says;
+  read `fitted.series`.
 - A missing exogenous value in a single series with a row-consuming transform
   (`Difference`, `LogRatio`, chains) is reported at the right row of your
   table, not shifted by the rows the transform consumed.

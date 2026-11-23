@@ -912,4 +912,194 @@
         @test f.t_last == Date(2022, 2, 19) && f.n_train == 50
         @test keys(forecast(f, 3)) == (:ds, :y_hat)
     end
+    @testset "a single series is a panel of one" begin
+        n = 70
+        ds = collect(Date(2022, 1, 1):Day(1):Date(2022, 1, 1) + Day(n - 1))
+        promo = Float64.(mod.(1:n, 5) .== 0)
+        yv = 50 .+ 2 .* sin.(1:n) .+ 0.1 .* (1:n)
+        stbl = (ds=ds, y=yv, promo=promo)
+        ptbl = (unique_id=fill("a", n), ds=ds, y=yv, promo=promo)
+        fds = ds[end] .+ Day.(1:7)
+        fpro = Float64.(mod.(n + 1:n + 7, 5) .== 0)
+        sfut = (ds=fds, promo=fpro)
+        pfut = (unique_id=fill("a", 7), ds=fds, promo=fpro)
+        feats = FeatureSet(Lag(1), RollingMean(3), Diff(1), Calendar(:dayofweek),
+                           Fourier(7, 1), Exogenous(:promo),
+                           CustomFeature(:hlen, length, 0))
+        mkp(model, strat, tr) = Forecaster(model; features=feats, strategy=strat,
+                                           freq=Day(1), id=:unique_id, transform=tr)
+        mks(model, strat, tr) = Forecaster(model; features=feats, strategy=strat,
+                                           freq=Day(1), transform=tr)
+        transforms = (NoTransform(), Difference(2),
+                      TransformChain(LastScale(4), LogRatio(3)))
+        for strat in (Recursive(), Direct(3)), tr in transforms
+            h = strat isa Direct ? 3 : 7
+            fs = fit(mks(TestModels.KeepTrain(), strat, tr), stbl)
+            fp = fit(mkp(TestModels.KeepTrain(), strat, tr), ptbl)
+            @test length(fs.models) == length(fp.models)
+            @test all(isequal(a.fitresult, b.fitresult)
+                      for (a, b) in zip(fs.models, fp.models))
+            sa, sb = only(fs.series), only(fp.series)
+            @test sa.id === nothing && sb.id == "a"
+            for fld in (:y_history, :t_last, :t_start, :n_train, :z_history,
+                        :transform_state, :step0)
+                @test isequal(getfield(sa, fld), getfield(sb, fld))
+            end
+            @test sa.step0 == 0
+            for model in (TestModels.LinAR(0.9, 1.0), EvoTreeRegressor(nrounds=5),
+                          DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+                a = forecast(fit(mks(model, strat, tr), stbl), h; future=sfut)
+                b = forecast(fit(mkp(model, strat, tr), ptbl), h; future=pfut)
+                @test isequal(a.y_hat, b.y_hat) && isequal(a.ds, b.ds)
+            end
+        end
+    end
+
+    @testset "panel fit errors keep their order and prefix" begin
+        fc = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
+        diff = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                          transform=Difference(1), freq=Day(1), id=:unique_id)
+        bad = makepanel(lens=(10, 10))
+        bad.y[end - 1] = 1e308; bad.y[end] = -1e308
+        err = try fit(diff, bad) catch e; e end
+        @test err isa ArgumentError
+        @test startswith(err.msg, "series unique_id=\"s2\": transform=Difference(1) " *
+                                  "turned the target into a non-finite value")
+        err = try fit(Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                                 transform=Difference(1), freq=Day(1)),
+                      (ds=bad.ds[11:20], y=bad.y[11:20])) catch e; e end
+        @test err isa ArgumentError
+        @test startswith(err.msg, "transform=Difference(1) turned the target into a " *
+                                  "non-finite value")
+        unsorted = (unique_id=["a", "a", "a"],
+                    ds=[Date(2022, 1, 3), Date(2022, 1, 1), Date(2022, 1, 2)])
+        @test_throws "target column :y not found" fit(fc, unsorted)
+        @test_throws "id column :unique_id not found" fit(
+            fc, (ds=unsorted.ds, y=[1.0, 2, 3]))
+        for tr in (Difference(5), LogRatio(7))
+            n = tr isa Difference ? 5 : 7
+            one = makepanel(lens=(n,))
+            fct = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                             transform=tr, freq=Day(1), id=:unique_id)
+            @test_throws "no series has enough rows to train on" fit(fct, one)
+        end
+    end
+
+    @testset "fit leaves the table and the model prototype untouched" begin
+        model = TestModels.LinAR(0.5, 1.0)
+        keep = deepcopy(model)
+        for tbl in (panel, makepanel(lens=(30,)))
+            copy_ = deepcopy(tbl)
+            fit(mk(model, FeatureSet(Lag(1), RollingMean(3)); strat=Direct(2)), tbl)
+            @test tbl == copy_ && model == keep
+        end
+    end
+
+    @testset "skip warning comes before the models' clean! warnings" begin
+        fc = mk(TestModels.Clamped(0), FeatureSet(Lag(7)); strat=Direct(2))
+        @test_logs((:warn, r"skipping 1 series with fewer than 8 rows"),
+                   (:warn, "k must be ≥ 1; resetting k to 1."),
+                   (:warn, "k must be ≥ 1; resetting k to 1."),
+                   fit(fc, makepanel(lens=(40, 3, 35))))
+    end
+
+    @testset "Direct without enough rows throws before any model trains" begin
+        tiny = makepanel(lens=(3, 3, 3))
+        fc = mk(TestModels.Clamped(0), FeatureSet(Lag(1)); strat=Direct(5))
+        @test_logs min_level=Logging.Warn @test_throws(
+            "not enough data for Direct(5): no series has enough rows to train the " *
+            "step-3 model. Shorten max_horizon, provide longer series, or reduce " *
+            "lags/windows.", fit(fc, tiny))
+        fcs = Forecaster(TestModels.Clamped(0); features=FeatureSet(Lag(2)),
+                         strategy=Direct(4), freq=Day(1))
+        short = makepanel(lens=(4,))
+        short = (ds=short.ds, y=short.y)
+        @test_logs min_level=Logging.Warn @test_throws(
+            "not enough data for Direct(4): after dropping the feature set's 2 " *
+            "history rows, only 2 training rows remain", fit(fcs, short))
+    end
+
+    @testset "the facade throws on every panel, even of one series" begin
+        one = makepanel(lens=(40,), levels=(100.0,), starts=[Date(2022, 1, 1)])
+        f = fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), one)
+        @test nseries(f) == 1
+        for name in (:y_history, :t_last, :t_start, :n_train, :z_history,
+                     :transform_state)
+            @test_throws("single-series state, but this forecaster was fit on 1 series",
+                         getproperty(f, name))
+        end
+        @test only(f.series).n_train == 40
+    end
+
+    @testset "single Direct fit slices each step once" begin
+        n = 40_000
+        big = (ds=collect(Date(2000, 1, 1):Day(1):Date(2000, 1, 1) + Day(n - 1)),
+               y=Float64.(1:n))
+        sfs = FeatureSet(Lag.(1:3)...)
+        dir = Forecaster(TestModels.MeanModel(); features=sfs, strategy=Direct(5),
+                         freq=Day(1))
+        rec = Forecaster(TestModels.MeanModel(); features=sfs, freq=Day(1))
+        fit(dir, big); fit(rec, big)
+        extra = (@allocated fit(dir, big)) - (@allocated fit(rec, big))
+        steps = sum(n - 3 - i + 1 for i in 1:5) * 4 * sizeof(Float64)
+        @test extra < 1.15 * steps
+    end
+
+    @testset "series groups: strict for one series, sorted for a panel" begin
+        M = MachineLearningForecast
+        n = 20
+        ds = collect(Date(2022, 1, 1):Day(1):Date(2022, 1, 1) + Day(n - 1))
+        tbl = (ds=ds, y=Float64.(1:n))
+        fcs = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                         freq=Day(1))
+        g = M._series_groups(fcs, tbl)
+        @test length(g) == 1 && g[1][1] === nothing && g[1][2] === tbl && g[1][3] == 1:n
+        @test_throws "time column :ds is not sorted" M._series_groups(
+            fcs, (ds=reverse(ds), y=tbl.y))
+        shuf = shuffle(StableRNG(3), 1:length(panel.y))
+        sp = map(c -> c[shuf], panel)
+        gp = M._series_groups(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), sp)
+        @test [x[1] for x in gp] == unique(sp.unique_id)
+        for (id, sub, rows) in gp
+            @test issorted(sub.ds) && sp.ds[rows] == sub.ds
+            @test sp.unique_id[rows] == sub.unique_id
+            @test sub.y == sp.y[rows]
+        end
+    end
+    @testset "ids of mixed types and per-series states" begin
+        base = makepanel(lens=(30, 30), levels=(100.0, 10.0))
+        withids(a, b) = (unique_id=Any[k == "s1" ? a : b for k in base.unique_id],
+                         ds=base.ds, y=base.y)
+        fc = mk(TestModels.LinAR(0.9, 1.0), FeatureSet(Lag(1)))
+
+        @testset "a String and an Int id" begin
+            out = forecast(fit(fc, withids("a", 2)), 2)
+            @test isequal(out.unique_id, Any["a", "a", 2, 2])
+            @test eltype(out.unique_id) == Any
+        end
+
+        @testset "an Int and a Float64 id keep their types" begin
+            out = forecast(fit(fc, withids(1, 2.0)), 2)
+            @test isequal(out.unique_id, Real[1, 1, 2.0, 2.0])
+            @test eltype(out.unique_id) == Real
+            @test typeof.(out.unique_id) == [Int, Int, Float64, Float64]
+            out = forecast(fit(fc, withids(1, 2.5)), 2)
+            @test isequal(out.unique_id, Real[1, 1, 2.5, 2.5])
+        end
+
+        @testset "a transform whose state type varies per series" begin
+            tr = TestModels.VaryingState()
+            fct = Forecaster(TestModels.LinAR(0.9, 1.0); features=FeatureSet(Lag(1)),
+                             freq=Day(1), id=:unique_id, transform=tr)
+            f = fit(fct, base)
+            @test [s.transform_state for s in f.series] == Any[nothing, 5.0]
+            @test [s.z_history[1] for s in f.series] == [101.0, 6.0]
+            out = forecast(f, 2)
+            solo = fit(Forecaster(TestModels.LinAR(0.9, 1.0);
+                                  features=FeatureSet(Lag(1)), freq=Day(1),
+                                  transform=tr),
+                       (ds=base.ds[31:60], y=base.y[31:60]))
+            @test out.y_hat[3:4] == forecast(solo, 2).y_hat
+        end
+    end
 end

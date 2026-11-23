@@ -453,4 +453,29 @@
             @test_throws "series unique_id=\"a\": " * phrase fit(fcp, panel)
         end
     end
+    @testset "single-series fit errors keep their order and text" begin
+        fc = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                        freq=Day(1))
+        @test_throws "time column :ds not found in the data" fit(fc, (a=[1.0, 2.0],))
+        d3, d1, d2 = Date(2022, 1, 3), Date(2022, 1, 1), Date(2022, 1, 2)
+        @test_throws "time column :ds is not sorted; row 2 (2022-01-01) comes after " *
+                     "2022-01-03" fit(fc, (ds=[d3, d1, d2],))
+        @test_throws "target column :y not found" fit(fc, (ds=[d1, d2, d3],))
+        kc = Forecaster(TestModels.KeepTrain(); features=FeatureSet(Lag(1)), freq=Day(1))
+        f = fit(kc, (ds=[d1, d2], y=[1.0, 2.0]))
+        @test only(f.models).fitresult.y == [2.0]
+        @test only(f.models).fitresult.X.y_lag_1 == [1.0]
+        for (tr, k) in ((Difference(5), 5), (LogRatio(7), 7))
+            fct = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                             freq=Day(1), transform=tr)
+            tbl = (ds=collect(d1:Day(1):d1 + Day(k - 1)), y=Float64.(1:k))
+            @test_throws "the data has only 0 rows" fit(fct, tbl)
+        end
+        model = TestModels.LinAR(0.5, 1.0)
+        tbl = (ds=collect(d1:Day(1):d1 + Day(19)), y=Float64.(1:20))
+        same, keep = deepcopy(tbl), deepcopy(model)
+        fit(Forecaster(model; features=FeatureSet(Lag(1)), freq=Day(1),
+                       strategy=Direct(2)), tbl)
+        @test tbl == same && model == keep
+    end
 end

@@ -23,6 +23,17 @@ function _precompile_workload()
         forecast(fit(fc, data), 3)
         backtest(fc, data; horizon=3, windows=2, metrics=(mae, smape, mase))
     end
+    d = collect(Date(2020, 1, 1):Day(1):Date(2020, 3, 31))
+    daily = (ds=d, y=[10 + sin(i) + i / 10 for i in eachindex(d)],
+             promo=[Float64(i % 7 == 0) for i in eachindex(d)])
+    ahead = d[end] .+ Day.(1:3)
+    future = (ds=ahead, promo=zeros(3))
+    dfeats = FeatureSet(Lag(1), Lag(7), RollingMean(7), Diff(1), Calendar(:dayofweek),
+                        Fourier(7, 1), Exogenous(:promo))
+    for strategy in (Recursive(), Direct(3))
+        fc = Forecaster(_PrecompileMean(); features=dfeats, freq=Day(1), strategy)
+        forecast(fit(fc, daily), 3; future)
+    end
     return nothing
 end
 

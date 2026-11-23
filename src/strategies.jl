@@ -93,3 +93,17 @@ _shifted(::AtOrigin, col, i, n) = col[1:(n - i + 1)]
 _shifted(::AtTarget, col, i, n) = col[i:n]
 _gather_index(::AtOrigin, from, to) = from
 _gather_index(::AtTarget, from, to) = to
+
+function _pair_vectors(lens::Vector{Int}, i)
+    m = sum(nX -> max(nX - i + 1, 0), lens)
+    from, to = Vector{Int}(undef, m), Vector{Int}(undef, m)
+    k = o = 0
+    for nX in lens
+        for j in 1:(nX - i + 1)
+            k += 1
+            from[k], to[k] = o + j, o + j + i - 1
+        end
+        o += nX
+    end
+    return from, to
+end

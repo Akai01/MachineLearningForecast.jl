@@ -50,7 +50,7 @@ function panel_groups(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
     return out
 end
 
-function _in_series(f, fc::Forecaster, key)
+function _in_series(f, fc::Forecaster{M,S,Symbol}, key) where {M,S}
     try
         return f()
     catch err
@@ -58,6 +58,38 @@ function _in_series(f, fc::Forecaster, key)
         throw(ArgumentError("series $(fc.id)=$(repr(key)): " * err.msg))
     end
 end
+
+_series_groups(fc::Forecaster{M,S,Symbol}, tbl::NamedTuple,
+               base=1:nrows(tbl)) where {M,S} = panel_groups(fc, tbl, base)
+
+# Skip short series so the rest can still train.
+function _usable_series(fc::Forecaster{M,S,Symbol}, prepared) where {M,S}
+    mh = minhistory(fc.features)
+    usable = eltype(prepared)[]
+    short = Tuple{Any,Int}[]
+    for p in prepared
+        n = nrows(p.tz)
+        n ≤ mh ? push!(short, (p.id, n)) : push!(usable, p)
+    end
+    if isempty(usable)
+        throw(ArgumentError(
+            "no series has enough rows to train on: the feature set needs $mh " *
+            "history rows before the first usable row, and the longest series has " *
+            "$(maximum(last, short; init=0)). Provide longer series or reduce " *
+            "lags/windows."))
+    end
+    if !isempty(short)
+        names = join((string(fc.id, "=", repr(k), " (", n, " rows)")
+                      for (k, n) in first(short, 5)), ", ")
+        more = length(short) > 5 ? ", …" : ""
+        @warn "skipping $(length(short)) series with fewer than $(mh + 1) rows, " *
+              "which is the minimum the feature set needs: $names$more"
+    end
+    return usable
+end
+
+_fit_origin(fc::Forecaster{M,S,Symbol}, usable) where {M,S} =
+    minimum(p.tz[fc.time][1] for p in usable)
 
 # Skip short series so the rest can still train.
 function _panel_frames(fc::Forecaster, groups)
@@ -400,7 +432,7 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, scheme, metri
 
     for (k, cut) in enumerate(cuts)
         train_rows = _rows_before(cut, ids, t_all)
-        fitted = _fit_panel(fc, row_subset(tbl, train_rows), train_rows)
+        fitted = _fit_spec(fc, row_subset(tbl, train_rows), train_rows)
         fcast = if isempty(exogcols)
             forecast(fitted, horizon)
         else
