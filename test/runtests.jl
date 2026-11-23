@@ -25,6 +25,7 @@ using .FeatureHelpers
     include("test_panel.jl")
     include("test_transforms.jl")
     include("test_integration.jl")
+    include("test_leakage.jl")
 
     @testset "Aqua quality checks" begin
         Aqua.test_all(MachineLearningForecast; ambiguities=false)

@@ -629,6 +629,9 @@ During recursive forecasting, `f` is called on the growing history vector
 (actuals followed by earlier predictions), so it sees exactly the same kind of
 input as during training.
 
+A function that reads anything but its argument, such as a captured series or `parent(h)`,
+bypasses the leakage guarantee: `f` must read only the history it is given.
+
 In training `f` is called once per row on the history before it, so a function
 that loops over the whole history makes `fit` O(n^2) in the series length; keep
 it cheap or use a built-in rolling feature.
