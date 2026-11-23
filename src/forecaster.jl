@@ -470,9 +470,6 @@ function _fit_spec(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
     return FittedForecaster(fc, models, states, outputnames(fc.features))
 end
 
-_training_frame(fc::Forecaster, tbl::NamedTuple, rows) =
-    build_training_frame(fc.features, tbl, fc.target, fc.time, rows)
-
 """
     forecast(f::FittedForecaster, h::Integer; future=nothing) -> NamedTuple
 
@@ -647,29 +644,6 @@ function _untransform_all(transform, preds, states)
     return out
 end
 
-_forecast_spec(f::FittedForecaster, spec::Forecaster{M,S,Symbol}, h, future) where {M,S} =
-    _forecast_panel(f, h, future)
-
-function _forecast_spec(f::FittedForecaster, spec::Forecaster{M,S,Nothing},
-                        h::Integer, future) where {M,S}
-    st = only(getfield(f, :series))
-    grid = future_grid(st.t_start, spec.freq, st.n_train, h)
-    exogcols = exogenous_columns(spec.features)
-    exog_rows = nothing
-    if !isempty(exogcols)
-        future === nothing && throw(ArgumentError(
-            "features contain Exogenous($(join(":" .* string.(exogcols), ", "))) but " *
-            "forecast() was called without `future`. Pass a table with columns " *
-            "(:$(spec.time), $(join(":" .* string.(exogcols), ", "))) covering " *
-            "$(first(grid)) … $(last(grid))."))
-        exog_rows = _exogenous_rows(spec, exogcols, grid, future)
-    elseif future !== nothing
-        @warn "`future` was passed but the feature set has no Exogenous features; " *
-              "it will be ignored."
-    end
-    return _forecast(f, spec.strategy, h, grid, exog_rows)
-end
-
 function _exogenous_rows(spec::Forecaster{M,S,Nothing}, states, grids, future,
                          hs) where {M,S}
     grid = only(grids)
@@ -758,18 +732,8 @@ function _fill_feature!(colvecs::Vector{Vector{Float64}}, j::Int, buf::Vector{Fl
     return j + length(buf)
 end
 
-# Sized once: outputnames per row would allocate.
-function _prediction_row(f::FittedForecaster)
-    colvecs = [Vector{Float64}(undef, 1) for _ in f.feature_names]
-    row = NamedTuple{Tuple(f.feature_names)}(Tuple(colvecs))
-    return colvecs, row, _feature_buffers(f.spec.features)
-end
-
 _feature_buffers(features::FeatureSet) =
     Vector{Float64}[Vector{Float64}(undef, length(outputnames(feat))) for feat in features]
-
-_forecast_table(spec::Forecaster, grid, preds::Vector{Float64}) =
-    NamedTuple{(spec.time, :y_hat)}((grid, preds))
 
 function Base.show(io::IO, fc::Forecaster)
     print(io, "Forecaster(", nameof(typeof(fc.model)), ", ",

@@ -103,8 +103,6 @@ _histories(::Recursive, states, hs) =
      for (k, st) in enumerate(states)]
 _histories(::Direct, states, hs) = [st.z_history for st in states]
 
-_shifted(::AtOrigin, col, i, n) = col[1:(n - i + 1)]
-_shifted(::AtTarget, col, i, n) = col[i:n]
 _gather_index(::AtOrigin, from, to) = from
 _gather_index(::AtTarget, from, to) = to
 
