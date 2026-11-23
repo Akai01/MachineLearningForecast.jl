@@ -25,7 +25,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the time since the last non-zero value as `CustomFeature`s, a holiday
   `TimeFeature`, a parent aggregate or a covariate shifted by at least the
   horizon passed through `Exogenous`, per-step and per-series scores from
-  `BacktestResult.folds`, and naive and seasonal naive baselines.
+  `BacktestResult.folds`, naive and seasonal naive baselines, and `mase` and
+  `rmsse` scaled from the first non-zero value (the M5 rule) by trimming
+  `y_train`.
 - `Probabilistic` MLJ models work as base models: the forecast is the mean of
   the predicted distribution (`predict_mean`), so a model such as EvoTrees'
   `EvoTreeGaussian` fits, forecasts, backtests and tunes like a

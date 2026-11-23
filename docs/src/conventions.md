@@ -68,7 +68,9 @@ series; use a scaled metric to compare series of different scale.
 On intermittent series (many zeros), MAE-based measures, including MASE, can
 favour forecasts close to zero; the M5 competition used a squared-error scaled
 measure (RMSSE) for this reason (Makridakis, Spiliotis & Assimakopoulos 2022);
-use [`rmsse`](@ref) for such series.
+use [`rmsse`](@ref) for such series. Both take the scale from the whole training
+window; for the M5 rule, which starts it at the first non-zero value, see the recipe
+below.
 
 **Tuning base models with MLJ.** If you tune the base model with MLJ's
 `TunedModel`, prefer `TimeSeriesCV` to `CV()`. Plain K-fold CV trains on rows
@@ -233,6 +235,43 @@ new_data = (ds = df.ds[end] .+ Day.(1:h), price_lag14 = price[(n - k + 1):(n - k
 forecast(fitted, h; new_data)
 ```
 
+### Scaling from the first non-zero value (the M5 rule)
+
+[`mase`](@ref) and [`rmsse`](@ref) take the scale from the whole training window
+(Hyndman & Koehler 2006; Hyndman & Athanasopoulos 2021, §5.8). The M5 competition
+computed it only from the first non-zero value on, because products there launch
+late and the leading zeros mean "not yet launched" (Makridakis, Spiliotis &
+Assimakopoulos 2022; M Open Forecasting Center 2020). To score that way, trim
+`y_train` to start at its first non-zero value, that value included, and delegate:
+
+```julia
+using MachineLearningForecast
+
+function from_first_nonzero(y_train)
+    i = findfirst(!iszero, y_train)
+    return i === nothing ? y_train : y_train[i:end]
+end
+
+rmsse_m5(y, ŷ; y_train, m = 1) = rmsse(y, ŷ; y_train = from_first_nonzero(y_train), m)
+mase_m5(y, ŷ; y_train, m = 1) = mase(y, ŷ; y_train = from_first_nonzero(y_train), m)
+MachineLearningForecast.needs_ytrain(::typeof(rmsse_m5)) = true
+MachineLearningForecast.needs_ytrain(::typeof(mase_m5)) = true
+
+rmsse_m5([2.0, 3.0], [2.0, 2.0]; y_train = [0.0, 0.0, 0.0, 4.0, 6.0, 5.0, 7.0])
+```
+
+Pass `rmsse_m5` or `mase_m5` to [`backtest`](@ref) or [`tune`](@ref) like any
+metric (see `mase12` in [Models](models.md) for the same pattern).
+
+Trim only when leading zeros mean "not yet launched". Where they are genuine zero
+demand, they belong to the series and trimming discards them. An all-zero window has
+nothing to trim, so it is passed on unchanged: the scale is zero, and the metric warns
+and returns `Inf`, as `rmsse` and `mase` do for any constant window; the same happens
+when the values from the first non-zero on are constant. A window with `m` or fewer
+values from its first non-zero value on is too short for the scale, so `rmsse` and
+`mase` throw their usual `ArgumentError` (`length(y_train) > m`), and a `backtest`
+over such a series fails.
+
 ### Scores per horizon step and per series
 
 `BacktestResult.folds` has one row per fold, step and series with `:step`,
@@ -325,6 +364,9 @@ backtest(snaive, df; horizon = 14, windows = 3, metrics = (mae, smape)).metrics
 - Hyndman, R. J., & Koehler, A. B. (2006). Another look at measures of forecast
   accuracy. *International Journal of Forecasting*, 22(4), 679–688.
   <https://doi.org/10.1016/j.ijforecast.2006.03.001>
+- M Open Forecasting Center (2020). *The M5 competition: competitors' guide*.
+  University of Nicosia.
+  <https://github.com/Mcompetitions/M5-methods/blob/master/M5-Competitors-Guide.pdf>
 - Makridakis, S., Spiliotis, E., & Assimakopoulos, V. (2022). M5 accuracy
   competition: results, findings, and conclusions. *International Journal of
   Forecasting*, 38(4), 1346–1364.
