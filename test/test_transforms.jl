@@ -1,3 +1,5 @@
+import MachineLearningForecast: fit_transform, untransform
+
 @testset "target transforms" begin
     y = [4.0, 6.0, 5.0, 9.0, 8.0, 10.0]
 

@@ -1,8 +1,8 @@
-# Uses only exported names, as third-party code would.
+# Uses only the public API, as third-party code would.
 module ThirdPartyTuning
 
 using MachineLearningForecast: TuningStrategy
-import MachineLearningForecast: ask, tell!
+import MachineLearningForecast: ask!, tell!
 
 mutable struct Midpoint{T<:NamedTuple} <: TuningStrategy
     space::Vector{T}
@@ -11,7 +11,7 @@ mutable struct Midpoint{T<:NamedTuple} <: TuningStrategy
 end
 Midpoint(space) = Midpoint(space, 0, Tuple{NamedTuple,Union{Missing,Float64}}[])
 
-function ask(s::Midpoint)
+function ask!(s::Midpoint)
     s.asks ≥ 3 && return nothing
     s.asks += 1
     return s.space[(length(s.space) + 1) ÷ 2]
@@ -23,7 +23,7 @@ tell!(s::Midpoint, candidate, score) = push!(s.told, (candidate, score))
 struct Fixed{T} <: TuningStrategy
     out::T
 end
-ask(s::Fixed) = s.out
+ask!(s::Fixed) = s.out
 tell!(::Fixed, candidate, score) = nothing
 
 "Proposes each candidate of `list` once, in order."
@@ -31,7 +31,7 @@ mutable struct Replay <: TuningStrategy
     list::Vector{NamedTuple}
     i::Int
 end
-ask(s::Replay) = s.i < length(s.list) ? s.list[s.i += 1] : nothing
+ask!(s::Replay) = s.i < length(s.list) ? s.list[s.i += 1] : nothing
 tell!(::Replay, candidate, score) = nothing
 
 end
@@ -107,7 +107,7 @@ end
         @test length(tuner.told) == 3 && all(ismissing(sc) for (_, sc) in tuner.told)
     end
 
-    @testset "third-party sequential strategy drives the ask/tell loop" begin
+    @testset "third-party sequential strategy drives the ask!/tell! loop" begin
         space = [(model=DecisionTreeRegressor(max_depth=d, rng=StableRNG(1)),) for d in 1:5]
         tuner = ThirdPartyTuning.Midpoint(space)
         result = tune(base, df; tuner=tuner, horizon=14, initial=90, metric=mae)
@@ -221,20 +221,20 @@ end
         end
     end
 
-    @testset "ask must answer with a NamedTuple of known fields or nothing" begin
+    @testset "ask! must answer with a NamedTuple of known fields or nothing" begin
         for m in (DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
                   EvoTreeRegressor(nrounds=5))
             fcm = Forecaster(m; features=FeatureSet(Lag(1)), freq=Day(1))
             run(out) = tune(fcm, df; tuner=ThirdPartyTuning.Fixed(out), max_evals=2,
                             horizon=14, initial=90)
             @test_throws ArgumentError run(42)
-            @test_throws "ask(Fixed) returned 42; the ask/tell contract requires a " *
+            @test_throws "ask!(Fixed) returned 42; the ask!/tell! contract requires a " *
                          "NamedTuple of Forecaster field overrides, or nothing to stop." (
                 run(42))
             @test_throws ArgumentError run(nothing)
-            @test_throws "the tuning strategy proposed no candidates (Fixed): ask " *
+            @test_throws "the tuning strategy proposed no candidates (Fixed): ask! " *
                          "returned nothing on its first call, so there is nothing to " *
-                         "tune. Make ask return at least one NamedTuple of Forecaster " *
+                         "tune. Make ask! return at least one NamedTuple of Forecaster " *
                          "field overrides before nothing." run(nothing)
             # reconstruct rejects it inside the candidate's try
             @test_throws "all 2 tuning candidates failed" run((bogus=1,))
@@ -379,7 +379,7 @@ end
             fc, (ds=t, y=y); grid=(bogus=[1],), horizon=14, initial=90)
     end
 
-    @testset "an ask candidate with a data field fails only that candidate" begin
+    @testset "an ask! candidate with a data field fails only that candidate" begin
         for m in (DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
                   EvoTreeRegressor(nrounds=5))
             fcm = Forecaster(m; features=FeatureSet(Lag(1)), freq=Day(1))

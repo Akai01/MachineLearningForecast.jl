@@ -38,13 +38,71 @@ and the target row when forecasting. See [`anchor`](@ref).
 """
 abstract type AbstractFeature end
 
-"Features computed from the target's history (must be updated during recursion)."
+"""
+    TargetFeature
+
+Abstract supertype of the features computed from the target's history (updated
+during recursive forecasting), such as [`Lag`](@ref) and [`RollingMean`](@ref).
+Subtype it for your own, then implement the methods listed under
+[`AbstractFeature`](@ref). Its anchor is `AtOrigin` by default.
+
+# Example
+```julia
+import MachineLearningForecast: outputnames, minhistory, featurevalues!
+
+struct LastValue <: TargetFeature end
+outputnames(::LastValue) = [:last_value]
+minhistory(::LastValue) = 1
+featurevalues!(out, ::LastValue, ctx) = (out[1] = ctx.y[end]; nothing)
+
+FeatureSet(LastValue(), Lag(7))
+```
+"""
 abstract type TargetFeature <: AbstractFeature end
 
-"Features computed from the timestamp only (always computable for future rows)."
+"""
+    TimeFeature
+
+Abstract supertype of the features computed from the timestamp only, so always
+computable for future rows, such as [`Calendar`](@ref) and [`Fourier`](@ref).
+Subtype it for your own, then implement the methods listed under
+[`AbstractFeature`](@ref). Its anchor is `AtTarget` by default.
+
+# Example
+```julia
+using Dates
+import MachineLearningForecast: outputnames, featurevalues!
+
+struct IsWeekend <: TimeFeature end
+outputnames(::IsWeekend) = [:is_weekend]
+featurevalues!(out, ::IsWeekend, ctx) = (out[1] = Float64(dayofweek(ctx.t) >= 6); nothing)
+
+FeatureSet(Lag(1), IsWeekend())
+```
+"""
 abstract type TimeFeature <: AbstractFeature end
 
-"Features passed through from user data (must be provided for the future)."
+"""
+    ExogenousFeature
+
+Abstract supertype of the features passed through from the user's columns,
+which must be provided for the future through `new_data`, such as
+[`Exogenous`](@ref). Subtype it for your own, implement the methods listed under
+[`AbstractFeature`](@ref), and declare the columns it reads with
+[`inputcolumns`](@ref). Its anchor is `AtTarget` by default.
+
+# Example
+```julia
+import MachineLearningForecast: outputnames, inputcolumns, featurevalues!
+
+struct DoubledPromo <: ExogenousFeature end
+outputnames(::DoubledPromo) = [:promo2]
+inputcolumns(::DoubledPromo) = [:promo]
+featurevalues!(out, ::DoubledPromo, ctx) = (out[1] = 2.0 * ctx.exog.promo; nothing)
+
+FeatureSet(Lag(1), DoubledPromo())
+```
+"""
 abstract type ExogenousFeature <: AbstractFeature end
 
 """

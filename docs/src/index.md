@@ -61,7 +61,7 @@ fit
 forecast
 Recursive
 Direct
-MachineLearningForecast.ForecastStrategy
+ForecastStrategy
 ```
 
 ### Features
@@ -91,17 +91,17 @@ Fourier
 Exogenous
 CustomFeature
 MachineLearningForecast.AbstractFeature
-MachineLearningForecast.TargetFeature
-MachineLearningForecast.TimeFeature
-MachineLearningForecast.ExogenousFeature
+TargetFeature
+TimeFeature
+ExogenousFeature
 ```
 
 ### Target transforms
 
 ```@docs
 TargetTransform
-fit_transform
-untransform
+MachineLearningForecast.fit_transform
+MachineLearningForecast.untransform
 NoTransform
 MeanScale
 LastScale
@@ -133,6 +133,6 @@ TuneResult
 TuningStrategy
 GridSearch
 RandomSearch
-ask
-tell!
+MachineLearningForecast.ask!
+MachineLearningForecast.tell!
 ```

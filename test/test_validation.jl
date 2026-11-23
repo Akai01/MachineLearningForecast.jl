@@ -245,7 +245,18 @@ end
         @test length(exports) == 44
         @test :Forecaster in exports && :tune in exports && :mase in exports
         @test :rmsse in exports
-        @test :TransformChain in exports && :untransform in exports
+        @test :TransformChain in exports
+        # Types are exported; extension functions are imported.
+        for name in (:TargetFeature, :TimeFeature, :ExogenousFeature, :ForecastStrategy)
+            @test name in exports
+            @test getfield(MachineLearningForecast, name) isa Type
+        end
+        for name in (:ask!, :tell!, :fit_transform, :untransform)
+            @test !(name in exports)
+            @test isdefined(MachineLearningForecast, name)
+            @test getfield(MachineLearningForecast, name) isa Function
+        end
+        @test !isdefined(MachineLearningForecast, :ask)
     end
 
     @testset "Calendar sub-daily parts need a DateTime column" begin

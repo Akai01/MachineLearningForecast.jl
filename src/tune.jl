@@ -4,7 +4,7 @@
 Abstract supertype of tuning search strategies for [`tune`](@ref). Shipped
 strategies: [`GridSearch`](@ref) and [`RandomSearch`](@ref).
 
-`tune` is an ask/tell loop: it asks the strategy for the next candidate,
+`tune` is an ask!/tell! loop: it asks the strategy for the next candidate,
 scores it with [`backtest`](@ref) and tells the strategy the score. The batch
 strategies serve a precomputed candidate list through this loop; a sequential
 strategy, such as a Bayesian optimizer defined outside this package, drives it
@@ -13,9 +13,10 @@ directly.
 # Extending with your own (sequential) strategy
 
 Subtype `TuningStrategy` and implement two methods; `tune` will drive them in
-an ask/tell loop:
+an ask!/tell! loop. The two functions are public but not exported, so import
+them first: `import MachineLearningForecast: ask!, tell!`.
 
-- [`ask`](@ref)`(s::MyStrategy) -> Union{NamedTuple,Nothing}` — return the next
+- [`ask!`](@ref)`(s::MyStrategy) -> Union{NamedTuple,Nothing}` — return the next
   candidate: a NamedTuple of `Forecaster` field overrides (keys among `:model`,
   `:features`, `:strategy`, `:transform`), drawn from your search space. Return
   `nothing` to signal termination.
@@ -23,19 +24,21 @@ an ask/tell loop:
   evaluating `candidate`: a `Float64` backtest score (lower is better), or
   `missing` if the candidate failed to evaluate.
 
-Termination is signalled either by `ask` returning `nothing`, or by the
+Termination is signalled either by `ask!` returning `nothing`, or by the
 `max_evals` budget enforced by `tune`. Your strategy owns its search-space
 representation (construct it with whatever space description it needs).
 
 # Example
 ```julia
+import MachineLearningForecast: ask!, tell!
+
 mutable struct FirstK <: TuningStrategy
     candidates::Vector{NamedTuple}
     i::Int
 end
-MachineLearningForecast.ask(s::FirstK) = s.i > length(s.candidates) ? nothing :
-                                         (c = s.candidates[s.i]; s.i += 1; c)
-MachineLearningForecast.tell!(s::FirstK, candidate, score) = nothing
+ask!(s::FirstK) = s.i > length(s.candidates) ? nothing :
+                  (c = s.candidates[s.i]; s.i += 1; c)
+tell!(s::FirstK, candidate, score) = nothing
 ```
 """
 abstract type TuningStrategy end
@@ -85,49 +88,56 @@ RandomSearch(n::Integer; rng::Random.AbstractRNG=Random.default_rng()) =
     RandomSearch(n, rng)
 
 """
-    ask(strategy) -> Union{NamedTuple, Nothing}
+    ask!(strategy) -> Union{NamedTuple, Nothing}
 
 Ask a [`TuningStrategy`](@ref) for its next candidate: a NamedTuple of
 [`Forecaster`](@ref) field overrides (keys among `:model`, `:features`,
 `:strategy`, `:transform`). Return `nothing` to signal that the search is
-finished. Part of the public tuning-extension API — implement it for
-your own strategy subtypes; see [`TuningStrategy`](@ref) for the full contract.
+finished. The name ends in `!` because a strategy advances its own state on each
+call. Part of the public tuning-extension API: implement it for your own strategy
+subtypes; see [`TuningStrategy`](@ref) for the full contract. It is not
+exported, so import it: `import MachineLearningForecast: ask!`.
 
 # Example
 ```julia
+import MachineLearningForecast: ask!
+
 mutable struct FirstK <: TuningStrategy
     candidates::Vector{NamedTuple}
     i::Int
 end
-MachineLearningForecast.ask(s::FirstK) = s.i > length(s.candidates) ? nothing :
-                                         (c = s.candidates[s.i]; s.i += 1; c)
+ask!(s::FirstK) = s.i > length(s.candidates) ? nothing :
+                  (c = s.candidates[s.i]; s.i += 1; c)
 
 s = FirstK([(strategy=Recursive(),), (strategy=Direct(28),)], 1)
-ask(s)   # (strategy = Recursive(),)
-ask(s)   # (strategy = Direct(28),)
-ask(s)   # nothing: the search is finished
+ask!(s)   # (strategy = Recursive(),)
+ask!(s)   # (strategy = Direct(28),)
+ask!(s)   # nothing: the search is finished
 ```
 """
-function ask end
+function ask! end
 
 """
     tell!(strategy, candidate, score)
 
 Report an evaluation result back to a [`TuningStrategy`](@ref): `candidate` is
-the NamedTuple previously returned by [`ask`](@ref), and `score` is the
+the NamedTuple previously returned by [`ask!`](@ref), and `score` is the
 `Float64` mean backtest metric (lower is better) or `missing` if the candidate
-failed to evaluate. Part of the public tuning-extension API — implement it for
+failed to evaluate. Part of the public tuning-extension API: implement it for
 your own strategy subtypes; see [`TuningStrategy`](@ref) for the full contract.
+It is not exported, so import it: `import MachineLearningForecast: ask!, tell!`.
 
 # Example
 ```julia
+import MachineLearningForecast: ask!, tell!
+
 mutable struct Logged <: TuningStrategy
     candidates::Vector{NamedTuple}
     scores::Vector{Union{Missing,Float64}}
 end
-MachineLearningForecast.ask(s::Logged) = length(s.scores) < length(s.candidates) ?
-                                         s.candidates[length(s.scores) + 1] : nothing
-MachineLearningForecast.tell!(s::Logged, candidate, score) = push!(s.scores, score)
+ask!(s::Logged) = length(s.scores) < length(s.candidates) ?
+                  s.candidates[length(s.scores) + 1] : nothing
+tell!(s::Logged, candidate, score) = push!(s.scores, score)
 
 s = Logged([(strategy=Recursive(),), (strategy=Direct(28),)], [])
 tune(fc, df; tuner=s, horizon=28, initial=730)
@@ -170,8 +180,8 @@ mutable struct CandidateQueue
 end
 CandidateQueue(cands::Vector{<:NamedTuple}) = CandidateQueue(collect(NamedTuple, cands), 1)
 
-ask(q::CandidateQueue) = q.i > length(q.candidates) ? nothing :
-                         (c = q.candidates[q.i]; q.i += 1; c)
+ask!(q::CandidateQueue) = q.i > length(q.candidates) ? nothing :
+                          (c = q.candidates[q.i]; q.i += 1; c)
 tell!(::CandidateQueue, candidate, score) = nothing
 
 _sequence(t::TuningStrategy, grid) = t
@@ -330,10 +340,10 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
     stds = Union{Missing,Float64}[]
     errors = Union{Missing,String}[]
     while max_evals === nothing || length(cands) < max_evals
-        cand = ask(seq)
+        cand = ask!(seq)
         cand === nothing && break
         cand isa NamedTuple || throw(ArgumentError(
-            "ask($(nameof(typeof(tuner)))) returned $(repr(cand)); the ask/tell " *
+            "ask!($(nameof(typeof(tuner)))) returned $(repr(cand)); the ask!/tell! " *
             "contract requires a NamedTuple of Forecaster field overrides, or " *
             "nothing to stop."))
         m, sd, err = _evaluate_candidate(fc, cand, tbl, horizon, scheme, metric)
@@ -341,8 +351,8 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
         push!(cands, cand); push!(means, m); push!(stds, sd); push!(errors, err)
     end
     isempty(cands) && throw(ArgumentError(
-        "the tuning strategy proposed no candidates ($(nameof(typeof(tuner)))): ask " *
-        "returned nothing on its first call, so there is nothing to tune. Make ask " *
+        "the tuning strategy proposed no candidates ($(nameof(typeof(tuner)))): ask! " *
+        "returned nothing on its first call, so there is nothing to tune. Make ask! " *
         "return at least one NamedTuple of Forecaster field overrides before nothing."))
 
     table = _tune_table(cands, means, stds, errors)

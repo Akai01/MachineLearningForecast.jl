@@ -30,7 +30,7 @@ learner.
 - **Backtesting**: expanding-window time-series cross-validation with pluggable
   metrics.
 - **Pipeline tuning**: grid/random search over models, feature sets, and
-  strategies, scored on backtest error, with a documented ask/tell interface
+  strategies, scored on backtest error, with a documented ask!/tell! interface
   for plugging in your own search strategy (e.g. a Bayesian optimizer).
 - **Tables.jl-native**: accepts *any* Tables.jl-compatible source (a NamedTuple
   of vectors, `CSV.File`, a `DataFrame`, ...) and returns plain columntables
@@ -136,7 +136,8 @@ fc = Forecaster(EvoTreeRegressor(); freq=Month(1), id=:unique_id,
 | `TransformChain(t...)` | apply in order, undo in reverse |
 
 Your own transform subtypes `TargetTransform` and implements
-`fit_transform(t, y) -> (z, state)` and `untransform(t, ẑ, state)`.
+`fit_transform(t, y) -> (z, state)` and `untransform(t, ẑ, state)`. Both are public
+but not exported: `import MachineLearningForecast: fit_transform, untransform`.
 
 ## Strategies
 
@@ -243,11 +244,12 @@ they never abort the search. A non-finite mean score (`NaN` or `Inf`) counts as
 a failure. If every candidate fails, `tune` throws an `ErrorException` listing
 the distinct error messages.
 
-**Bring your own strategy.** The search loop is a documented ask/tell
-protocol: subtype `TuningStrategy`, implement `ask(s)` (return the next
+**Bring your own strategy.** The search loop is a documented ask!/tell!
+protocol: subtype `TuningStrategy`, implement `ask!(s)` (return the next
 candidate as a NamedTuple of `Forecaster` field overrides, or `nothing` to
 stop) and `tell!(s, candidate, score)` (receive the backtest score, or
-`missing` on failure), and pass it as `tuner=`. That is the exact interface a
+`missing` on failure), and pass it as `tuner=`. Both functions are public but not
+exported: `import MachineLearningForecast: ask!, tell!`. That is the exact interface a
 sequential Bayesian optimizer needs — see the `TuningStrategy` docstring.
 
 ## Panel (multi-series) forecasting

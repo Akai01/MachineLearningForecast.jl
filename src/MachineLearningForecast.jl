@@ -14,12 +14,13 @@ interface: any MLJ `Deterministic` regressor is a valid base model, and a
   [`NoTransform`](@ref), [`MeanScale`](@ref), [`LastScale`](@ref),
   [`Deseasonalize`](@ref), [`LogRatio`](@ref), [`Difference`](@ref),
   [`TransformChain`](@ref); your own subtype [`TargetTransform`](@ref) implements
-  [`fit_transform`](@ref) and [`untransform`](@ref).
+  [`fit_transform`](@ref) and [`untransform`](@ref) (public, not exported:
+  `import MachineLearningForecast: fit_transform, untransform`).
 - Panel (multi-series) forecasting: set `id` on [`Forecaster`](@ref) to fit
   one global model across many series ([`nseries`](@ref), [`SeriesState`](@ref)).
 - [`fit`](@ref) / [`forecast`](@ref) as a functional pair; [`backtest`](@ref)
   for expanding-window cross-validation; [`tune`](@ref) for pipeline tuning
-  with an extensible ask/tell [`TuningStrategy`](@ref) interface.
+  with an extensible ask!/tell! [`TuningStrategy`](@ref) interface.
 - Metrics: [`mae`](@ref), [`rmse`](@ref), [`mape`](@ref), [`smape`](@ref),
   [`mase`](@ref), [`rmsse`](@ref).
 """
@@ -37,11 +38,12 @@ import Tables
 export Forecaster, FittedForecaster, fit, forecast, backtest, BacktestResult,
        FeatureSet, Lag, RollingMean, RollingStd, RollingMin, RollingMax,
        Diff, Calendar, Fourier, Exogenous, CustomFeature,
-       Recursive, Direct,
+       TargetFeature, TimeFeature, ExogenousFeature,
+       ForecastStrategy, Recursive, Direct,
        mae, rmse, mape, smape, mase, rmsse,
-       tune, TuneResult, TuningStrategy, GridSearch, RandomSearch, ask, tell!,
+       tune, TuneResult, TuningStrategy, GridSearch, RandomSearch,
        SeriesState, nseries,
-       TargetTransform, fit_transform, untransform, NoTransform, MeanScale, LastScale,
+       TargetTransform, NoTransform, MeanScale, LastScale,
        Deseasonalize, LogRatio, Difference, TransformChain
 
 include("utils.jl")

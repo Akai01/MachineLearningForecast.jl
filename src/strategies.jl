@@ -2,7 +2,14 @@
     ForecastStrategy
 
 Abstract supertype of forecasting strategies. Shipped strategies:
-[`Recursive`](@ref) and [`Direct`](@ref).
+[`Recursive`](@ref) and [`Direct`](@ref). It is the type of the `strategy` field
+of a [`Forecaster`](@ref), and tuning grids and dispatch can use it.
+
+# Example
+```julia
+strategies = [Recursive(), Direct(28)]
+all(s -> s isa ForecastStrategy, strategies)   # true
+```
 """
 abstract type ForecastStrategy end
 

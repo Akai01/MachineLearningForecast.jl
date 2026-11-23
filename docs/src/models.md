@@ -202,11 +202,15 @@ over the series, since each has 18. sMAPE is shown in percent.
 There are two baselines, scored the same way series by series. The seasonal
 naive forecast repeats each series' last 12 training months. Naive2, one of
 the M3 competition's benchmarks, repeats the last seasonally adjusted value and
-puts the season back. [`fit_transform`](@ref) with `Deseasonalize(12)` does
-the adjustment, with the same seasonal indices as step 2 of the transform,
-since they do not depend on the level, and [`untransform`](@ref) the inverse.
+puts the season back. [`fit_transform`](@ref MachineLearningForecast.fit_transform)
+with `Deseasonalize(12)` does the adjustment, with the same seasonal indices as
+step 2 of the transform, since they do not depend on the level, and
+[`untransform`](@ref MachineLearningForecast.untransform) the inverse. Neither is
+exported, so the code imports them.
 
 ```julia
+import MachineLearningForecast: fit_transform, untransform
+
 mase12(y, ŷ; y_train) = mase(y, ŷ; y_train, m = 12)
 MachineLearningForecast.needs_ytrain(::typeof(mase12)) = true
 

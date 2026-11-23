@@ -163,7 +163,6 @@ and the default `materialize!` fills the training column by calling
 
 ```julia
 using Dates
-using MachineLearningForecast: TimeFeature
 import MachineLearningForecast: outputnames, featurevalues!
 
 struct Holiday <: TimeFeature

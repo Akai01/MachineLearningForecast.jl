@@ -71,10 +71,10 @@ These are load-bearing; please follow them:
 
 ## Adding a new feature type
 
-A feature is a subtype of `TargetFeature`, `TimeFeature` or `ExogenousFeature` (or of
-`AbstractFeature` directly, then it also defines `anchor`). To extend the package,
-import the generic functions and implement three methods (plus `anchor` for a direct
-`AbstractFeature` subtype):
+A feature is a subtype of `TargetFeature`, `TimeFeature` or `ExogenousFeature`, all
+exported (or of `AbstractFeature` directly, then it also defines `anchor`). To extend
+the package, import the generic functions and implement three methods (plus `anchor`
+for a direct `AbstractFeature` subtype):
 
 ```julia
 import MachineLearningForecast: outputnames, minhistory, featurevalues!, inputcolumns,
@@ -133,9 +133,12 @@ and not `ctx.y` is `AtTarget`: subtype `TimeFeature` or `ExogenousFeature`, or d
 
 ## Adding a target transform
 
-A transform is a subtype of `TargetTransform` and implements two methods:
+A transform is a subtype of `TargetTransform` and implements two methods, which are
+public but not exported, so import them:
 
 ```julia
+import MachineLearningForecast: fit_transform, untransform
+
 fit_transform(t, y)        # -> (z, state): z may be shorter, aligned to y's end
 untransform(t, ẑ, state)   # -> the forecasts of y for the forecasts ẑ of z
 ```
@@ -147,13 +150,14 @@ known future exactly from its forward-mapped values, as
 
 ## Adding a tuning strategy
 
-`TuningStrategy`, `ask` and `tell!` are public, documented API precisely so that
-strategies can live outside this package. Subtype `TuningStrategy` and implement
-`ask` (return a `NamedTuple` of `Forecaster` field overrides, or `nothing` to
-stop) and `tell!` (receive the candidate and its `Float64` score, or `missing`
+`TuningStrategy`, `ask!` and `tell!` are public, documented API precisely so that
+strategies can live outside this package. `ask!` and `tell!` are not exported, so
+import them (`import MachineLearningForecast: ask!, tell!`). Subtype `TuningStrategy`
+and implement `ask!` (return a `NamedTuple` of `Forecaster` field overrides, or
+`nothing` to stop) and `tell!` (receive the candidate and its `Float64` score, or `missing`
 if it failed). `tune` will drive the loop. See the `TuningStrategy` docstring
 for the exact contract, and `test/test_tune.jl` for a third-party strategy
-implemented using only exported names.
+implemented using only the public API.
 
 ## Style
 

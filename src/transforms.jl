@@ -7,10 +7,13 @@ forecasts of `z` back. Its state is fitted on that series' own training history
 only, so it never sees the forecast window, and [`backtest`](@ref) refits it in
 every fold.
 
-A transform implements two methods:
+A transform implements two methods, public but not exported, so import them
+first:
 
 ```julia
-fit_transform(t, y)    # -> (z, state); z may be shorter, aligned to y's end
+import MachineLearningForecast: fit_transform, untransform
+
+fit_transform(t, y)        # -> (z, state); z may be shorter, aligned to y's end
 untransform(t, ẑ, state)   # -> the forecasts of y for the forecasts ẑ of z
 ```
 
@@ -31,10 +34,13 @@ abstract type TargetTransform end
 
 Fit transform `t` on one series' training target `y` and return the transformed
 series `z` (possibly shorter, aligned to the end of `y`) and the state that
-[`untransform`](@ref) needs. Part of the [`TargetTransform`](@ref) contract.
+[`untransform`](@ref) needs. Part of the [`TargetTransform`](@ref) contract. It is
+not exported, so import it: `import MachineLearningForecast: fit_transform`.
 
 # Example
 ```julia
+import MachineLearningForecast: fit_transform
+
 z, state = fit_transform(LastScale(3), [2.0, 4.0, 6.0, 8.0])   # z = y ./ 6
 ```
 """
@@ -44,10 +50,13 @@ function fit_transform end
     untransform(t::TargetTransform, ẑ::AbstractVector{Float64}, state) -> Vector{Float64}
 
 Map the forecasts `ẑ` of the transformed series back to the original scale,
-step 1 first. Part of the [`TargetTransform`](@ref) contract.
+step 1 first. Part of the [`TargetTransform`](@ref) contract. It is not exported,
+so import it: `import MachineLearningForecast: fit_transform, untransform`.
 
 # Example
 ```julia
+import MachineLearningForecast: fit_transform, untransform
+
 z, state = fit_transform(LastScale(3), [2.0, 4.0, 6.0, 8.0])
 untransform(LastScale(3), [1.5, 1.5], state)   # [9.0, 9.0]
 ```

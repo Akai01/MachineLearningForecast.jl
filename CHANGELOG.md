@@ -98,6 +98,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Breaking: `ask` is now `ask!`, and four names are no longer exported.** The
+  tuning-strategy function that returns the next candidate is `ask!`, since it
+  advances the strategy's state; there is no `ask` any more. `ask!`, `tell!`,
+  `fit_transform` and `untransform` stay public API but are no longer exported:
+  extend them with `import MachineLearningForecast: ask!, tell!` (tuning
+  strategies) or `import MachineLearningForecast: fit_transform, untransform`
+  (target transforms), so that a method you define extends the package's
+  function instead of creating a new one. `TargetFeature`, `TimeFeature` and
+  `ExogenousFeature`, the abstract types to subtype for a new feature, and
+  `ForecastStrategy`, for dispatch and `isa` checks, are now exported and have
+  docstrings with examples.
+  The error `tune` raises when a strategy's `ask!` returns something other than
+  a `NamedTuple` or `nothing`, or nothing at its first call, now says `ask!`.
 - Documentation follows the forecasting literature (references on the
   conventions page). The README and the docs no longer call `CV()` unsafe in
   every case, and say when `TimeSeriesCV` helps, including its limit on a
@@ -117,7 +130,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   only the keys `:model`, `:features`, `:strategy` and `:transform`. The
   data-shape fields `:freq`, `:target`, `:time` and `:id` are no longer valid
   grid keys or candidate overrides: a grid with one of them throws, and an
-  `ask` candidate with one fails that candidate, with a message saying the
+  `ask!` candidate with one fails that candidate, with a message saying the
   field describes the data and cannot be tuned (a name that is not a field is
   still reported as unknown). The `FeatureSet` error text for a bad
   `:features` candidate no longer starts with "tune candidate key".
@@ -342,15 +355,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Calendar(:hour)` and `Calendar(:minute)` check the time values instead of
   the element type, so a `DateTime` column typed `Union{Missing,DateTime}` or
   `Any` is accepted. A `Date` column is still rejected with the same message.
-- The `FittedForecaster`, `BacktestResult`, `ask`, `tell!` and `TuneResult`
+- The `FittedForecaster`, `BacktestResult`, `ask!`, `tell!` and `TuneResult`
   docstrings have examples. `FittedForecaster`'s describes `fitted.series`,
   and `BacktestResult`'s lists the id column a panel backtest adds to `folds`.
 - The `AbstractFeature`, `Direct` and `TuningStrategy` docstrings now state the
-  four-method feature contract, `Direct`'s column anchoring and the ask/tell
+  four-method feature contract, `Direct`'s column anchoring and the ask!/tell!
   loop.
 - The `forecast` docstring describes a panel forecast: the id column in the
   result, and the id column and per-series timestamps `new_data` needs. The
-  `Forecaster` signature shows `id=nothing`, and the `TuningStrategy` and `ask`
+  `Forecaster` signature shows `id=nothing`, and the `TuningStrategy` and `ask!`
   docstrings list `:id` among the candidate keys.
 - The `fit` docstring said the time column must be sorted. That holds for a
   single series; a panel's rows may come in any order, since `fit` sorts each
