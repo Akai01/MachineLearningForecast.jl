@@ -103,9 +103,14 @@ columntables convert straight back: `DataFrame(fcast)`.
 
 **No-leakage guarantee**: every target-history feature uses only information
 strictly *before* the current row's target (rolling windows and differences
-require `lag ≥ 1`), and the test suite asserts it. A backtest feeds the realised
-values of the covariates, so its errors are a best case (too low) unless the column
-holds the values that were actually known at the forecast origin.
+require `lag ≥ 1`), and the test suite asserts it. A backtest uses the realised values
+of the covariates, so it scores ex-post forecasts (Hyndman & Athanasopoulos 2021, §7.6).
+For covariates not known at the origin (a competitor's price, the weather) this
+typically understates the error of the real, ex-ante forecast, which also carries the
+error of forecasting the covariate. For covariates known in advance (calendar effects,
+planned promotions, prices you set) ex-ante and ex-post agree. To measure ex-ante
+error, supply in the held-out rows the covariate values that were available at the
+origin (a forecast, or a lagged column).
 
 ## Target transforms
 
@@ -146,9 +151,18 @@ Your own transform subtypes `TargetTransform` and implements
   `h = 1 (mod m)`; use `Lag.(1:m)`, which holds an in-phase lag at every `h`, or
   `Recursive`.
 
-[Leakage and conventions](docs/src/conventions.md) compares the two strategies and
-lists the rules each feature, backtest and metric follows, with recipes for custom
-features.
+Neither strategy is better in general. `Recursive` estimates one model efficiently but
+is biased when the one-step model is misspecified, and the errors it feeds back
+accumulate. `Direct` is more robust to such misspecification and to non-stationarity
+such as unit roots, and feeds nothing back, but estimates each horizon separately, which
+costs variance, and its forecasts at neighbouring steps need not be coherent
+(Marcellino, Stock & Watson 2006; Chevillon 2007; Ben Taieb et al. 2012). Empirically,
+iterated (`Recursive`) forecasts are often at least as accurate on stationary data
+(Marcellino, Stock & Watson 2006). Compare both with `backtest`.
+
+[Leakage and conventions](docs/src/conventions.md) compares the two strategies and lists
+the rules each feature, backtest and metric follows, with recipes for custom features.
+Its "References" section lists the sources cited in this README.
 
 ## Hyperparameter tuning
 
@@ -168,15 +182,19 @@ tuned = TunedModel(model = EvoTreeRegressor(),
 fc = Forecaster(tuned; features=..., strategy=Recursive(), freq=Day(1))
 ```
 
-> **⚠️ Leakage warning.** Never use MLJ's `CV()` — shuffled *or not* — or
-> `Holdout(shuffle=true)` here. Plain K-fold is not safe merely because
-> `shuffle=false`: every fold but the last trains on rows that come *after* its
-> test rows, so the model sees the future of the block it is scored on, and
-> lag features carry that information directly. Shuffling makes it worse by
-> mixing future rows into training outright. Use **`TimeSeriesCV` only**.
+> **Leakage warning.** If you tune the base model with MLJ's `TunedModel`, prefer
+> `TimeSeriesCV` to `CV()`. Plain K-fold CV trains on rows that come after some of its
+> test rows. For a stationary series, pure lag features and a model whose one-step
+> residuals are not autocorrelated, this does not bias the estimate (Bergmeir, Hyndman
+> & Koo 2018); it does for a trending or otherwise non-stationary series (Cerqueira,
+> Torgo & Mozetič 2020) or when the model underfits and its residuals are
+> autocorrelated. The result does not cover covariates or multi-step targets.
+> `TimeSeriesCV` never trains on rows after its test rows on a single series, so it
+> avoids these problems there. On a panel the pooled frame is ordered by series, not by
+> time, so score on a validation window or use `tune` instead.
 >
 > Also note the caveat: this tunes *one-step-ahead tabular* error, which is a
-> proxy — recursion error compounds over the horizon, and pipeline-level
+> proxy — recursion error accumulates over the horizon, and pipeline-level
 > choices (lags, Fourier order, strategy) are invisible to it. For those, use
 > `tune` below.
 
@@ -190,7 +208,7 @@ space = Dict(:eta       => HP.LogUniform(:eta, log(0.005), log(0.3)),
              :max_depth => HP.QuantUniform(:max_depth, 3.0, 10.0, 1.0))
 tuned = TunedModel(model = EvoTreeRegressor(),
                    tuning = MLJTreeParzenTuning(),
-                   resampling = TimeSeriesCV(nfolds=5),   # TimeSeriesCV only!
+                   resampling = TimeSeriesCV(nfolds=5),   # time-ordered folds!
                    range = space, n = 50, measure = rms)
 fc = Forecaster(tuned; features=..., strategy=Recursive(), freq=Day(1))
 ```
@@ -271,16 +289,18 @@ Notes:
   aborting the fit.
 - **Exogenous covariates** join on `(id, time)`, so `new_data` must carry the id
   column too.
-- **Backtesting** with `initial` cuts folds on the *global timestamp grid* —
-  `initial`, `step` and `horizon` count distinct timestamps, not rows. With
-  `windows` it instead counts each series' folds back from *its own* end, as
-  the M competitions hold out each series' last values, which suits panels
-  whose series span different years. Either way it scores by joining forecasts
-  to actuals on `(id, time)`, and scaled metrics such as `mase` use each
-  series' own training values. `tune` takes `initial` or `windows` the same
-  way. A fold does not score a series that has no rows up to the fold's origin, too
-  few of them to train on (it is skipped with a warning), or no actuals after
-  it, so the set of scored series can change from fold to fold.
+- **Backtesting** with `initial` cuts folds on the *global timestamp grid* — `initial`,
+  `step` and `horizon` count distinct timestamps, not rows. With `windows` it instead
+  counts each series' folds back from *its own* end, as the M competitions hold out each
+  series' last values. If the series are not aligned in calendar time, the training set
+  of a fold can contain values from after another series' cutoff, a known pitfall of
+  global models (Hewamalage, Ackermann & Bergmeir 2023); with `initial`, all series are
+  cut at the same timestamp, which avoids it. Either way it scores by joining forecasts
+  to actuals on `(id, time)`, and scaled metrics such as `mase` use each series' own
+  training values. `tune` takes `initial` or `windows` the same way. A fold does not
+  score a series that has no rows up to the fold's origin, too few of them to train on
+  (it is skipped with a warning), or no actuals after it, so the set of scored series
+  can change from fold to fold.
 - Per-series state is available as `fitted.series`, a vector of
   `SeriesState`; for a single series the familiar `fitted.y_history`,
   `fitted.t_last` and `fitted.n_train` still work.
@@ -292,6 +312,13 @@ better. `mape` and `smape` return fractions (0.10 = 10%);
 `mase(y, ŷ; y_train, m=1)` scales by the in-sample seasonal-naive error.
 In `backtest`, unscaled metrics pool the fold's rows; scaled metrics are per series,
 weighted by scored points; the overall row is the unweighted mean over folds.
+Scaled metrics follow Hyndman & Koehler (2006): each series' errors are divided by that
+series' own training-window naive error, then averaged over series (here weighted by
+scored points, our choice). Unscaled metrics are pooled across series, so on a panel
+they are dominated by the large-scale series; use a scaled metric to compare series of
+different scale. On intermittent series (many zeros), MAE-based measures, including
+MASE, can favour forecasts close to zero; the M5 competition used a squared-error
+scaled measure (RMSSE) for this reason (Makridakis, Spiliotis & Assimakopoulos 2022).
 
 ## Error messages
 

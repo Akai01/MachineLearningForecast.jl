@@ -12,12 +12,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   against leakage; the conventions behind forecasts and backtest scores (`Lag`
   under `Direct`, realised covariates in a backtest, the series scored in a
   panel backtest, gaps and missing values, how metrics aggregate, MLJ's `CV()`
-  on time series); how to choose between `Recursive` and `Direct`; and recipes
+  on time series, intermittent series); how to choose between `Recursive` and
+  `Direct`; a "References" section with the literature behind these
+  conventions; and recipes
   for a rolling median, an exponentially weighted mean, the share of zeros and
   the time since the last non-zero value as `CustomFeature`s, a holiday
   `TimeFeature`, a parent aggregate or a covariate shifted by at least the
   horizon passed through `Exogenous`, per-step and per-series scores from
-  `BacktestResult.folds`, and a naive baseline.
+  `BacktestResult.folds`, and naive and seasonal naive baselines.
 - `Probabilistic` MLJ models work as base models: the forecast is the mean of
   the predicted distribution (`predict_mean`), so a model such as EvoTrees'
   `EvoTreeGaussian` fits, forecasts, backtests and tunes like a
@@ -88,6 +90,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Documentation follows the forecasting literature (references on the
+  conventions page). The README and the docs no longer call `CV()` unsafe in
+  every case, and say when `TimeSeriesCV` helps, including its limit on a
+  panel. The `Exogenous` and `backtest` docstrings and the README say that a
+  backtest scores ex-post forecasts. The `mase` docstring says that its scale is
+  the in-sample one-step (lag-`m`) naive error, and that MAE-based measures can
+  favour near-zero forecasts on intermittent series. The `backtest` docstring
+  and the README explain how scaled and unscaled metrics aggregate over a panel
+  and the cross-series cutoff caveat of `windows`. The `Recursive` and `Direct`
+  docstrings and the README compare the two strategies in both directions.
 - **`Forecaster` has one constructor, `Forecaster(model; features, freq, ...)`.**
   The eight-argument positional constructor is gone. `features` that is not a
   `FeatureSet`, and a `freq` that is not a positive `Dates.Period`, now throw an
@@ -105,7 +117,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the origin-anchored target history a "v1 simplification", and say what it
   means for `Lag` (`y[t0-k+1]`, not `y[target-k]`, at horizon `h`). The
   `Exogenous` and `backtest` docstrings say that a backtest feeds realised
-  covariates, so its errors are a best case; `backtest` also says how metrics
+  covariates, so it scores ex-post forecasts; `backtest` also says how metrics
   aggregate, and that a fold does not score a series that has no rows up to the
   fold's origin, too few of them to train on (it is skipped with a warning), or
   no actuals after it, so the set of scored series can change from fold to fold.
@@ -342,8 +354,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The `tune` docstring and the README say that `tune` throws an
   `ErrorException` listing the errors when every candidate fails, and the
   README that a non-finite mean score counts as a failure.
-- The docs site's leakage warning now says never to use `CV()`, shuffled or
-  not, as the README does, and links the README. The README's `SeriesState`
+- The docs site's leakage warning now matches the README's and links the
+  README. The README's `SeriesState`
   link is fixed, and it calls Tables.jl the only table dependency rather than
   the only dependency.
 

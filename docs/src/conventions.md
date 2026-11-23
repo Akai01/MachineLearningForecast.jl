@@ -30,14 +30,24 @@ last observed value), not `y[target-k]`; `Lag(m)` is in phase with the target
 only when `h = 1 (mod m)`; use `Lag.(1:m)`, which holds an in-phase lag at every
 `h`, or [`Recursive`](@ref).
 
-**`Exogenous` and `backtest`.** A backtest feeds the realised values of the
-covariates, so its errors are a best case (too low) unless the column holds the
-values that were actually known at the forecast origin. The recipes below build
-such columns.
+**`Exogenous` and `backtest`.** A backtest uses the realised values of the
+covariates, so it scores ex-post forecasts (Hyndman & Athanasopoulos 2021,
+§7.6). For covariates not known at the origin (a competitor's price, the
+weather) this typically understates the error of the real, ex-ante forecast,
+which also carries the error of forecasting the covariate. For covariates known
+in advance (calendar effects, planned promotions, prices you set) ex-ante and
+ex-post agree. To measure ex-ante error, supply in the held-out rows the
+covariate values that were available at the origin (a forecast, or a lagged
+column). The recipes below build lagged columns.
 
 **Panel `backtest`.** A fold does not score a series that has no rows up to the
 fold's origin, too few of them to train on (it is skipped with a warning), or
 no actuals after it, so the set of scored series can change from fold to fold.
+With `windows`, each series is cut at its own end, as in the M competitions. If
+the series are not aligned in calendar time, the training set of a fold can
+contain values from after another series' cutoff, a known pitfall of global
+models (Hewamalage, Ackermann & Bergmeir 2023). With `initial`, all series are
+cut at the same timestamp, which avoids it.
 
 **Gaps and missing values.** The package refuses a time column with gaps,
 duplicates or missing timestamps, and a target with `missing` or non-finite
@@ -48,30 +58,49 @@ fitting, because a fill that uses later values, such as interpolation, leaks.
 metrics are per series, weighted by scored points; the overall row is the
 unweighted mean over folds. Scaled metrics are those that
 [`needs_ytrain`](@ref MachineLearningForecast.needs_ytrain) marks, such as
-[`mase`](@ref).
+[`mase`](@ref). Scaled metrics follow Hyndman & Koehler (2006): each series'
+errors are divided by that series' own training-window naive error, then
+averaged over series (here weighted by scored points, our choice). Unscaled
+metrics are pooled across series, so on a panel they are dominated by the
+large-scale series; use a scaled metric to compare series of different scale.
+On intermittent series (many zeros), MAE-based measures, including MASE, can
+favour forecasts close to zero; the M5 competition used a squared-error scaled
+measure (RMSSE) for this reason (Makridakis, Spiliotis & Assimakopoulos 2022).
 
 **Tuning base models with MLJ.** If you tune the base model with MLJ's
-`TunedModel`, use `TimeSeriesCV` and never `CV()`, shuffled or not: every fold
-but the last trains on rows that come after its test rows, so the model sees
-the future of the block it is scored on. [Tuning the models](tuning.md) avoids
-the question by scoring on a validation window that comes after the training
-window.
+`TunedModel`, prefer `TimeSeriesCV` to `CV()`. Plain K-fold CV trains on rows
+that come after some of its test rows. For a stationary series, pure lag
+features and a model whose one-step residuals are not autocorrelated, this does
+not bias the estimate (Bergmeir, Hyndman & Koo 2018); it does for a trending or
+otherwise non-stationary series (Cerqueira, Torgo & Mozetič 2020) or when the
+model underfits and its residuals are autocorrelated. The result does not cover
+covariates or multi-step targets. `TimeSeriesCV` never trains on rows after its
+test rows on a single series, so it avoids these problems there. On a panel the
+pooled frame is ordered by series, not by time, so score on a validation window
+or use `tune` instead. [Tuning the models](tuning.md) scores on a validation
+window that comes after the training window.
 
 ## Choosing a strategy
 
 [`Recursive`](@ref) fits one model on one-step-ahead rows, where the lag
 features are the true past values. At forecast time it runs that model on its
-own earlier predictions, so its errors compound over the horizon, and any
-horizon can be forecast.
+own earlier predictions, and any horizon can be forecast.
 
 [`Direct`](@ref) fits one model per step `1..max_horizon`. Model `i` predicts
 the target `i` steps ahead from the history at the forecast origin, so no
-prediction is fed back and errors do not compound. It needs `max_horizon`
-models, cannot forecast past `max_horizon`, and every step sees the same target
-history, which is why the `Lag` convention above matters.
+prediction is fed back. It needs `max_horizon` models, cannot forecast past
+`max_horizon`, and every step sees the same target history, which is why the
+`Lag` convention above matters.
 
-Neither is better in general. Compare them with [`backtest`](@ref), or let
-[`tune`](@ref) search over `strategy`.
+Neither strategy is better in general. `Recursive` estimates one model
+efficiently but is biased when the one-step model is misspecified, and the
+errors it feeds back accumulate. `Direct` is more robust to such misspecification
+and to non-stationarity such as unit roots, and feeds nothing back, but estimates
+each horizon separately, which costs variance, and its forecasts at neighbouring
+steps need not be coherent (Marcellino, Stock & Watson 2006; Chevillon 2007; Ben
+Taieb et al. 2012). Empirically, iterated (`Recursive`) forecasts are often at
+least as accurate on stationary data (Marcellino, Stock & Watson 2006). Compare both with
+[`backtest`](@ref), or let [`tune`](@ref) search over `strategy`.
 
 ## Recipes
 
@@ -153,7 +182,7 @@ forecast period, but its value `H` steps ago is, as long as `H` is at least the
 forecast horizon. Shift it by `H`, then pass it through [`Exogenous`](@ref). The recipe assumes
 that every series ends on the same date and that the dates are contiguous.
 The column holds only values from before the forecast origin in `fit`, in
-`forecast` and in `backtest`, so the backtest scores are not too low.
+`forecast` and in `backtest`, so the backtest measures the ex-ante error.
 
 ```julia
 H = 7                                   # at least the horizon
@@ -238,3 +267,66 @@ MMI.target_scitype(::Type{NaiveLast}) = AbstractVector{MMI.Continuous}
 naive = Forecaster(NaiveLast(); features = FeatureSet(Lag(1)), freq = Day(1))
 backtest(naive, df; horizon = 7, windows = 3, metrics = (mae, smape)).metrics
 ```
+
+### A seasonal naive forecaster as a baseline
+
+Naive and seasonal naive forecasts are the standard benchmarks (Hyndman &
+Athanasopoulos 2021, §5.2). When the data are seasonal with period `m`, backtest
+a seasonal naive baseline: a model that returns `y_lag_m`, with `Lag(m)` as the
+only feature, under `Recursive`. For a horizon above `m` the fed-back
+predictions equal the lagged values, so each step repeats the value one or more
+seasons earlier, which is the seasonal naive forecast. Under `Direct` it does
+not: `Lag(m)` is then `y[t0-m+1]` at every step, as explained above.
+
+```julia
+using Tables
+import MLJModelInterface as MMI
+
+mutable struct SeasonalNaive <: MMI.Deterministic
+    m::Int
+end
+MMI.fit(::SeasonalNaive, verbosity, X, y) = (nothing, nothing, NamedTuple())
+MMI.predict(model::SeasonalNaive, fitresult, Xnew) =
+    collect(Float64, Tables.getcolumn(Xnew, Symbol(:y_lag_, model.m)))
+MMI.input_scitype(::Type{SeasonalNaive}) = MMI.Table(MMI.Continuous)
+MMI.target_scitype(::Type{SeasonalNaive}) = AbstractVector{MMI.Continuous}
+
+m = 7
+snaive = Forecaster(SeasonalNaive(m); features = FeatureSet(Lag(m)), freq = Day(1))
+backtest(snaive, df; horizon = 14, windows = 3, metrics = (mae, smape)).metrics
+```
+
+## References
+
+- Ben Taieb, S., Bontempi, G., Atiya, A. F., & Sorjamaa, A. (2012). A review and
+  comparison of strategies for multi-step ahead time series forecasting based on
+  the NN5 forecasting competition. *Expert Systems with Applications*, 39(8),
+  7067–7083. <https://doi.org/10.1016/j.eswa.2012.01.039>
+- Bergmeir, C., Hyndman, R. J., & Koo, B. (2018). A note on the validity of
+  cross-validation for evaluating autoregressive time series prediction.
+  *Computational Statistics & Data Analysis*, 120, 70–83.
+  <https://doi.org/10.1016/j.csda.2017.11.003>
+- Cerqueira, V., Torgo, L., & Mozetič, I. (2020). Evaluating time series
+  forecasting models: an empirical study on performance estimation methods.
+  *Machine Learning*, 109(11), 1997–2028.
+  <https://doi.org/10.1007/s10994-020-05910-7>
+- Chevillon, G. (2007). Direct multi-step estimation and forecasting. *Journal of
+  Economic Surveys*, 21(4), 746–785.
+  <https://doi.org/10.1111/j.1467-6419.2007.00518.x>
+- Hewamalage, H., Ackermann, K., & Bergmeir, C. (2023). Forecast evaluation for
+  data scientists: common pitfalls and best practices. *Data Mining and
+  Knowledge Discovery*, 37(2), 788–832.
+  <https://doi.org/10.1007/s10618-022-00894-5>
+- Hyndman, R. J., & Athanasopoulos, G. (2021). *Forecasting: principles and
+  practice* (3rd ed.). OTexts. <https://otexts.com/fpp3/>
+- Hyndman, R. J., & Koehler, A. B. (2006). Another look at measures of forecast
+  accuracy. *International Journal of Forecasting*, 22(4), 679–688.
+  <https://doi.org/10.1016/j.ijforecast.2006.03.001>
+- Makridakis, S., Spiliotis, E., & Assimakopoulos, V. (2022). M5 accuracy
+  competition: results, findings, and conclusions. *International Journal of
+  Forecasting*, 38(4), 1346–1364.
+  <https://doi.org/10.1016/j.ijforecast.2021.11.013>
+- Marcellino, M., Stock, J. H., & Watson, M. W. (2006). A comparison of direct and
+  iterated multistep AR methods for forecasting macroeconomic time series.
+  *Journal of Econometrics*, 135(1–2), 499–526.
+  <https://doi.org/10.1016/j.jeconom.2005.07.020>

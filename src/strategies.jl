@@ -11,8 +11,10 @@ abstract type ForecastStrategy end
 
 One model; forecasts are fed back as pseudo-history to compute lag features.
 The model is trained once on the one-step-ahead frame and iterated over the
-horizon, so any horizon can be forecast — at the price of compounding
-prediction error through the fed-back history.
+horizon, so any horizon can be forecast. Neither strategy is better in general:
+`Recursive` estimates one model efficiently but is biased when the one-step model is
+misspecified, and the errors it feeds back accumulate (references under
+[`Direct`](@ref)).
 
 # Example
 ```julia
@@ -28,6 +30,15 @@ struct Recursive <: ForecastStrategy end
 One model per horizon step `1..max_horizon`. `max_horizon` fixes the number of
 models at fit time; forecasting beyond it errors (refit with a larger horizon
 or use [`Recursive`](@ref)).
+
+Neither strategy is better in general. `Recursive` estimates one model efficiently but
+is biased when the one-step model is misspecified, and the errors it feeds back
+accumulate. `Direct` is more robust to such misspecification and to non-stationarity
+such as unit roots, and feeds nothing back, but estimates each horizon separately, which
+costs variance, and its forecasts at neighbouring steps need not be coherent (Marcellino,
+Stock & Watson 2006; Chevillon 2007; Ben Taieb et al. 2012). Empirically, iterated
+(`Recursive`) forecasts are often at least as accurate on stationary data (Marcellino,
+Stock & Watson 2006). Compare both with [`backtest`](@ref).
 
 At forecast time, the direct models condition their target-history features on
 the history up to the forecast origin, while exogenous and time features vary per

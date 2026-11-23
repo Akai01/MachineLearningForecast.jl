@@ -259,8 +259,8 @@ NamedTuple of [`Forecaster`](@ref) field overrides (e.g. `model`, `features`,
 backtested with [`backtest`](@ref)`(spec, data; horizon, initial, step,
 metrics=(metric,))`, or with `windows` in place of `initial`, and scored by the
 mean of `metric` across folds (lower is better). Pass exactly one of `initial`
-and `windows`; `windows` counts each series' folds back from its own end, which
-lets `tune` work on panels whose series span different calendar periods.
+and `windows`; `windows` counts each series' folds back from its own end (see
+[`backtest`](@ref) for the caveat when the series are not aligned in calendar time).
 
 - `grid`: NamedTuple mapping `Forecaster` field names (`model`, `features`,
   `strategy`, `transform`) to candidate value lists.

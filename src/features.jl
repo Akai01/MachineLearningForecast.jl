@@ -477,8 +477,13 @@ supplied for the full horizon via the `new_data` keyword; in `backtest` they
 are sliced from the held-out data automatically. Exogenous columns must be
 numeric (`Real` or `Bool`).
 
-A backtest feeds the realised values of the covariates, so its errors are a best case (too
-low) unless the column holds the values that were actually known at the forecast origin.
+A backtest uses the realised values of the covariates, so it scores ex-post forecasts
+(Hyndman & Athanasopoulos 2021, §7.6). For covariates not known at the origin (a
+competitor's price, the weather) this typically understates the error of the real,
+ex-ante forecast, which also carries the error of forecasting the covariate. For
+covariates known in advance (calendar effects, planned promotions, prices you set)
+ex-ante and ex-post agree. To measure ex-ante error, supply in the held-out rows the
+covariate values that were available at the origin (a forecast, or a lagged column).
 
 # Example
 ```julia

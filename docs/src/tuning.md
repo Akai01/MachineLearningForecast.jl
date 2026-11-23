@@ -36,9 +36,20 @@ validate(model) = evaluate(model, vpanel)[1:2]
 140321 rows
 ```
 
-The split is time-ordered on purpose: MLJ's `CV()` is unsafe for time series,
-shuffled or not, because every fold but the last trains on rows that come after
-its test rows (see [Leakage and conventions](conventions.md)).
+The split is time-ordered on purpose: the validation window comes after the
+training window, as the forecast period does in real use. If you tune the base model with MLJ's
+`TunedModel`, prefer `TimeSeriesCV` to `CV()`. Plain K-fold CV trains on rows
+that come after some of its test rows. For a stationary series, pure lag
+features and a model whose one-step residuals are not autocorrelated, this does
+not bias the estimate (Bergmeir, Hyndman & Koo 2018); it does for a trending or
+otherwise non-stationary series (Cerqueira, Torgo & Mozetič 2020) or when the
+model underfits and its residuals are autocorrelated. The result does not cover
+covariates or multi-step targets. `TimeSeriesCV` never trains on rows after its
+test rows on a single series, so it avoids these problems there. On a panel the
+pooled frame is ordered by series, not by time, so score on a validation window
+or use `tune` instead. The 18-step forecasts on this page, for a trending
+panel, are outside the Bergmeir, Hyndman & Koo result. The references are
+listed in [Leakage and conventions](conventions.md).
 
 ## The search spaces
 

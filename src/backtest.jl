@@ -125,9 +125,11 @@ on `(id, time)`, so ragged series contribute wherever they have actuals.
 `windows` instead counts the folds back from **each series' own end**, as the
 M competitions hold out each series' last values: in fold `k`, every series
 trains on its rows up to its own cutoff, and one global model is fitted on all
-of them. When the series span different calendar periods, a series' cutoff can
-fall before other series' training rows, as with every global model evaluated
-this way. The `folds` table then carries the id column too.
+of them. If the series are not aligned in calendar time, the training set of a fold
+can contain values from after another series' cutoff, a known pitfall of global
+models (Hewamalage, Ackermann & Bergmeir 2023). With `initial`, all series are cut at
+the same timestamp, which avoids it. For a panel, the `folds` table carries the id column
+too.
 A fold does not score a series that has no rows up to the fold's origin, too few of them
 to train on (it is skipped with a warning), or no actuals after it, so the set of scored
 series can change from fold to fold.
@@ -139,12 +141,21 @@ training target — [`mase`](@ref), or your own, declared via
 fold's training window supplied automatically (on a panel, each series' own, so a
 scale never mixes series).
 Unscaled metrics pool the fold's rows; scaled metrics are per series, weighted by scored
-points; the overall row is the unweighted mean over folds.
+points; the overall row is the unweighted mean over folds. Scaled metrics follow Hyndman
+& Koehler (2006): each series' errors are divided by that series' own training-window
+naive error, then averaged over series (here weighted by scored points, our choice).
+Unscaled metrics are pooled across series, so on a panel they are dominated by the
+large-scale series; use a scaled metric to compare series of different scale.
 
 When the feature set includes [`Exogenous`](@ref) columns, they are sliced from
 the held-out data automatically (they are "known" in a backtest).
-A backtest feeds the realised values of the covariates, so its errors are a best case (too
-low) unless the column holds the values that were actually known at the forecast origin.
+A backtest uses the realised values of the covariates, so it scores ex-post forecasts
+(Hyndman & Athanasopoulos 2021, §7.6). For covariates not known at the origin (a
+competitor's price, the weather) this typically understates the error of the real,
+ex-ante forecast, which also carries the error of forecasting the covariate. For
+covariates known in advance (calendar effects, planned promotions, prices you set)
+ex-ante and ex-post agree. To measure ex-ante error, supply in the held-out rows the
+covariate values that were available at the origin (a forecast, or a lagged column).
 
 # Example
 ```julia

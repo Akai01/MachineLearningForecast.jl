@@ -87,8 +87,13 @@ end
     mase(y, ŷ; y_train, m=1) -> Float64
 
 Mean absolute scaled error: `mae(y, ŷ)` divided by the in-sample MAE of the
-seasonal-naive forecast with seasonality `m` on `y_train`
-(`mean(|y_train[t] - y_train[t-m]|)`). Values below 1 beat the naive baseline.
+(seasonal) naive forecast with seasonality `m` on `y_train`
+(`mean(|y_train[t] - y_train[t-m]|)`). A value below 1 means the errors are smaller
+on average than the in-sample one-step (lag-`m`) naive errors (Hyndman & Koehler 2006);
+multi-step errors are naturally larger, so compare with a naive baseline backtested at
+the same horizon. On intermittent series (many zeros), MAE-based measures, including
+MASE, can favour forecasts close to zero; the M5 competition used a squared-error
+scaled measure (RMSSE) for this reason (Makridakis, Spiliotis & Assimakopoulos 2022).
 If the naive error is zero (constant training series), a warning is emitted
 and `Inf` is returned.
 
