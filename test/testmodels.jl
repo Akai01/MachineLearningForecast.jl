@@ -158,6 +158,56 @@ end
 MMI.input_scitype(::Type{KeepPredict}) = MMI.Table(MMI.Continuous)
 MMI.target_scitype(::Type{KeepPredict}) = AbstractVector{MMI.Continuous}
 
+"""
+Predicts zeros, but `extra` predictions too many (too few if negative): a
+learner that breaks the one-prediction-per-row contract.
+"""
+mutable struct WrongCount <: MMI.Deterministic
+    extra::Int
+end
+MMI.fit(::WrongCount, verbosity, X, y) = (nothing, nothing, NamedTuple())
+MMI.predict(m::WrongCount, fitresult, Xnew) =
+    zeros(max(length(Tables.rows(Xnew)) + m.extra, 0))
+MMI.input_scitype(::Type{WrongCount}) = MMI.Table(MMI.Continuous)
+MMI.target_scitype(::Type{WrongCount}) = AbstractVector{MMI.Continuous}
+
+"""
+Predicts like `LinAR(a, b)`, but reads its input through `reshape` (which flags
+the column as shared data on Julia 1.10) and, if `asmatrix`, returns an n×1
+Matrix. `extra` predictions too many (too few if negative) break the
+one-prediction-per-row contract.
+"""
+mutable struct ReshapeLinAR <: MMI.Deterministic
+    a::Float64
+    b::Float64
+    extra::Int
+    asmatrix::Bool
+end
+MMI.fit(::ReshapeLinAR, verbosity, X, y) = (nothing, nothing, NamedTuple())
+function MMI.predict(m::ReshapeLinAR, fitresult, Xnew)
+    out = m.a .* reshape(Tables.getcolumn(Xnew, :y_lag_1), :, 1) .+ m.b
+    out = m.extra ≥ 0 ? vcat(out, zeros(m.extra, 1)) : out[1:(end + m.extra), :]
+    return m.asmatrix ? out : vec(out)
+end
+MMI.input_scitype(::Type{ReshapeLinAR}) = MMI.Table(MMI.Continuous)
+MMI.target_scitype(::Type{ReshapeLinAR}) = AbstractVector{MMI.Continuous}
+
+"""
+Predicts zeros and keeps the `y_lag_1` column itself, not a copy, of every
+`Xnew` it is asked about, in `calls[]`: it shows which arrays the forecast loop
+hands to a model. Read them back through `fitted.models[1].model.calls[]`.
+"""
+mutable struct ColumnProbe <: MMI.Deterministic
+    calls::Base.RefValue{Vector{Any}}
+end
+MMI.fit(::ColumnProbe, verbosity, X, y) = (nothing, nothing, NamedTuple())
+function MMI.predict(m::ColumnProbe, fitresult, Xnew)
+    push!(m.calls[], Tables.getcolumn(Xnew, :y_lag_1))
+    return zeros(length(Tables.rows(Xnew)))
+end
+MMI.input_scitype(::Type{ColumnProbe}) = MMI.Table(MMI.Continuous)
+MMI.target_scitype(::Type{ColumnProbe}) = AbstractVector{MMI.Continuous}
+
 "Declares no input scitype, so it is Unknown."
 mutable struct NoInputTrait <: MMI.Deterministic end
 MMI.target_scitype(::Type{NoInputTrait}) = AbstractVector{MMI.Continuous}

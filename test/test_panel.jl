@@ -1102,4 +1102,369 @@
             @test out.y_hat[3:4] == forecast(solo, 2).y_hat
         end
     end
+
+    @testset "forecast checks keep their messages and order, single and panel" begin
+        n = 40
+        ds = collect(Date(2022, 1, 1):Day(1):Date(2022, 1, 1) + Day(n - 1))
+        stbl = (ds=ds, y=50 .+ 0.1 .* (1:n), promo=Float64.(1:n))
+        pe = merge(makepanel(), (promo=Float64.(1:length(panel.y)),))
+        feats = FeatureSet(Lag(1), Exogenous(:promo))
+        fs = fit(Forecaster(TestModels.EchoColumn(:promo); features=feats,
+                            strategy=Direct(3), freq=Day(1)), stbl)
+        fp = fit(mk(TestModels.EchoColumn(:promo), feats; strat=Direct(3)), pe)
+        g(h) = ds[end] .+ Day.(1:h)
+        nofut = "features contain Exogenous(:promo) but forecast() was called without " *
+                "`future`. Pass a table with columns "
+        @test_throws nofut * "(:ds, :promo) covering $(g(3)[1]) … $(g(3)[3])." forecast(
+            fs, 3)
+        @test_throws nofut * "(:unique_id, :ds, :promo) covering all 3 series over " *
+                     "their 3 forecast steps." forecast(fp, 3)
+        # The exogenous error comes before the horizon error.
+        @test_throws nofut * "(:ds, :promo) covering $(g(5)[1]) … $(g(5)[5])." forecast(
+            fs, 5)
+        @test_throws nofut * "(:unique_id, :ds, :promo) covering all 3 series over " *
+                     "their 5 forecast steps." forecast(fp, 5)
+        horizon = "strategy=Direct(3) was fit with max_horizon=3 but forecast(h=5) was " *
+                  "requested. Refit with Direct(5) or use Recursive()."
+        sfut = (ds=g(5), promo=Float64.(1:5))
+        @test_throws horizon forecast(fs, 5; future=sfut)
+        short = (ds=g(3), promo=Float64.(1:3))
+        @test_throws "`future` is missing 2 of the 5 timestamps" forecast(
+            fs, 5; future=short)
+
+        # Direct warns about a `future` it cannot use.
+        ignored = "`future` was passed but the feature set has no Exogenous features; " *
+                  "it will be ignored."
+        plains = fit(Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                                strategy=Direct(3), freq=Day(1)), stbl)
+        plainp = fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)); strat=Direct(3)),
+                     panel)
+        nd = (unique_id=["s1"], ds=[Date(2022, 3, 1)], promo=[1.0])
+        @test_logs (:warn, ignored) forecast(plains, 2; future=sfut)
+        @test_logs (:warn, ignored) forecast(plainp, 2; future=nd)
+        @test_logs (:warn, ignored) @test_throws(horizon, forecast(plains, 5; future=sfut))
+        @test_logs (:warn, ignored) @test_throws(horizon, forecast(plainp, 5; future=nd))
+        @test_throws horizon forecast(plains, 5)
+        @test_throws horizon forecast(plainp, 5)
+
+        # Single checks columns, rows, timestamps, then values.
+        rec = fit(Forecaster(TestModels.EchoColumn(:promo); features=feats,
+                             freq=Day(1)), stbl)
+        gs = g(3)
+        nopromo = (ds=gs[1:1],)
+        @test_throws "`future` is missing column :promo; it must contain the time " *
+                     "column :ds and the exogenous column :promo." forecast(
+            rec, 3; future=nopromo)
+        dupabsent = (ds=[gs[1], gs[1]], promo=[1.0, 2.0])
+        @test_throws "`future` has duplicate timestamps in column :ds; first duplicate " *
+                     "at $(gs[1])." forecast(rec, 3; future=dupabsent)
+        holed = (ds=gs[1:2], promo=[missing, 2.0])
+        @test_throws "`future` is missing 1 of the 3 timestamps required for the " *
+                     "forecast grid $(gs[1]) … $(gs[3]); first missing: $(gs[3]). " *
+                     "Provide exogenous values for every future step." forecast(
+            rec, 3; future=holed)
+        @test_throws "`future` has a missing value in exogenous column :promo at time " *
+                     "$(gs[1]). Provide complete exogenous values for every future " *
+                     "step." forecast(rec, 3; future=(ds=gs, promo=[missing, 2.0, 3.0]))
+
+        # Panel checks series by series, step by step.
+        recp = fit(mk(TestModels.EchoColumn(:promo), feats), pe)
+        s1 = recp.series[1].t_last .+ Day.(1:2)
+        part = (unique_id=["s1", "s1"], ds=s1, promo=[missing, 1.0])
+        @test_throws "`future` has a missing value in exogenous column :promo for " *
+                     "unique_id=\"s1\" at $(s1[1]). Provide complete exogenous values " *
+                     "for every series at every forecast step." forecast(
+            recp, 2; future=part)
+        part2 = (unique_id=["s1", "s1"], ds=s1, promo=[1.0, 2.0])
+        @test_throws "`future` has no row for unique_id=\"s2\" at " forecast(
+            recp, 2; future=part2)
+    end
+
+    @testset "a single series forecasts as a panel of one, with a shuffled future" begin
+        n = 50
+        ds = collect(Date(2022, 1, 1):Day(1):Date(2022, 1, 1) + Day(n - 1))
+        yv = 50 .+ 2 .* sin.(1:n)
+        stbl = (ds=ds, y=yv, promo=Float64.(1:n))
+        ptbl = (unique_id=fill("a", n), ds=ds, y=yv, promo=Float64.(1:n))
+        feats = FeatureSet(Lag(1), Exogenous(:promo))
+        ahead = ds[end] .+ Day.(1:12)
+        p = shuffle(StableRNG(5), 1:12)
+        vals = 100.0 .+ (1:12)
+        sfut = (ds=ahead[p], promo=vals[p], other=fill(NaN, 12))
+        pfut = (unique_id=fill("a", 12), ds=ahead[p], promo=vals[p], other=fill(NaN, 12))
+        for strat in (Recursive(), Direct(4)), tr in (NoTransform(), LastScale(3))
+            h = strat isa Direct ? 4 : 9
+            fs = fit(Forecaster(TestModels.EchoColumn(:promo); features=feats,
+                                strategy=strat, freq=Day(1), transform=tr), stbl)
+            fp = fit(Forecaster(TestModels.EchoColumn(:promo); features=feats,
+                                strategy=strat, freq=Day(1), id=:unique_id,
+                                transform=tr), ptbl)
+            a = forecast(fs, h; future=sfut)
+            b = forecast(fp, h; future=pfut)
+            @test isequal(a.y_hat, b.y_hat) && isequal(a.ds, b.ds)
+            @test b.unique_id == fill("a", h)
+            tr isa NoTransform && @test a.y_hat == vals[1:h]
+        end
+    end
+
+    @testset "forecast output columns, order and types" begin
+        n = 30
+        ds = collect(Date(2022, 1, 1):Day(1):Date(2022, 1, 1) + Day(n - 1))
+        out = forecast(fit(Forecaster(TestModels.LinAR(1.0, 0.0);
+                                      features=FeatureSet(Lag(1)), freq=Day(1)),
+                           (ds=ds, y=Float64.(1:n))), 3)
+        @test keys(out) == (:ds, :y_hat)
+        @test out.ds isa Vector{Date} && out.y_hat isa Vector{Float64}
+        @test out.ds == ds[end] .+ Day.(1:3)
+        pf = fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), panel)
+        out = forecast(pf, 2)
+        @test keys(out) == (:unique_id, :ds, :y_hat)
+        @test out.unique_id isa Vector{String} && out.ds isa Vector{Date}
+        @test out.y_hat isa Vector{Float64}
+        @test out.unique_id == repeat(["s1", "s2", "s3"], inner=2)
+        @test out.ds == vcat([s.t_last .+ Day.(1:2) for s in pf.series]...)
+        renamed = (store=[fill(7, 20); fill(8, 20)], date=[ds[1:20]; ds[1:20]],
+                   value=Float64.(1:40))
+        fr = fit(Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                            freq=Day(1), target=:value, time=:date, id=:store), renamed)
+        out = forecast(fr, 2)
+        @test keys(out) == (:store, :date, :y_hat) && out.store isa Vector{Int}
+        @test out.store == [7, 7, 8, 8]
+        sr = fit(Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
+                            freq=Day(1), target=:value, time=:date),
+                 (date=ds, value=Float64.(1:n)))
+        @test keys(forecast(sr, 2)) == (:date, :y_hat)
+    end
+
+    @testset "forecast is repeatable and leaves the fitted state alone" begin
+        n = 40
+        ds = collect(Date(2022, 1, 1):Day(1):Date(2022, 1, 1) + Day(n - 1))
+        stbl = (ds=ds, y=50 .+ 2 .* sin.(1:n) .+ 0.1 .* (1:n))
+        snap(f) = [(copy(s.y_history), copy(s.z_history), s.t_last, s.t_start,
+                    s.n_train, s.transform_state, s.step0) for s in f.series]
+        for strat in (Recursive(), Direct(4)), tr in (NoTransform(), LastScale(3))
+            for (data, id) in ((stbl, nothing), (panel, :unique_id))
+                fc = Forecaster(TestModels.LinAR(0.9, 1.0); features=FeatureSet(Lag(1),
+                                RollingMean(3)), strategy=strat, freq=Day(1), id,
+                                transform=tr)
+                f = fit(fc, data)
+                before = snap(f)
+                a = forecast(f, 4)
+                @test isequal(snap(f), before)
+                b = forecast(f, 4)
+                @test isequal(a, b)
+                @test isequal(snap(f), before)
+            end
+        end
+    end
+
+    @testset "the forecast loop: one body for a single series and a panel" begin
+        M = MachineLearningForecast
+        n = 40
+        mkt(model, feats; strat=Recursive(), tr=NoTransform()) =
+            Forecaster(model; features=feats, strategy=strat, freq=Day(1),
+                       target=:y, time=:ds, id=:unique_id, transform=tr)
+        ds = collect(Date(2022, 1, 1):Day(1):Date(2022, 1, 1) + Day(n - 1))
+        stbl = (ds=ds, y=50 .+ 2 .* sin.(1:n) .+ 0.1 .* (1:n))
+        mks(model, feats; strat=Recursive(), tr=NoTransform()) =
+            Forecaster(model; features=feats, strategy=strat, freq=Day(1), transform=tr)
+        grids_of(f, hs) = [M.future_grid(st.t_start, f.spec.freq, st.n_train, hs[k])
+                           for (k, st) in enumerate(f.series)]
+
+        @testset "_check_horizon: one name, two receivers" begin
+            lin = TestModels.LinAR(1.0, 0.0)
+            feats = FeatureSet(Lag(1))
+            fcd = mks(lin, feats; strat=Direct(3))
+            fcp = mkt(lin, feats; strat=Direct(3))
+            fitted = "strategy=Direct(3) was fit with max_horizon=3 but forecast(h=5) " *
+                     "was requested. Refit with Direct(5) or use Recursive()."
+            spec = "backtest horizon=5 exceeds the Direct strategy's max_horizon=3. Use " *
+                   "Direct(5) or reduce horizon."
+            for (fc, data) in ((fcd, stbl), (fcp, panel))
+                f = fit(fc, data)
+                @test_throws ArgumentError M._check_horizon(f, 5)
+                @test_throws fitted M._check_horizon(f, 5)
+                @test_throws spec M._check_horizon(fc, 5)
+                @test M._check_horizon(f, 3) === nothing
+                @test M._check_horizon(fc, 3) === nothing
+            end
+            fcr = mks(lin, feats)
+            @test M._check_horizon(fcr, 10^6) === nothing
+            @test M._check_horizon(fit(fcr, stbl), 10^6) === nothing
+            @test M._check_horizon(mkt(lin, feats), 10^6) === nothing
+        end
+
+        @testset "_forecast_states is what forecast computes" begin
+            feats = FeatureSet(Lag(1), RollingMean(3))
+            for strat in (Recursive(), Direct(5)), tr in (NoTransform(), LastScale(3))
+                f = fit(mks(TestModels.LinAR(0.9, 1.0), feats; strat, tr), stbl)
+                st = only(f.series)
+                grid = M.future_grid(st.t_start, f.spec.freq, st.n_train, 5)
+                out = M._forecast_states(f, [st], [5], [grid], nothing)
+                @test only(out) == forecast(f, 5).y_hat
+                @test out isa Vector{Vector{Float64}}
+
+                fp = fit(mkt(TestModels.LinAR(0.9, 1.0), feats; strat, tr), panel)
+                full = forecast(fp, 5).y_hat
+                hs = [5, 2, 3]
+                out = M._forecast_states(fp, fp.series, hs, grids_of(fp, hs), nothing)
+                @test out == [full[1:5], full[6:7], full[11:13]]
+                if strat isa Direct
+                    @test_throws "strategy=Direct(5) was fit with max_horizon=5 but " *
+                                 "forecast(h=6)" M._forecast_states(
+                        fp, fp.series, [6, 1, 1], grids_of(fp, [6, 1, 1]), nothing)
+                else
+                    out = M._forecast_states(fp, fp.series, [6, 1, 1],
+                                             grids_of(fp, [6, 1, 1]), nothing)
+                    @test length(out[1]) == 6
+                end
+            end
+        end
+
+        @testset "Direct forecasts step s with the model trained for step s" begin
+            # MeanModel's step-s model predicts the mean of y[s+1:n].
+            fs = fit(mks(TestModels.MeanModel(), FeatureSet(Lag(1)); strat=Direct(4)),
+                     stbl)
+            @test forecast(fs, 4).y_hat == [mean(stbl.y[(s + 1):end]) for s in 1:4]
+            fp = fit(mkt(TestModels.MeanModel(), FeatureSet(Lag(1)); strat=Direct(4)),
+                     panel)
+            # One global model per step: the mean pools every series.
+            ys = [panel.y[panel.unique_id .== id] for id in ("s1", "s2", "s3")]
+            pooled = [mean(reduce(vcat, [y[(s + 1):end] for y in ys])) for s in 1:4]
+            @test forecast(fp, 4).y_hat ≈ repeat(pooled, 3)
+        end
+
+        @testset "_forecast_states is inferred" begin
+            feats = FeatureSet(Lag(1), RollingMean(3), Exogenous(:promo))
+            pe = merge(panel, (promo=Float64.(eachindex(panel.y)),))
+            se = merge(stbl, (promo=Float64.(1:n),))
+            chain = TransformChain(LastScale(4), LogRatio(3))
+            for strat in (Recursive(), Direct(5)), tr in (NoTransform(), chain)
+                for (fc, data) in ((mks(TestModels.LinAR(0.9, 1.0), feats; strat, tr), se),
+                                   (mkt(TestModels.LinAR(0.9, 1.0), feats; strat, tr), pe))
+                    f = fit(fc, data)
+                    hs = fill(5, nseries(f))
+                    grids = grids_of(f, hs)
+                    fut = if fc.id === nothing
+                        (ds=grids[1], promo=Float64.(1:5))
+                    else
+                        (unique_id=repeat([s.id for s in f.series], inner=5),
+                         ds=vcat(grids...), promo=Float64.(1:5nseries(f)))
+                    end
+                    rows = M._exogenous_rows(fc, f.series, grids, fut, hs)
+                    out = @inferred M._forecast_states(f, f.series, hs, grids, rows)
+                    @test out isa Vector{Vector{Float64}}
+                    @test M._output_table(fc, f.series, grids, out).y_hat ==
+                          forecast(f, 5; future=fut).y_hat
+                end
+            end
+            plain = FeatureSet(Lag(1))
+            for strat in (Recursive(), Direct(5)), tr in (NoTransform(), chain)
+                lin = TestModels.LinAR(0.9, 1.0)
+                for (fc, data) in ((mks(lin, plain; strat, tr), stbl),
+                                   (mkt(lin, plain; strat, tr), panel))
+                    f = fit(fc, data)
+                    hs = fill(5, nseries(f))
+                    out = @inferred M._forecast_states(f, f.series, hs, grids_of(f, hs),
+                                                       nothing)
+                    @test out isa Vector{Vector{Float64}}
+                end
+            end
+        end
+
+        @testset "a model must return one prediction per forecast row" begin
+            feats = FeatureSet(Lag(1))
+            msg(got, rows) = "model WrongCount returned $got predictions for $rows " *
+                "forecast row(s) at step 1; a model must return one prediction per row."
+            for strat in (Recursive(), Direct(3)), extra in (1, -1)
+                m = TestModels.WrongCount(extra)
+                fs = fit(mks(m, feats; strat), stbl)
+                fp = fit(mkt(m, feats; strat), panel)
+                @test_throws msg(1 + extra, 1) forecast(fs, 3)
+                @test_throws msg(3 + extra, 3) forecast(fp, 3)
+                @test_throws ArgumentError forecast(fp, 3)
+            end
+            # The right count passes.
+            fp = fit(mkt(TestModels.WrongCount(0), feats), panel)
+            @test forecast(fp, 3).y_hat == zeros(9)
+        end
+
+        @testset "a model may return a column matrix and reshape its input" begin
+            feats = FeatureSet(Lag(1), RollingMean(3))
+            lin = TestModels.LinAR(0.9, 1.0)
+            for strat in (Recursive(), Direct(5)), asmatrix in (true, false)
+                rs = TestModels.ReshapeLinAR(0.9, 1.0, 0, asmatrix)
+                @test forecast(fit(mks(rs, feats; strat), stbl), 5).y_hat ==
+                      forecast(fit(mks(lin, feats; strat), stbl), 5).y_hat
+                fr = fit(mkt(rs, feats; strat), panel)
+                fl = fit(mkt(lin, feats; strat), panel)
+                @test forecast(fr, 5).y_hat == forecast(fl, 5).y_hat
+                # A ragged active set shrinks columns the model reshaped.
+                hs = [5, 2, 3]
+                @test M._forecast_states(fr, fr.series, hs, grids_of(fr, hs), nothing) ==
+                      M._forecast_states(fl, fl.series, hs, grids_of(fl, hs), nothing)
+            end
+            for extra in (1, -1)
+                m = TestModels.ReshapeLinAR(0.9, 1.0, extra, true)
+                @test_throws "model ReshapeLinAR returned $(1 + extra) predictions for " *
+                             "1 forecast row(s) at step 1; a model must return one " *
+                             "prediction per row." forecast(
+                    fit(mks(m, feats), stbl), 3)
+                @test_throws "model ReshapeLinAR returned $(3 + extra) predictions for " *
+                             "3 forecast row(s) at step 1" forecast(
+                    fit(mkt(m, feats), panel), 3)
+            end
+        end
+
+        @testset "real learners: one loop for a single series and a panel" begin
+            feats = FeatureSet(Lag(1), RollingMean(3))
+            small = makepanel(lens=(30, 25, 28))
+            one = makepanel(lens=(30,))
+            sone = (ds=one.ds, y=one.y)
+            for m in (EvoTreeRegressor(nrounds=5),
+                      DecisionTreeRegressor(max_depth=2, rng=StableRNG(1))),
+                (strat, hs) in ((Recursive(), [5, 2, 3]), (Direct(3), [3, 2, 1]))
+                hmax = maximum(hs)
+                a = forecast(fit(mks(m, feats; strat), sone), hmax)
+                b = forecast(fit(mkt(m, feats; strat), one), hmax)
+                @test a.y_hat == b.y_hat && a.ds == b.ds
+                fp = fit(mkt(m, feats; strat), small)
+                full = forecast(fp, hmax).y_hat
+                out = M._forecast_states(fp, fp.series, hs, grids_of(fp, hs), nothing)
+                @test out == [full[(k - 1) * hmax .+ (1:hs[k])] for k in 1:3]
+            end
+        end
+
+        @testset "the step loop's state is concrete and its rows cost what they must" begin
+            feats = FeatureSet(Lag(1), RollingMean(3))
+            fp = fit(mkt(TestModels.LinAR(0.9, 1.0), feats), panel)
+            hs = [5, 2, 3]
+            run = @inferred M._StepRun(fp.spec.features, fp.spec.strategy,
+                                       fp.feature_names, fp.series, hs,
+                                       grids_of(fp, hs), nothing)
+            @test all(isconcretetype, fieldtypes(typeof(run)))
+
+            # Columns are reused until the row count shrinks.
+            probe = TestModels.ColumnProbe(Ref(Any[]))
+            fq = fit(mkt(probe, feats), panel)
+            M._forecast_states(fq, fq.series, hs, grids_of(fq, hs), nothing)
+            c = only(fq.models).model.calls[]
+            @test length.(c) == [3, 3, 2, 1, 1]
+            @test c[1] === c[2] && c[4] === c[5]
+            @test c[3] !== c[2] && c[4] !== c[3]
+
+            # A step costs a predict plus a bounded fill per row.
+            bytes(f, args...) = (f(args...); @allocated f(args...))
+            np = 50
+            many = makepanel(lens=fill(60, np), levels=collect(1.0:np),
+                             starts=fill(Date(2022, 1, 1), np))
+            nf = FeatureSet(Lag(1), Lag(7), RollingMean(7))
+            fm = fit(mkt(TestModels.LinAR(0.9, 1.0), nf), many)
+            perstep = (bytes(forecast, fm, 40) - bytes(forecast, fm, 20)) / 20
+            rows = NamedTuple{Tuple(fm.feature_names)}(
+                Tuple([ones(np) for _ in fm.feature_names]))
+            pbytes = bytes(M._predict, only(fm.models), rows)
+            @test perstep <= pbytes + np * 64 * length(nf) + 256
+        end
+    end
 end

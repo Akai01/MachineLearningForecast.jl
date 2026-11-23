@@ -478,4 +478,25 @@
                        strategy=Direct(2)), tbl)
         @test tbl == same && model == keep
     end
+
+    @testset "forecast allocates its buffers once, not per step" begin
+        M = MachineLearningForecast
+        bytes(f, args...) = (f(args...); @allocated f(args...))
+        feats = FeatureSet(Lag(1), Lag(7), RollingMean(7))
+        d = (ds=collect(Date(2022, 1, 1):Day(1):Date(2022, 1, 1) + Day(399)),
+             y=50 .+ 2 .* sin.(1:400))
+        f = fit(Forecaster(TestModels.LinAR(0.9, 1.0); features=feats, freq=Day(1)), d)
+        perstep = (bytes(forecast, f, 200) - bytes(forecast, f, 100)) / 100
+        row1 = NamedTuple{Tuple(f.feature_names)}(Tuple([[1.0] for _ in f.feature_names]))
+        pbytes = bytes(M._predict, only(f.models), row1)
+        @test perstep <= pbytes + 64 * length(feats) + 256
+
+        # A copy of the history would cost 8n bytes.
+        nbig = 40_000
+        big = (ds=collect(Date(2000, 1, 1):Day(1):Date(2000, 1, 1) + Day(nbig - 1)),
+               y=Float64.(1:nbig))
+        fd = fit(Forecaster(TestModels.MeanModel(); features=FeatureSet(Lag.(1:3)...),
+                            strategy=Direct(5), freq=Day(1)), big)
+        @test bytes(forecast, fd, 1) < sizeof(Float64) * nbig / 4
+    end
 end

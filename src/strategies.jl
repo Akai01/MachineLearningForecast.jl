@@ -89,6 +89,19 @@ Direct() = throw(ArgumentError(
 nmodels(::Recursive) = 1
 nmodels(s::Direct) = s.max_horizon
 
+horizon_limit(::Recursive) = typemax(Int)
+horizon_limit(s::Direct) = s.max_horizon
+_feeds_back(::Recursive) = true
+_feeds_back(::Direct) = false
+_model_at(models, ::Recursive, s) = only(models)
+_model_at(models, ::Direct, s) = models[s]
+
+# Direct reads the fitted history, it never grows it.
+_histories(::Recursive, states, hs) =
+    [sizehint!(copy(st.z_history), length(st.z_history) + hs[k])
+     for (k, st) in enumerate(states)]
+_histories(::Direct, states, hs) = [st.z_history for st in states]
+
 _shifted(::AtOrigin, col, i, n) = col[1:(n - i + 1)]
 _shifted(::AtTarget, col, i, n) = col[i:n]
 _gather_index(::AtOrigin, from, to) = from

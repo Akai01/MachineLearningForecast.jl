@@ -281,7 +281,38 @@ function _panel_predict!(preds, f, strat::Direct, states, histories, grids, exog
     return preds
 end
 
-function _panel_exogenous_rows(spec::Forecaster, exogcols, states, grids, future)
+function _output_table(spec::Forecaster{M,S,Symbol}, states, grids, preds) where {M,S}
+    n = sum(length, grids)
+    idcol = Vector{Any}(undef, n)
+    tcol = Vector{eltype(first(grids))}(undef, n)
+    ycol = Vector{Float64}(undef, n)
+    r = 1
+    for k in eachindex(states), s in eachindex(grids[k])
+        idcol[r] = states[k].id
+        tcol[r] = grids[k][s]
+        ycol[r] = preds[k][s]
+        r += 1
+    end
+    return NamedTuple{(spec.id, spec.time, :y_hat)}(
+        (identity.(idcol), tcol, ycol))
+end
+
+function _exogenous_rows(spec::Forecaster{M,S,Symbol}, states, grids, future,
+                         hs) where {M,S}
+    exogcols = exogenous_columns(spec.features)
+    if isempty(exogcols)
+        if future !== nothing
+            @warn "`future` was passed but the feature set has no Exogenous " *
+                  "features; it will be ignored."
+        end
+        return nothing
+    end
+    future === nothing && throw(ArgumentError(
+        "features contain Exogenous($(join(":" .* string.(exogcols), ", "))) but " *
+        "forecast() was called without `future`. Pass a table with columns " *
+        "(:$(spec.id), :$(spec.time), $(join(":" .* string.(exogcols), ", "))) " *
+        "covering all $(length(states)) series over their $(maximum(hs)) " *
+        "forecast steps."))
     nd = normalize_table(future)
     needed = [spec.id; spec.time; exogcols]
     absent = [c for c in needed if !haskey(nd, c)]
@@ -443,7 +474,7 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, scheme, metri
                 g = future_grid(st.t_start, fc.freq, st.n_train, horizon)
                 something(findfirst(t -> !haskey(actual, (st.id, t)), g), horizon + 1) - 1
             end
-            _forecast_panel(fitted, hs, nd)
+            _forecast(fitted, hs, nd)
         end
 
         fid, ft, fy = fcast[fc.id], fcast[fc.time], fcast.y_hat

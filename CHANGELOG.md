@@ -101,6 +101,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A single series is fitted through the same code as a panel of one series; fits
   are unchanged. A panel `Direct` fit that has too few rows to train every step
   model now throws before it trains any of them (the message is unchanged).
+- A single series is forecast through the same code as a panel of one series;
+  forecasts are unchanged. A model that returns the wrong number of predictions
+  for a forecast step now fails with an `ArgumentError` on panels too.
+- A base model must not keep the `Xnew` table after `predict` returns: forecasting
+  reuses its columns between steps.
 - **Breaking: the `forecast` keyword `new_data` is now `future`.**
   `forecast(fitted, h; future=table)` takes the future-known covariates;
   `new_data=` is no longer accepted (no alias, no deprecation). The

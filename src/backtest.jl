@@ -179,11 +179,7 @@ function backtest(fc::Forecaster, data; horizon::Integer,
     step ≥ 1 || throw(ArgumentError(
         "backtest step must be ≥ 1, got $step. Pass how many steps each fold moves " *
         "the origin, e.g. step=$horizon, which equals horizon (the default)."))
-    if fc.strategy isa Direct && horizon > fc.strategy.max_horizon
-        throw(ArgumentError(
-            "backtest horizon=$horizon exceeds the Direct strategy's max_horizon=" *
-            "$(fc.strategy.max_horizon). Use Direct($horizon) or reduce horizon."))
-    end
+    _check_horizon(fc, horizon)
     iterable = applicable(iterate, metrics)
     # A one-shot iterator must survive validation and every fold.
     ms = iterable && !(metrics isa Union{Tuple,NamedTuple,AbstractVector}) ?

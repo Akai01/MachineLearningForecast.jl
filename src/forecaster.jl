@@ -490,7 +490,146 @@ function forecast(f::FittedForecaster, h::Integer; future=nothing)
     h ≥ 1 || throw(ArgumentError(
         "forecast horizon h must be ≥ 1, got $h. Pass the number of steps to " *
         "forecast, e.g. forecast(fitted, 28)."))
-    return _forecast_spec(f, f.spec, h, future)
+    return _forecast(f, fill(Int(h), nseries(f)), future)
+end
+
+# hs[k] is series k's horizon, which backtest may shorten.
+function _forecast(f::FittedForecaster, hs::Vector{Int}, future)
+    spec = f.spec
+    states = getfield(f, :series)
+    grids = _grids(states, spec.freq, hs)
+    exog_rows = _exogenous_rows(spec, states, grids, future, hs)
+    preds = _forecast_states(f, states, hs, grids, exog_rows)
+    return _output_table(spec, states, grids, preds)
+end
+
+# Apart so the closure does not carry the model type.
+_grids(states, freq, hs) = _collect(
+    k -> future_grid(states[k].t_start, freq, states[k].n_train, hs[k]),
+    eachindex(states))
+
+_output_table(spec::Forecaster{M,S,Nothing}, states, grids, preds) where {M,S} =
+    NamedTuple{(spec.time, :y_hat)}((only(grids), only(preds)))
+
+function _check_horizon(f::FittedForecaster, h::Integer)
+    lim = horizon_limit(f.spec.strategy)
+    h ≤ lim || throw(ArgumentError(
+        "strategy=Direct($lim) was fit with max_horizon=$lim but forecast(h=$h) was " *
+        "requested. Refit with Direct($h) or use Recursive()."))
+    return nothing
+end
+
+function _check_horizon(fc::Forecaster, h::Integer)
+    lim = horizon_limit(fc.strategy)
+    h ≤ lim || throw(ArgumentError(
+        "backtest horizon=$h exceeds the Direct strategy's max_horizon=$lim. " *
+        "Use Direct($h) or reduce horizon."))
+    return nothing
+end
+
+# A step loop's state; it holds no model type.
+struct _StepRun{S<:ForecastStrategy,G,E}
+    features::FeatureSet
+    strategy::S
+    states::Vector{SeriesState}
+    hs::Vector{Int}
+    grids::G
+    exog_rows::E
+    histories::Vector{Vector{Float64}}
+    scratch::Vector{Vector{Float64}}
+    cols::Vector{Vector{Float64}}
+    bufs::Vector{Vector{Float64}}
+    active::Vector{Int}
+    preds::Vector{Vector{Float64}}
+end
+
+function _StepRun(features::FeatureSet, strategy, names::Vector{Symbol}, states, hs, grids,
+                  exog_rows)
+    n = length(states)
+    scratch = Vector{Vector{Float64}}(undef, length(names))
+    cols = Vector{Vector{Float64}}(undef, length(names))
+    for j in eachindex(names)
+        scratch[j] = Vector{Float64}(undef, 1)
+        cols[j] = Vector{Float64}(undef, n)
+    end
+    preds = Vector{Vector{Float64}}(undef, n)
+    active = Vector{Int}(undef, n)
+    for k in 1:n
+        preds[k] = Vector{Float64}(undef, hs[k])
+        active[k] = k
+    end
+    return _StepRun(features, strategy, states, hs, grids, exog_rows,
+                    _histories(strategy, states, hs), scratch, cols,
+                    _feature_buffers(features), active, preds)
+end
+
+# One row per series still being forecast.
+function _fill_step!(run::_StepRun, s::Int)
+    active, hs = run.active, run.hs
+    m = 0
+    for k in active
+        hs[k] ≥ s || continue
+        m += 1
+        active[m] = k
+    end
+    changed = m != length(active)
+    resize!(active, m)
+    if changed
+        # New columns on a shrink: a model may have shared them.
+        for j in eachindex(run.cols)
+            run.cols[j] = Vector{Float64}(undef, m)
+        end
+    end
+    for r in 1:m
+        k = active[r]
+        ex = run.exog_rows === nothing ? nothing : run.exog_rows[k][s]
+        ctx = _context(run.states[k], run.histories[k], run.grids[k][s], s, ex)
+        _fill_row!(run.scratch, run.bufs, run.features, ctx)
+        for j in eachindex(run.cols)
+            run.cols[j][r] = run.scratch[j][1]
+        end
+    end
+    return changed
+end
+
+function _store_step!(run::_StepRun, s::Int, ŷ, @nospecialize(trained))
+    active = run.active
+    length(ŷ) == length(active) || throw(ArgumentError(
+        "model $(nameof(typeof(trained.model))) returned $(length(ŷ)) predictions for " *
+        "$(length(active)) forecast row(s) at step $s; a model must return one " *
+        "prediction per row."))
+    for r in eachindex(active)
+        k = active[r]
+        v = Float64(ŷ[r])
+        run.preds[k][s] = v
+        _feeds_back(run.strategy) && push!(run.histories[k], v)
+    end
+    return nothing
+end
+
+function _forecast_states(f::FittedForecaster, states, hs::Vector{Int}, grids, exog_rows)
+    spec = f.spec
+    strategy = spec.strategy
+    hmax = maximum(hs)
+    _check_horizon(f, hmax)
+    run = _StepRun(spec.features, strategy, f.feature_names, states, hs, grids, exog_rows)
+    # Reused across steps: a model must not keep Xnew.
+    row = NamedTuple{Tuple(f.feature_names)}(Tuple(run.cols))
+    for s in 1:hmax
+        _fill_step!(run, s) && (row = NamedTuple{Tuple(f.feature_names)}(Tuple(run.cols)))
+        trained = _model_at(f.models, strategy, s)
+        _store_step!(run, s, _predict(trained, row), trained)
+    end
+    return _untransform_all(spec.transform, run.preds, states)
+end
+
+# Apart: user transforms extend untransform.
+function _untransform_all(transform, preds, states)
+    out = Vector{Vector{Float64}}(undef, length(states))
+    for k in eachindex(states)
+        out[k] = untransform(transform, preds[k], states[k].transform_state)
+    end
+    return out
 end
 
 _forecast_spec(f::FittedForecaster, spec::Forecaster{M,S,Symbol}, h, future) where {M,S} =
@@ -516,7 +655,22 @@ function _forecast_spec(f::FittedForecaster, spec::Forecaster{M,S,Nothing},
     return _forecast(f, spec.strategy, h, grid, exog_rows)
 end
 
-function _exogenous_rows(spec::Forecaster, exogcols::Vector{Symbol}, grid, future)
+function _exogenous_rows(spec::Forecaster{M,S,Nothing}, states, grids, future,
+                         hs) where {M,S}
+    grid = only(grids)
+    exogcols = exogenous_columns(spec.features)
+    if isempty(exogcols)
+        if future !== nothing
+            @warn "`future` was passed but the feature set has no Exogenous " *
+                  "features; it will be ignored."
+        end
+        return nothing
+    end
+    future === nothing && throw(ArgumentError(
+        "features contain Exogenous($(join(":" .* string.(exogcols), ", "))) but " *
+        "forecast() was called without `future`. Pass a table with columns " *
+        "(:$(spec.time), $(join(":" .* string.(exogcols), ", "))) covering " *
+        "$(first(grid)) … $(last(grid))."))
     nd = normalize_table(future)
     needed = [spec.time; exogcols]
     absent = [c for c in needed if !haskey(nd, c)]
@@ -552,7 +706,7 @@ function _exogenous_rows(spec::Forecaster, exogcols::Vector{Symbol}, grid, futur
         end
         rows[s] = row
     end
-    return rows
+    return [rows]
 end
 
 function _new_time(v, T::Type, time::Symbol, i::Integer)
