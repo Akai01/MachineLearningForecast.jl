@@ -1,5 +1,5 @@
-function _fit(fc::Forecaster, ::Recursive, tbl::NamedTuple)
-    X, y, _ = _training_frame(fc, tbl)
+function _fit(fc::Forecaster, ::Recursive, tbl::NamedTuple, rows)
+    X, y, _ = _training_frame(fc, tbl, rows)
     return [_train(fc.model, X, y)]
 end
 

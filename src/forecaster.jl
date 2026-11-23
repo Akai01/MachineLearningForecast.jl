@@ -348,13 +348,15 @@ function _fit_spec(fc::Forecaster{M,S,Nothing}, tbl::NamedTuple) where {M,S}
     y = target_vector(tbl, fc.target)
     tz, z, state = _transform_table(fc, tbl, y)
     st = SeriesState(nothing, y, t[end], t[1], length(t), z, state, 0)
-    return FittedForecaster(fc, _fit(fc, fc.strategy, tz), [st], outputnames(fc.features))
+    rows = (length(y) - nrows(tz) + 1):length(y)
+    return FittedForecaster(fc, _fit(fc, fc.strategy, tz, rows), [st],
+                            outputnames(fc.features))
 end
 
 _fit_spec(fc::Forecaster{M,S,Symbol}, tbl::NamedTuple) where {M,S} = _fit_panel(fc, tbl)
 
-_training_frame(fc::Forecaster, tbl::NamedTuple) =
-    build_training_frame(fc.features, tbl, fc.target, fc.time)
+_training_frame(fc::Forecaster, tbl::NamedTuple, rows) =
+    build_training_frame(fc.features, tbl, fc.target, fc.time, rows)
 
 """
     forecast(f::FittedForecaster, h::Integer; future=nothing) -> NamedTuple

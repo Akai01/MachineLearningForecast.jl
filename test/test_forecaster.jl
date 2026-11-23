@@ -428,4 +428,29 @@
             @test allequal(r.table.mean_score)
         end
     end
+
+    @testset "a missing exogenous value is reported at the user's row" begin
+        m30 = 30
+        t30 = collect(Date(2022, 1, 1):Day(1):Date(2022, 1, 1) + Day(m30 - 1))
+        promo = Vector{Union{Missing,Float64}}(1.0:m30)
+        promo[10] = missing
+        y30 = Float64.(1:m30) .+ 10
+        single = (ds=t30, y=y30, promo=promo)
+        phrase = "feature column :promo has a missing value at row 10 (time 2022-01-10)"
+        fs = FeatureSet(Lag(1), Exogenous(:promo))
+        models = (EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+        for m in models, strat in (Recursive(), Direct(2)),
+            tr in (NoTransform(), Difference(3), LogRatio(3),
+                   TransformChain(Difference(1), LogRatio(3)))
+            fc = Forecaster(m; features=fs, strategy=strat, freq=Day(1), transform=tr)
+            @test_throws ArgumentError fit(fc, single)
+            @test_throws phrase fit(fc, single)
+            # the same fit as a panel already reports the user's row
+            panel = (unique_id=fill("a", m30), ds=t30, y=y30, promo=promo)
+            fcp = Forecaster(m; features=fs, strategy=strat, freq=Day(1), id=:unique_id,
+                             transform=tr)
+            @test_throws "series unique_id=\"a\": " * phrase fit(fcp, panel)
+        end
+    end
 end

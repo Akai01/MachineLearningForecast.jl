@@ -289,6 +289,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A missing exogenous value in a single series with a row-consuming transform
+  (`Difference`, `LogRatio`, chains) is reported at the right row of your
+  table, not shifted by the rows the transform consumed.
 - Displaying a `TuneResult` no longer throws for a model with a `missing`
   hyperparameter, and a `NaN` hyperparameter left at its default is no longer
   shown as changed.

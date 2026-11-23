@@ -1,6 +1,6 @@
 # See test "Direct anchors time/exogenous columns".
-function _fit(fc::Forecaster, s::Direct, tbl::NamedTuple)
-    X, y, _ = _training_frame(fc, tbl)
+function _fit(fc::Forecaster, s::Direct, tbl::NamedTuple, rows)
+    X, y, _ = _training_frame(fc, tbl, rows)
     nX = length(y)
     mh = minhistory(fc.features)
     nX ≥ s.max_horizon || throw(ArgumentError(
