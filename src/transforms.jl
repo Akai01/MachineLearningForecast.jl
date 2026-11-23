@@ -111,6 +111,7 @@ LastScale(12)   # monthly data: scale by the last year's mean
 struct LastScale <: TargetTransform
     k::Int
     function LastScale(k::Integer)
+        _nobool(k, "LastScale k", "Pass e.g. LastScale(12).")
         k ≥ 1 || throw(ArgumentError(
             "LastScale needs k ≥ 1 values to average, got $k. Pass e.g. LastScale(12)."))
         return new(Int(k))
@@ -145,6 +146,8 @@ Deseasonalize(12)   # monthly data
 struct Deseasonalize <: TargetTransform
     period::Int
     function Deseasonalize(period::Integer)
+        _nobool(period, "Deseasonalize period", "Pass the season length in steps, " *
+                "e.g. Deseasonalize(12).")
         period ≥ 2 || throw(ArgumentError(
             "Deseasonalize needs a period of at least 2, got $period. Pass the " *
             "season length in steps, e.g. Deseasonalize(12) for monthly data."))
@@ -207,6 +210,7 @@ LogRatio(12)   # monthly data: ratio to the previous year's mean
 struct LogRatio <: TargetTransform
     window::Int
     function LogRatio(window::Integer)
+        _nobool(window, "LogRatio window", "Pass e.g. LogRatio(12).")
         window ≥ 1 || throw(ArgumentError(
             "LogRatio needs window ≥ 1, got $window. Pass e.g. LogRatio(12)."))
         return new(Int(window))
@@ -252,6 +256,7 @@ TransformChain(Difference(1), Difference(12))   # lag 1 first, then lag 12
 struct Difference <: TargetTransform
     lag::Int
     function Difference(lag::Integer)
+        _nobool(lag, "Difference lag", "Pass e.g. Difference(1).")
         lag ≥ 1 || throw(ArgumentError(
             "Difference needs lag ≥ 1, got $lag. Pass e.g. Difference(1)."))
         return new(Int(lag))

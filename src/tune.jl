@@ -73,6 +73,8 @@ struct RandomSearch{R<:Random.AbstractRNG} <: TuningStrategy
     n::Int
     rng::R
     function RandomSearch(n::Integer, rng::Random.AbstractRNG)
+        _nobool(n, "RandomSearch n", "Pass the number of candidates to draw, e.g. " *
+                "RandomSearch(10).")
         n ≥ 1 || throw(ArgumentError(
             "RandomSearch n must be ≥ 1, got $n. Pass the number of candidates to " *
             "draw, e.g. RandomSearch(10)."))
@@ -295,6 +297,12 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
               horizon::Integer, initial::Union{Nothing,Integer}=nothing,
               windows::Union{Nothing,Integer}=nothing, step::Integer=horizon,
               metric=smape)
+    _nobool(max_evals, "max_evals", "Pass the number of candidates to fit, e.g. " *
+            "max_evals=10, or nothing for no budget.")
+    _nobool(horizon, "tune horizon", "Pass the number of steps each fold forecasts, " *
+            "e.g. horizon=28.")
+    _nobool(step, "tune step", "Pass how many steps each fold moves the origin, " *
+            "e.g. step=$horizon, which equals horizon (the default).")
     max_evals === nothing || max_evals ≥ 1 || throw(ArgumentError(
         "max_evals must be ≥ 1 (or nothing for no budget), got $max_evals."))
     # Check before _warn_fit_count's range sees step=0.

@@ -99,6 +99,8 @@ mase([10.0, 12.0], [11.0, 11.0]; y_train=[1.0, 3.0, 1.0, 3.0])   # 0.5
 """
 function mase(y::AbstractVector, ŷ::AbstractVector; y_train::AbstractVector, m::Integer=1)
     _validate_metric_args(y, ŷ)
+    _nobool(m, "mase seasonality m", "Pass the season length in steps, e.g. m=7 for " *
+            "weekly seasonality on daily data.")
     m ≥ 1 || throw(ArgumentError(
         "mase seasonality m must be ≥ 1, got $m. Pass the season length in steps, " *
         "e.g. m=7 for weekly seasonality on daily data, or m=1 (the default)."))

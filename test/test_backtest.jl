@@ -77,6 +77,22 @@
         @test_throws "backtest step must be ≥ 1, got 0. Pass how many steps each fold " *
                      "moves the origin, e.g. step=5, which equals horizon (the " *
                      "default)." backtest(fc, df; horizon=5, initial=50, step=0)
+        for bad in (true, false)
+            @test_throws "backtest horizon must be a whole number, not the Bool $bad. " *
+                         "Pass the number of steps each fold forecasts, e.g. " *
+                         "horizon=28." backtest(fc, df; horizon=bad, initial=50)
+            @test_throws "backtest initial must be a whole number, not the Bool $bad. " *
+                         "Pass the size of the first training window, e.g. " *
+                         "initial=730." backtest(fc, df; horizon=5, initial=bad)
+            @test_throws "backtest windows must be a whole number, not the Bool $bad. " *
+                         "Pass the number of folds to hold out at the end of each " *
+                         "series, e.g. windows=3." backtest(fc, df; horizon=5,
+                                                             windows=bad)
+            @test_throws "backtest step must be a whole number, not the Bool $bad. " *
+                         "Pass how many steps each fold moves the origin, e.g. " *
+                         "step=5, which equals horizon (the default)." backtest(
+                fc, df; horizon=5, initial=50, step=bad)
+        end
         @test_throws ArgumentError backtest(fc, df; horizon=30, initial=90)
         @test_throws "no complete backtest folds: data has 100 rows, but the first fold " *
                      "needs initial + horizon = 120. Provide more data" backtest(

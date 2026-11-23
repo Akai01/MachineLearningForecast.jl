@@ -383,6 +383,8 @@ fcast.y_hat                                          # the point forecasts
 ```
 """
 function forecast(f::FittedForecaster, h::Integer; new_data=nothing)
+    _nobool(h, "forecast horizon h", "Pass the number of steps to forecast, e.g. " *
+            "forecast(fitted, 28).")
     h ≥ 1 || throw(ArgumentError(
         "forecast horizon h must be ≥ 1, got $h. Pass the number of steps to " *
         "forecast, e.g. forecast(fitted, 28)."))

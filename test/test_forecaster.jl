@@ -322,6 +322,11 @@
         @test_throws "forecast horizon h must be ≥ 1, got 0. Pass the number of steps " *
                      "to forecast, e.g. forecast(fitted, 28)." forecast(fitted, 0)
         @test_throws ArgumentError forecast(fitted, -2)
+        for bad in (true, false)
+            @test_throws "forecast horizon h must be a whole number, not the Bool " *
+                         "$bad. Pass the number of steps to forecast, e.g. " *
+                         "forecast(fitted, 28)." forecast(fitted, bad)
+        end
         @test_throws "h must be ≥ 1, got -2" forecast(fitted, -2)
         df2 = deepcopy(df)
         fit(fc, df2)

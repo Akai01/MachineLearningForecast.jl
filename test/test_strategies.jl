@@ -10,6 +10,11 @@
         @test_throws "Direct max_horizon must be ≥ 1, got 0. Pass the number of steps " *
                      "to forecast, e.g. Direct(28)." Direct(0)
         @test_throws ArgumentError Direct(-5)
+        for bad in (true, false)
+            @test_throws "Direct max_horizon must be a whole number, not the Bool " *
+                         "$bad. Pass the number of steps to forecast, e.g. " *
+                         "Direct(28)." Direct(bad)
+        end
         @test_throws "max_horizon must be ≥ 1, got -5" Direct(-5)
         @test Direct(3).max_horizon == 3
     end

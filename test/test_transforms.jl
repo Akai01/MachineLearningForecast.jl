@@ -68,6 +68,17 @@
         @test_throws "Deseasonalize needs a period of at least 2, got 1" Deseasonalize(1)
         @test_throws "LogRatio needs window ≥ 1, got 0" LogRatio(0)
         @test_throws "Difference needs lag ≥ 1, got 0" Difference(0)
+        for bad in (true, false)
+            @test_throws "LastScale k must be a whole number, not the Bool $bad. Pass " *
+                         "e.g. LastScale(12)." LastScale(bad)
+            @test_throws "Deseasonalize period must be a whole number, not the Bool " *
+                         "$bad. Pass the season length in steps, e.g. " *
+                         "Deseasonalize(12)." Deseasonalize(bad)
+            @test_throws "LogRatio window must be a whole number, not the Bool $bad. " *
+                         "Pass e.g. LogRatio(12)." LogRatio(bad)
+            @test_throws "Difference lag must be a whole number, not the Bool $bad. " *
+                         "Pass e.g. Difference(1)." Difference(bad)
+        end
         @test_throws "TransformChain needs at least one transform" TransformChain()
         @test_throws("MeanScale() cannot scale a series whose training mean is 0.0",
                      fit_transform(MeanScale(), [1.0, -1.0]))

@@ -63,11 +63,15 @@ function _fold_scheme(who::AbstractString, initial, windows, step::Integer)
         "initial=$(repr(initial)) and windows=$(repr(windows)). Pass e.g. " *
         "initial=730 or windows=3."))
     if initial !== nothing
+        _nobool(initial, "$who initial", "Pass the size of the first training " *
+                "window, e.g. initial=730.")
         initial ≥ 1 || throw(ArgumentError(
             "$who initial must be ≥ 1, got $initial. Pass the size of the first " *
             "training window, e.g. initial=730."))
         return FromStart(initial, step)
     end
+    _nobool(windows, "$who windows", "Pass the number of folds to hold out at the " *
+            "end of each series, e.g. windows=3.")
     windows ≥ 1 || throw(ArgumentError(
         "$who windows must be ≥ 1, got $windows. Pass the number of folds to hold " *
         "out at the end of each series, e.g. windows=3."))
@@ -153,9 +157,13 @@ function backtest(fc::Forecaster, data; horizon::Integer,
                   initial::Union{Nothing,Integer}=nothing,
                   windows::Union{Nothing,Integer}=nothing,
                   step::Integer=horizon, metrics=(mae, rmse))
+    _nobool(horizon, "backtest horizon", "Pass the number of steps each fold " *
+            "forecasts, e.g. horizon=28.")
     horizon ≥ 1 || throw(ArgumentError(
         "backtest horizon must be ≥ 1, got $horizon. Pass the number of steps each " *
         "fold forecasts, e.g. horizon=28."))
+    _nobool(step, "backtest step", "Pass how many steps each fold moves the origin, " *
+            "e.g. step=$horizon, which equals horizon (the default).")
     scheme = _fold_scheme("backtest", initial, windows, step)
     step ≥ 1 || throw(ArgumentError(
         "backtest step must be ≥ 1, got $step. Pass how many steps each fold moves " *

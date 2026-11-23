@@ -24,6 +24,13 @@ function normalize_table(data)
     return tbl
 end
 
+# A Bool is an Integer, so true would pass as 1.
+function _nobool(x, what::AbstractString, fix::AbstractString; noun="whole number")
+    x isa Bool && throw(ArgumentError(
+        "$what must be a $noun, not the Bool $x. $fix"))
+    return nothing
+end
+
 "Number of rows of a columntable."
 nrows(tbl::NamedTuple) = isempty(tbl) ? 0 : length(first(tbl))
 

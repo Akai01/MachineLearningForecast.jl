@@ -155,6 +155,11 @@ end
         @test r1.table.model == r2.table.model
         @test all(r1.table.mean_score .≈ r2.table.mean_score)
         @test_throws ArgumentError RandomSearch(0)
+        for bad in (true, false)
+            @test_throws "RandomSearch n must be a whole number, not the Bool $bad. " *
+                         "Pass the number of candidates to draw, e.g. " *
+                         "RandomSearch(10)." RandomSearch(bad)
+        end
         @test_throws "RandomSearch n must be ≥ 1, got 0. Pass the number of candidates " *
                      "to draw, e.g. RandomSearch(10)." RandomSearch(0)
 
@@ -192,6 +197,28 @@ end
                                         horizon=14, initial=90, max_evals=0)
         @test_throws "max_evals must be ≥ 1 (or nothing for no budget), got 0." tune(
             base, df; grid=(model=[base.model],), horizon=14, initial=90, max_evals=0)
+        for bad in (true, false)
+            g = (model=[base.model],)
+            @test_throws "max_evals must be a whole number, not the Bool $bad. Pass " *
+                         "the number of candidates to fit, e.g. max_evals=10, or " *
+                         "nothing for no budget." tune(base, df; grid=g, horizon=14,
+                                                       initial=90, max_evals=bad)
+            @test_throws "tune horizon must be a whole number, not the Bool $bad. Pass " *
+                         "the number of steps each fold forecasts, e.g. " *
+                         "horizon=28." tune(base, df; grid=g, horizon=bad, initial=90)
+            @test_throws "tune initial must be a whole number, not the Bool $bad. Pass " *
+                         "the size of the first training window, e.g. " *
+                         "initial=730." tune(base, df; grid=g, horizon=14, initial=bad)
+            @test_throws "tune windows must be a whole number, not the Bool $bad. Pass " *
+                         "the number of folds to hold out at the end of each series, " *
+                         "e.g. windows=3." tune(base, df; grid=g, horizon=14,
+                                                windows=bad)
+            @test_throws "tune step must be a whole number, not the Bool $bad. Pass how " *
+                         "many steps each fold moves the origin, e.g. step=14, which " *
+                         "equals horizon (the default)." tune(base, df; grid=g,
+                                                              horizon=14, initial=90,
+                                                              step=bad)
+        end
     end
 
     @testset "ask must answer with a NamedTuple of known fields or nothing" begin

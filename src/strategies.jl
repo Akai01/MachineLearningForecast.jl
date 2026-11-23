@@ -53,9 +53,13 @@ Forecaster(model; features=FeatureSet(Lag(1)), strategy=Direct(28), freq=Day(1))
 """
 struct Direct <: ForecastStrategy
     max_horizon::Int
-    Direct(h::Integer) = h ≥ 1 ? new(Int(h)) :
-        throw(ArgumentError("Direct max_horizon must be ≥ 1, got $h. Pass the " *
-                            "number of steps to forecast, e.g. Direct(28)."))
+    function Direct(h::Integer)
+        _nobool(h, "Direct max_horizon", "Pass the number of steps to forecast, " *
+                "e.g. Direct(28).")
+        h ≥ 1 || throw(ArgumentError("Direct max_horizon must be ≥ 1, got $h. Pass " *
+                                     "the number of steps to forecast, e.g. Direct(28)."))
+        return new(Int(h))
+    end
 end
 
 Direct() = throw(ArgumentError(

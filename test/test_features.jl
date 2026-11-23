@@ -138,6 +138,27 @@ end
         @test_throws "CustomFeature minhistory must be ≥ 0, got -1. Pass the number of " *
                      "history values f needs, or 0 if it needs none." (
             CustomFeature(:f, identity, -1))
+        # A Bool is an integer, but not a count or an order.
+        for bad in (true, false)
+            for T in (RollingMean, RollingStd, RollingMin, RollingMax)
+                @test_throws "$T window must be a whole number, not the Bool $bad. Use " *
+                             "e.g. $T(7)." T(bad)
+                @test_throws "$T lag must be a whole number, not the Bool $bad. Use " *
+                             "lag=1, the default." T(3; lag=bad)
+            end
+            @test_throws "Diff k must be a whole number, not the Bool $bad. Use e.g. " *
+                         "Diff(1) for the first difference." Diff(bad)
+            @test_throws "Diff lag must be a whole number, not the Bool $bad. Use " *
+                         "lag=1, the default." Diff(1; lag=bad)
+            @test_throws "Fourier order must be a whole number, not the Bool $bad. Use " *
+                         "e.g. Fourier(7, 2) for two harmonics." Fourier(7, bad)
+            @test_throws "Fourier period must be a number, not the Bool $bad. Use e.g. " *
+                         "Fourier(7, 2) for weekly seasonality on daily data." (
+                Fourier(bad, 2))
+            @test_throws "CustomFeature minhistory must be a whole number, not the " *
+                         "Bool $bad. Pass the number of history values f needs, e.g. " *
+                         "1." CustomFeature(:f, identity, bad)
+        end
         # Wrong argument types fail dispatch (current behaviour).
         for bad in (() -> RollingMean(2.5), () -> Diff(1.5), () -> Fourier(7, 1.5),
                     () -> CustomFeature(:f, mean, 1.5), () -> Calendar("month"),

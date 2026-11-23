@@ -269,6 +269,9 @@ for (T, stem, fun, minw, example) in (
             window::Int
             lag::Int
             function $T(window::Integer, lag::Integer)
+                _nobool(window, $(string(T, " window")),
+                        $(string("Use e.g. ", T, "(7).")))
+                _nobool(lag, $(string(T, " lag")), "Use lag=1, the default.")
                 window ≥ $minw || throw(ArgumentError(
                     string($(string(T)), " window must be ≥ ", $minw, ", got ", window,
                            ". Use e.g. ", $(string(T)), "(7).")))
@@ -313,6 +316,8 @@ struct Diff <: TargetFeature
     k::Int
     lag::Int
     function Diff(k::Integer, lag::Integer)
+        _nobool(k, "Diff k", "Use e.g. Diff(1) for the first difference.")
+        _nobool(lag, "Diff lag", "Use lag=1, the default.")
         k ≥ 1 || throw(ArgumentError(
             "Diff k must be ≥ 1, got $k. Use e.g. Diff(1) for the first difference."))
         lag ≥ 1 || throw(ArgumentError(
@@ -420,6 +425,9 @@ struct Fourier <: TimeFeature
     period::Float64
     order::Int
     function Fourier(period::Real, order::Integer)
+        _nobool(period, "Fourier period", "Use e.g. Fourier(7, 2) for weekly " *
+                "seasonality on daily data."; noun="number")
+        _nobool(order, "Fourier order", "Use e.g. Fourier(7, 2) for two harmonics.")
         period > 0 || throw(ArgumentError(
             "Fourier period must be > 0 (in freq steps), got $period. " *
             "Use e.g. Fourier(7, 2) for weekly seasonality on daily data."))
@@ -657,6 +665,8 @@ struct CustomFeature{F<:Function} <: TargetFeature
     f::F
     minhistory::Int
     function CustomFeature(name::Symbol, f::F, minhistory::Integer) where {F<:Function}
+        _nobool(minhistory, "CustomFeature minhistory", "Pass the number of history " *
+                "values f needs, e.g. 1.")
         minhistory ≥ 0 || throw(ArgumentError(
             "CustomFeature minhistory must be ≥ 0, got $minhistory. Pass the number " *
             "of history values f needs, or 0 if it needs none."))

@@ -250,6 +250,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `Lag(true)` built `Lag(1)` (a `Bool` is an integer to Julia). `Lag` now
   refuses a `Bool` with the whole-number `ArgumentError`.
+  The other step counts and orders did the same and now refuse a `Bool` too:
+  the `Diff` and rolling-feature arguments, `Fourier`'s period and order,
+  `CustomFeature`'s `minhistory`, `Direct`, the target transforms,
+  `RandomSearch`, `forecast`'s `h`, `mase`'s `m`, and the `horizon`,
+  `initial`, `windows` and `step` of `backtest` and `tune` (and `max_evals`).
 - `backtest` merged metrics with the same name (for example closures from
   one factory, or `(mae, mae)`): their per-fold rows were indistinguishable
   and every overall score came out as the mean of the metrics sharing the

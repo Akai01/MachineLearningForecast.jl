@@ -21,6 +21,11 @@
     @test_throws "mase needs length(y_train) > m; got length(y_train)=1 with m=1. " *
                  "Pass a longer y_train or a smaller m." mase(y, ŷ; y_train=[1.0], m=1)
     @test_throws ArgumentError mase(y, ŷ; y_train=y_train, m=0)
+    for bad in (true, false)
+        @test_throws "mase seasonality m must be a whole number, not the Bool $bad. " *
+                     "Pass the season length in steps, e.g. m=7 for weekly " *
+                     "seasonality on daily data." mase(y, ŷ; y_train=y_train, m=bad)
+    end
     @test_throws "mase seasonality m must be ≥ 1, got 0. Pass the season length in " *
                  "steps, e.g. m=7 for weekly seasonality on daily data, or m=1 (the " *
                  "default)." mase(y, ŷ; y_train=y_train, m=0)
