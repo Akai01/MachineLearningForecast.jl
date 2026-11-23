@@ -1019,6 +1019,105 @@
             "history rows, only 2 training rows remain", fit(fcs, short))
     end
 
+    @testset "Direct warns once when a panel series is too short for a step model" begin
+        kt = TestModels.KeepTrain
+        fcd(model=kt(); lag=1, h=5) = mk(model, FeatureSet(Lag(lag)); strat=Direct(h))
+        msg = "Direct(5): 1 series with fewer than 5 training rows is left out of the " *
+              "step models beyond their row count: unique_id=\"s2\" (3 training rows)"
+
+        @testset "one short series: the message, and the numbers do not change" begin
+            f = @test_logs (:warn, msg) fit(fcd(), makepanel(lens=(40, 4, 35)))
+            lens, lv = (39, 3, 34), (100.0, 10.0, 50.0)
+            for i in 1:5
+                keep = [k for k in 1:3 if lens[k] >= i]
+                @test length(keep) == (i <= 3 ? 3 : 2)
+                x = reduce(vcat, [lv[k] .+ Float64.(1:(lens[k] - i + 1)) for k in keep])
+                y = reduce(vcat, [lv[k] .+ Float64.((1 + i):(lens[k] + 1)) for k in keep])
+                r = f.models[i].fitresult
+                @test only(values(r.X)) == x
+                @test r.y == y
+            end
+        end
+
+        @testset "a series that is skipped is announced first" begin
+            p = makepanel(lens=(40, 4, 35, 1), levels=(100.0, 10.0, 50.0, 5.0),
+                            starts=fill(Date(2022, 1, 1), 4))
+            @test_logs((:warn, r"skipping 1 series with fewer than 2 rows"),
+                       (:warn, msg), fit(fcd(), p))
+            @test_logs((:warn, r"skipping 1 series with fewer than 2 rows"),
+                       (:warn, msg), (:warn, "k must be ≥ 1; resetting k to 1."),
+                       (:warn, "k must be ≥ 1; resetting k to 1."),
+                       (:warn, "k must be ≥ 1; resetting k to 1."),
+                       (:warn, "k must be ≥ 1; resetting k to 1."),
+                       (:warn, "k must be ≥ 1; resetting k to 1."),
+                       fit(fcd(TestModels.Clamped(0)), p))
+        end
+
+        @testset "seven short series: five are named, then an ellipsis" begin
+            p = makepanel(lens=(40, fill(4, 7)...), levels=Tuple(1.0:8.0),
+                          starts=fill(Date(2022, 1, 1), 8))
+            names = join(("unique_id=\"s$k\" (3 training rows)" for k in 2:6), ", ")
+            @test_logs (:warn,
+                "Direct(5): 7 series with fewer than 5 training rows are left out of " *
+                "the step models beyond their row count: $names, …") fit(fcd(), p)
+            p6 = makepanel(lens=(40, fill(4, 5)...), levels=Tuple(1.0:6.0),
+                           starts=fill(Date(2022, 1, 1), 6))
+            @test_logs (:warn,
+                "Direct(5): 5 series with fewer than 5 training rows are left out of " *
+                "the step models beyond their row count: $names") fit(fcd(), p6)
+        end
+
+        @testset "Int ids, a longer lag, one row short of the last step" begin
+            p = makepanel(lens=(40, 7, 35))
+            p = (unique_id=[parse(Int, s[2:end]) for s in p.unique_id], ds=p.ds, y=p.y)
+            @test_logs (:warn,
+                "Direct(5): 1 series with fewer than 5 training rows is left out of the " *
+                "step models beyond their row count: unique_id=2 (4 training rows)"
+            ) fit(fcd(; lag=3), p)
+        end
+
+        @testset "no warning when nothing is left out" begin
+            short = makepanel(lens=(40, 4, 35))
+            @test_logs min_level=Logging.Warn fit(mk(kt(), FeatureSet(Lag(1))), short)
+            # Exactly H training rows still reach the last step.
+            even = makepanel(lens=(40, 6, 35))
+            f = @test_logs min_level=Logging.Warn fit(fcd(; h=5), even)
+            @test length(f.models) == 5
+            @test_logs min_level=Logging.Warn fit(fcd(; h=3), short)
+            # A single series has no other series to be left out of.
+            one = makepanel(lens=(40,))
+            one = (ds=one.ds, y=one.y)
+            fcs = Forecaster(kt(); features=FeatureSet(Lag(1)), strategy=Direct(5),
+                             freq=Day(1))
+            @test_logs min_level=Logging.Warn fit(fcs, one)
+            # All short: the error comes first, with no warning.
+            @test_logs min_level=Logging.Warn @test_throws(
+                "not enough data for Direct(5)", fit(fcd(), makepanel(lens=(3, 3, 3))))
+        end
+
+        @testset "once per fit, not once per step model, with several models" begin
+            for m in (EvoTreeRegressor(nrounds=3),
+                      DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+                f = @test_logs (:warn, msg) fit(fcd(m), makepanel(lens=(40, 4, 35)))
+                @test length(f.models) == 5
+            end
+        end
+
+        @testset "once per fold in a panel backtest" begin
+            p = makepanel(lens=(60, 30, 55), starts=[Date(2022, 1, 1),
+                          Date(2022, 1, 31), Date(2022, 1, 1)])
+            fc = fcd(TestModels.LinAR(1.0, 0.0); h=20)
+            wrn = (:warn, "Direct(20): 1 series with fewer than 20 training rows is " *
+                          "left out of the step models beyond their row count: " *
+                          "unique_id=\"s2\" (9 training rows)")
+            wrn2 = (:warn, "Direct(20): 1 series with fewer than 20 training rows is " *
+                           "left out of the step models beyond their row count: " *
+                           "unique_id=\"s2\" (19 training rows)")
+            r = @test_logs wrn wrn2 backtest(fc, p; horizon=5, initial=40, step=10)
+            @test unique(r.folds.fold) == [1, 2]
+        end
+    end
+
     @testset "the facade throws on every panel, even of one series" begin
         one = makepanel(lens=(40,), levels=(100.0,), starts=[Date(2022, 1, 1)])
         f = fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), one)

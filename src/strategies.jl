@@ -36,7 +36,8 @@ struct Recursive <: ForecastStrategy end
 
 One model per horizon step `1..max_horizon`. `max_horizon` fixes the number of
 models at fit time; forecasting beyond it errors (refit with a larger horizon
-or use [`Recursive`](@ref)).
+or use [`Recursive`](@ref)). On a panel, a series with fewer than `max_horizon`
+training rows trains only the step models it has rows for, and `fit` warns.
 
 Neither strategy is better in general. `Recursive` estimates one model efficiently but
 is biased when the one-step model is misspecified, and the errors it feeds back

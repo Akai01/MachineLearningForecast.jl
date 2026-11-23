@@ -289,7 +289,8 @@ Notes:
 - **Ragged panels are fine.** Series need not share a start date, an end date
   or a length, and each forecasts forward from *its own* last timestamp. Series
   shorter than the feature set needs are skipped with a warning rather than
-  aborting the fit.
+  aborting the fit. Under `Direct`, a series with fewer than `max_horizon`
+  training rows trains only the step models it has rows for, and `fit` warns.
 - **Exogenous covariates** join on `(id, time)`, so `future` must carry the id
   column too.
 - **Backtesting** with `initial` cuts folds on the *global timestamp grid* — `initial`,

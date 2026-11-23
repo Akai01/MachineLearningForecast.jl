@@ -281,6 +281,7 @@ function _train_models(fc::Forecaster, s::Direct, frames)
     lens = _collect(fr -> length(fr.y), frames)
     nmax = maximum(lens)
     nmax ≥ s.max_horizon || throw(_direct_rows_error(fc, s, nmax))
+    _warn_short_series(fc, s, frames, lens)
     anch = anchors(fc.features)
     X, y = _stack_frames(fc, frames)
     return map(1:s.max_horizon) do i
@@ -291,6 +292,20 @@ function _train_models(fc::Forecaster, s::Direct, frames)
         end
         _train(fc.model, NamedTuple{keys(X)}(Tuple(cols)), y[to])
     end
+end
+
+# A single series cannot be short after the check above.
+_warn_short_series(::Forecaster{M,S,Nothing}, s, frames, lens) where {M,S} = nothing
+function _warn_short_series(fc::Forecaster{M,S,Symbol}, s, frames, lens) where {M,S}
+    short = [(fr.state.id, n) for (fr, n) in zip(frames, lens) if n < s.max_horizon]
+    isempty(short) && return nothing
+    k = length(short)
+    names = join((string(fc.id, "=", repr(id), " (", n, " training rows)")
+                  for (id, n) in first(short, 5)), ", ")
+    @warn "Direct($(s.max_horizon)): $k series with fewer than $(s.max_horizon) " *
+          "training rows $(k == 1 ? "is" : "are") left out of the step models beyond " *
+          "their row count: $names$(k > 5 ? ", …" : "")"
+    return nothing
 end
 
 _direct_rows_error(fc::Forecaster{M,S,Nothing}, s, nmax) where {M,S} = ArgumentError(

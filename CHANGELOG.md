@@ -95,6 +95,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ensembles on the holdout and on a second, earlier validation window, for
   diagnosis only: it reports the gain the best configuration would have given
   in hindsight and how well each validation score ranks the configurations.
+- A panel `Direct` fit warns when a series has fewer training rows than
+  `max_horizon`; such a series is left out of the later step models, which
+  before happened silently.
 
 ### Changed
 

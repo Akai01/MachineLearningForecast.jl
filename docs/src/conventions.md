@@ -95,7 +95,9 @@ own earlier predictions, and any horizon can be forecast.
 the target `i` steps ahead from the history at the forecast origin, so no
 prediction is fed back. It needs `max_horizon` models, cannot forecast past
 `max_horizon`, and every step sees the same target history, which is why the
-`Lag` convention above matters.
+`Lag` convention above matters. On a panel, a series with fewer than
+`max_horizon` training rows trains only the step models it has rows for, and
+`fit` warns.
 
 Neither strategy is better in general. `Recursive` estimates one model
 efficiently but is biased when the one-step model is misspecified, and the
