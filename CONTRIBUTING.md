@@ -73,7 +73,8 @@ These are load-bearing; please follow them:
 
 A feature is a subtype of `TargetFeature`, `TimeFeature` or `ExogenousFeature` (or of
 `AbstractFeature` directly, then it also defines `anchor`). To extend the package,
-import the generic functions and implement three methods:
+import the generic functions and implement three methods (plus `anchor` for a direct
+`AbstractFeature` subtype):
 
 ```julia
 import MachineLearningForecast: outputnames, minhistory, featurevalues!, inputcolumns,

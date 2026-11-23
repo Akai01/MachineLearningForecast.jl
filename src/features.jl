@@ -207,7 +207,13 @@ end
 """
     Lag(k)
 
-Lagged target `y_{t-k}` as feature column `y_lag_k`. Requires `k ≥ 1`.
+Lagged target `y_{t-k}` as feature column `y_lag_k`. Requires a whole number `k ≥ 1`
+(a `Bool` is refused).
+
+Under [`Direct`](@ref), `Lag(k)` counts back from the forecast origin, so at horizon `h`
+it is `y[t0-k+1]` (`t0` is the index of the last observed value), not `y[target-k]`;
+`Lag(m)` is in phase with the target only when `h = 1 (mod m)`; use `Lag.(1:m)`, which
+holds an in-phase lag at every `h`, or [`Recursive`](@ref).
 
 # Example
 ```julia
@@ -217,7 +223,7 @@ Lag(7)   # the target seven steps ago, column :y_lag_7
 struct Lag <: TargetFeature
     k::Int
     function Lag(k)
-        k isa Real && isinteger(k) || throw(ArgumentError(
+        k isa Real && !(k isa Bool) && isinteger(k) || throw(ArgumentError(
             "lag must be a whole number of steps, got Lag($(repr(k))). Use e.g. Lag(7)."))
         k ≥ 1 || throw(ArgumentError(
             "lag must be ≥ 1, got Lag($k), which would leak the current or a future " *
@@ -460,8 +466,11 @@ end
 Pass-through of user-supplied covariate columns that are known in the future
 (e.g. promotions, prices, holidays). At `forecast` time these columns must be
 supplied for the full horizon via the `new_data` keyword; in `backtest` they
-are sliced from the held-out data automatically. In v1, exogenous columns must
-be numeric (Real or Bool).
+are sliced from the held-out data automatically. Exogenous columns must be
+numeric (`Real` or `Bool`).
+
+A backtest feeds the realised values of the covariates, so its errors are a best case (too
+low) unless the column holds the values that were actually known at the forecast origin.
 
 # Example
 ```julia
@@ -602,7 +611,7 @@ function _to_float(v, name::Symbol)
     v isa Real && return Float64(v)
     throw(ArgumentError(
         "exogenous column :$name has non-numeric value $(repr(v)) " *
-        "(type $(typeof(v))). In v1 exogenous columns must be numeric (Real or " *
+        "(type $(typeof(v))). Exogenous columns must be numeric (Real or " *
         "Bool). Encode categorical columns numerically first."))
 end
 

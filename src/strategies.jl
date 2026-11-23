@@ -29,9 +29,14 @@ One model per horizon step `1..max_horizon`. `max_horizon` fixes the number of
 models at fit time; forecasting beyond it errors (refit with a larger horizon
 or use [`Recursive`](@ref)).
 
-v1 simplification: at forecast time, the direct models condition their
-target-history features on the training-end history, while exogenous and time
-features vary per step.
+At forecast time, the direct models condition their target-history features on
+the history up to the forecast origin, while exogenous and time features vary per
+step.
+
+Under `Direct`, `Lag(k)` counts back from the forecast origin, so at horizon `h`
+it is `y[t0-k+1]` (`t0` is the index of the last observed value), not `y[target-k]`;
+`Lag(m)` is in phase with the target only when `h = 1 (mod m)`; use `Lag.(1:m)`, which
+holds an in-phase lag at every `h`, or [`Recursive`](@ref).
 
 Model `i` predicts the target `i` steps ahead. At fit time its `AtOrigin`
 features (lags, rolling statistics, differences, custom) come from the feature

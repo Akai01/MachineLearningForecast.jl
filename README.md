@@ -103,7 +103,9 @@ columntables convert straight back: `DataFrame(fcast)`.
 
 **No-leakage guarantee**: every target-history feature uses only information
 strictly *before* the current row's target (rolling windows and differences
-require `lag ≥ 1`), and the test suite asserts it.
+require `lag ≥ 1`), and the test suite asserts it. A backtest feeds the realised
+values of the covariates, so its errors are a best case (too low) unless the column
+holds the values that were actually known at the forecast origin.
 
 ## Target transforms
 
@@ -136,9 +138,17 @@ Your own transform subtypes `TargetTransform` and implements
 - `Recursive()` — one model trained one-step-ahead; forecasts are fed back as
   pseudo-history to compute lag features for later steps. Any horizon.
 - `Direct(max_horizon)` — one model per step `1..max_horizon`; forecasting
-  beyond `max_horizon` errors. v1 simplification: at forecast time the direct
-  models condition target-history features on the training-end history, while
-  time and exogenous features vary per step.
+  beyond `max_horizon` errors. At forecast time, the direct models condition their
+  target-history features on the history up to the forecast origin, while exogenous and
+  time features vary per step. Under `Direct`, `Lag(k)` counts back from the forecast
+  origin, so at horizon `h` it is `y[t0-k+1]` (`t0` is the index of the last observed
+  value), not `y[target-k]`; `Lag(m)` is in phase with the target only when
+  `h = 1 (mod m)`; use `Lag.(1:m)`, which holds an in-phase lag at every `h`, or
+  `Recursive`.
+
+[Leakage and conventions](docs/src/conventions.md) compares the two strategies and
+lists the rules each feature, backtest and metric follows, with recipes for custom
+features.
 
 ## Hyperparameter tuning
 
@@ -268,7 +278,9 @@ Notes:
   whose series span different years. Either way it scores by joining forecasts
   to actuals on `(id, time)`, and scaled metrics such as `mase` use each
   series' own training values. `tune` takes `initial` or `windows` the same
-  way.
+  way. A fold does not score a series that has no rows up to the fold's origin, too
+  few of them to train on (it is skipped with a warning), or no actuals after
+  it, so the set of scored series can change from fold to fold.
 - Per-series state is available as `fitted.series`, a vector of
   `SeriesState`; for a single series the familiar `fitted.y_history`,
   `fitted.t_last` and `fitted.n_train` still work.
@@ -278,6 +290,8 @@ Notes:
 `mae`, `rmse`, `mape`, `smape`, `mase` — all `(y, ŷ) -> Float64`, lower is
 better. `mape` and `smape` return fractions (0.10 = 10%);
 `mase(y, ŷ; y_train, m=1)` scales by the in-sample seasonal-naive error.
+In `backtest`, unscaled metrics pool the fold's rows; scaled metrics are per series,
+weighted by scored points; the overall row is the unweighted mean over folds.
 
 ## Error messages
 
@@ -333,14 +347,14 @@ type or tuning strategy. By participating you agree to the
 
 MIT — see [LICENSE](LICENSE).
 
-## Roadmap (not in v1)
+## Roadmap
 
 - **Box-Cox** and other power transforms as built-in `TargetTransform`s.
 - **Static features**: per-series constants given once, not repeated in
   `new_data`, and per-series encodings (a series-id feature).
 - **More history features**: expanding mean, exponentially weighted mean,
   seasonal rolling statistics, rolling quantiles, and lags of exogenous columns.
-- **Prediction intervals**: conformal intervals from `backtest` residuals.
+- **Prediction intervals** around the point forecasts.
 - **Model reuse**: forecast series not seen in training, update a fitted model
   with new observations without refitting, access the feature matrix, fit
   several models in one call, and tested save/load.

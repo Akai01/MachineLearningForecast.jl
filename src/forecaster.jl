@@ -106,8 +106,8 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol},X<:TargetTransf
             "custom column, or use a lag of the target, e.g. Lag(1)."))
         time in outs && throw(ArgumentError(
             "the feature set produces a column named :$time, which is the time " *
-            "column. Timestamps cannot be used as a numeric feature directly — use " *
-            "Calendar(...), Fourier(...), or a CustomFeature for a trend index."))
+            "column. Timestamps cannot be used as a numeric feature directly: use " *
+            "Calendar(...) or Fourier(...) for time-based features."))
         # forecast and backtest results use these column names.
         if time in RESERVED_OUTPUT_NAMES
             throw(ArgumentError(
@@ -321,7 +321,7 @@ _training_frame(fc::Forecaster, tbl::NamedTuple) =
     build_training_frame(fc.features, tbl, fc.target, fc.time)
 
 """
-    forecast(f::FittedForecaster, h::Int; new_data=nothing) -> NamedTuple
+    forecast(f::FittedForecaster, h::Integer; new_data=nothing) -> NamedTuple
 
 Forecast `h` steps past the end of the training data. Returns a columntable
 (NamedTuple of vectors) with the spec's time column (the future timestamps

@@ -36,6 +36,10 @@ validate(model) = evaluate(model, vpanel)[1:2]
 140321 rows
 ```
 
+The split is time-ordered on purpose: MLJ's `CV()` is unsafe for time series,
+shuffled or not, because every fold but the last trains on rows that come after
+its test rows (see [Leakage and conventions](conventions.md)).
+
 ## The search spaces
 
 Every learner gets the same budget of 30 configurations, and configuration 1 is

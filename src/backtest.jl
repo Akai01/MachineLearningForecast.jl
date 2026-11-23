@@ -124,17 +124,23 @@ trains on its rows up to its own cutoff, and one global model is fitted on all
 of them. When the series span different calendar periods, a series' cutoff can
 fall before other series' training rows, as with every global model evaluated
 this way. The `folds` table then carries the id column too.
+A fold does not score a series that has no rows up to the fold's origin, too few of them
+to train on (it is skipped with a warning), or no actuals after it, so the set of scored
+series can change from fold to fold.
 
 `metrics` is a tuple of callables `(y, ŷ) -> Float64` (e.g. [`mae`](@ref),
 [`rmse`](@ref), [`smape`](@ref)). Scaled metrics that also need the fold's
 training target — [`mase`](@ref), or your own, declared via
 [`needs_ytrain`](@ref) — are called as `metric(y, ŷ; y_train=...)` with that
-fold's training window supplied automatically. On a panel, such a metric is
-computed per series, with each series' own training values, and averaged with
-each series weighted by its scored points, so a scale never mixes series;
-other metrics pool the fold's scored rows. When the feature set includes
-[`Exogenous`](@ref) columns, they are sliced from the held-out data
-automatically (they are "known" in a backtest).
+fold's training window supplied automatically (on a panel, each series' own, so a
+scale never mixes series).
+Unscaled metrics pool the fold's rows; scaled metrics are per series, weighted by scored
+points; the overall row is the unweighted mean over folds.
+
+When the feature set includes [`Exogenous`](@ref) columns, they are sliced from
+the held-out data automatically (they are "known" in a backtest).
+A backtest feeds the realised values of the covariates, so its errors are a best case (too
+low) unless the column holds the values that were actually known at the forecast origin.
 
 # Example
 ```julia

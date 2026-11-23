@@ -69,6 +69,12 @@ end
         err2 = try mk(features=FeatureSet(Lag(1), Exogenous(:ds))) catch e; e end
         @test err2 isa ArgumentError
         @test occursin("Calendar", err2.msg)
+        @test occursin("Calendar(...) or Fourier(...)", err2.msg)
+        @test !occursin("CustomFeature", err2.msg)
+        @test_throws "the feature set produces a column named :ds, which is the time " *
+                     "column. Timestamps cannot be used as a numeric feature directly: " *
+                     "use Calendar(...) or Fourier(...) for time-based features." (
+            mk(features=FeatureSet(Lag(1), Exogenous(:ds))))
     end
 
     @testset "mutating the features vector cannot bypass the leak guard" begin

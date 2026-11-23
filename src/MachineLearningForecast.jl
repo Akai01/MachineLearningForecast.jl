@@ -10,6 +10,11 @@ interface: any MLJ `Deterministic` regressor is a valid base model, and a
   [`RollingMax`](@ref), [`Diff`](@ref), [`Calendar`](@ref), [`Fourier`](@ref),
   [`Exogenous`](@ref), [`CustomFeature`](@ref).
 - Pluggable strategies: [`Recursive`](@ref), [`Direct`](@ref).
+- Target transforms, fitted per series and undone on the forecasts:
+  [`NoTransform`](@ref), [`MeanScale`](@ref), [`LastScale`](@ref),
+  [`Deseasonalize`](@ref), [`LogRatio`](@ref), [`Difference`](@ref),
+  [`TransformChain`](@ref); your own subtype [`TargetTransform`](@ref) implements
+  [`fit_transform`](@ref) and [`untransform`](@ref).
 - Panel (multi-series) forecasting: set `id` on [`Forecaster`](@ref) to fit
   one global model across many series ([`nseries`](@ref), [`SeriesState`](@ref)).
 - [`fit`](@ref) / [`forecast`](@ref) as a functional pair; [`backtest`](@ref)

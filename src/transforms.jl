@@ -246,7 +246,7 @@ rebuild forecasts by adding the changes back. `Difference(1)` removes a trend,
 
 # Example
 ```julia
-TransformChain(Difference(1), Difference(12))   # mlforecast's Differences([1, 12])
+TransformChain(Difference(1), Difference(12))   # lag 1 first, then lag 12
 ```
 """
 struct Difference <: TargetTransform

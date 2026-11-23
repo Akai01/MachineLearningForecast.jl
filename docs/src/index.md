@@ -38,6 +38,9 @@ two-level tuning story — including the **leakage warning** about always using
 `TimeSeriesCV` (never MLJ's `CV()`, shuffled or not) when tuning base models
 with MLJ's `TunedModel`.
 
+[Leakage and conventions](conventions.md) states what the package guarantees against
+leakage, the conventions behind forecasts and backtest scores, how to choose a
+strategy, and recipes for custom features.
 [Using different models](models.md) compares six MLJ learners on the M3 monthly series.
 [Tuning the models](tuning.md) tunes their hyperparameters on a validation window.
 

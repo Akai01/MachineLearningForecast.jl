@@ -152,6 +152,11 @@ end
             @test_throws "lag must be a whole number" Lag(bad)
         end
         @test_throws "got Lag(1.5). Use e.g. Lag(7)" Lag(1.5)
+        # A Bool is an integer, but not a lag.
+        for bad in (true, false)
+            @test_throws "lag must be a whole number of steps, got Lag($bad). Use e.g. " *
+                         "Lag(7)" Lag(bad)
+        end
         @test Lag(7.0) == Lag(7)             # a whole float is still accepted
         @test_throws "lag must be ≥ 1" Lag(0)
         for bad in (-Inf, NaN)
@@ -348,6 +353,9 @@ end
         dfs = (ds=t, y=y, label=fill("a", 10))
         @test_throws ArgumentError materialize(Exogenous(:label), y, dfs)
         @test_throws "exogenous column :label has non-numeric value \"a\" (type String)" (
+            materialize(Exogenous(:label), y, dfs))
+        @test_throws "(type String). Exogenous columns must be numeric (Real or Bool). " *
+                     "Encode categorical columns numerically first." (
             materialize(Exogenous(:label), y, dfs))
         @test_throws ArgumentError rowvalues(Exogenous(:promo), y, t[1], 0, (other=1.0,))
         @test_throws "new_data is missing exogenous column :promo required by Exogenous. " *

@@ -8,6 +8,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A documentation page, "Leakage and conventions": what the package guarantees
+  against leakage; the conventions behind forecasts and backtest scores (`Lag`
+  under `Direct`, realised covariates in a backtest, the series scored in a
+  panel backtest, gaps and missing values, how metrics aggregate, MLJ's `CV()`
+  on time series); how to choose between `Recursive` and `Direct`; and recipes
+  for a rolling median, an exponentially weighted mean, the share of zeros and
+  the time since the last non-zero value as `CustomFeature`s, a holiday
+  `TimeFeature`, a parent aggregate or a covariate shifted by at least the
+  horizon passed through `Exogenous`, per-step and per-series scores from
+  `BacktestResult.folds`, and a naive baseline.
 - `Probabilistic` MLJ models work as base models: the forecast is the mean of
   the predicted distribution (`predict_mean`), so a model such as EvoTrees'
   `EvoTreeGaussian` fits, forecasts, backtests and tunes like a
@@ -78,6 +88,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Documentation wording. The `Direct` docstring and the README no longer call
+  the origin-anchored target history a "v1 simplification", and say what it
+  means for `Lag` (`y[t0-k+1]`, not `y[target-k]`, at horizon `h`). The
+  `Exogenous` and `backtest` docstrings say that a backtest feeds realised
+  covariates, so its errors are a best case; `backtest` also says how metrics
+  aggregate, and that a fold does not score a series that has no rows up to the
+  fold's origin, too few of them to train on (it is skipped with a warning), or
+  no actuals after it, so the set of scored series can change from fold to fold.
+  The module docstring lists the target transforms, the `forecast`
+  docstring gives `h::Integer`, as the method does, the `Difference` example no
+  longer names another package, and the README roadmap promises prediction
+  intervals without naming a method.
+- The error for a feature that produces the time column no longer suggests a
+  `CustomFeature` for a trend index, which only sees the length of a series'
+  history and not a time index shared by all series; it points to `Calendar`
+  and `Fourier`. The error for a non-numeric `Exogenous` value no longer says
+  "In v1".
 - The package precompiles a workload with PrecompileTools, a new dependency:
   single-series and panel `fit`, `forecast` and `backtest` with both
   strategies, with and without a transform. In a fresh session, loading the
@@ -208,6 +235,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `Lag(true)` built `Lag(1)` (a `Bool` is an integer to Julia). `Lag` now
+  refuses a `Bool` with the whole-number `ArgumentError`.
 - `backtest` merged metrics with the same name (for example closures from
   one factory, or `(mae, mae)`): their per-fold rows were indistinguishable
   and every overall score came out as the mean of the metrics sharing the
