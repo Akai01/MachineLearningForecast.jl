@@ -57,7 +57,7 @@
         fitted = fit(fc, df2)
         future = (ds=ts[end] .+ Day.(1:14),
                   promo=Float64.([ones(7); zeros(7)]))
-        fcast = forecast(fitted, 14; new_data=future)
+        fcast = forecast(fitted, 14; future=future)
         @test mean(fcast.y_hat[1:7]) - mean(fcast.y_hat[8:14]) > 2.5
     end
 end

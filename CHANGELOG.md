@@ -98,6 +98,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Breaking: the `forecast` keyword `new_data` is now `future`.**
+  `forecast(fitted, h; future=table)` takes the future-known covariates;
+  `new_data=` is no longer accepted (no alias, no deprecation). The
+  `ArgumentError` and warning texts that named the keyword now say `future`.
+  Forecast values are unchanged.
 - **Breaking: when every `tune` candidate fails, `tune` throws an `ArgumentError`**
   (it was an `ErrorException`). The message lists "candidate i (overrides): error"
   for the first five candidates, with the first error in full and the first line
@@ -266,7 +271,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `CustomFeature`), `Direct`, `Forecaster`, `forecast`, `backtest`,
   `RandomSearch`, `tune` and the metrics, of a missing time, target, id or
   `Exogenous` column, of a non-numeric target, and of panel data with a
-  missing id, no rows, or a missing exogenous value in `new_data`. Passing a
+  missing id, no rows, or a missing exogenous value in `future`. Passing a
   model type instead of an instance (`Forecaster(DecisionTreeRegressor; ...)`)
   names the type and the instance to pass, instead of reporting
   `got DataType`. A panel `backtest` fold with nothing to score says that no
@@ -354,9 +359,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A time column typed `Union{Missing,Date}` or `Any` (for example after
   `allowmissing`) whose values are all `Date`s now works with `Exogenous`
   features. `fit` accepted it, but `backtest` and `tune` rejected the
-  `new_data` they slice from it, single-series and panel, and `forecast`
-  rejected such a `new_data`. The check now reads the values: a missing
-  timestamp in `new_data` throws an `ArgumentError` naming the row, and a
+  held-out exogenous rows they slice from it, single-series and panel, and
+  `forecast` rejected such a `future`. The check now reads the values: a missing
+  timestamp in `future` throws an `ArgumentError` naming the row, and a
   `Date` vs `DateTime` mismatch is still rejected.
 - `Calendar(:hour)` and `Calendar(:minute)` check the time values instead of
   the element type, so a `DateTime` column typed `Union{Missing,DateTime}` or
@@ -368,7 +373,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   four-method feature contract, `Direct`'s column anchoring and the ask!/tell!
   loop.
 - The `forecast` docstring describes a panel forecast: the id column in the
-  result, and the id column and per-series timestamps `new_data` needs. The
+  result, and the id column and per-series timestamps `future` needs. The
   `Forecaster` signature shows `id=nothing`, and the `TuningStrategy` and `ask!`
   docstrings list `:id` among the candidate keys.
 - The `fit` docstring said the time column must be sorted. That holds for a

@@ -204,25 +204,36 @@
         grids = [[s.t_last + Day(i) for i in 1:2] for s in f.series]
         nd = (unique_id=repeat(["s1", "s2", "s3"], inner=2),
               ds=vcat(grids...), promo=[11.0, 12.0, 21.0, 22.0, 31.0, 32.0])
-        @test forecast(f, 2; new_data=nd).y_hat == [11.0, 12.0, 21.0, 22.0, 31.0, 32.0]
+        @test forecast(f, 2; future=nd).y_hat == [11.0, 12.0, 21.0, 22.0, 31.0, 32.0]
         p2 = shuffle(StableRNG(9), 1:6)
         shuf = (unique_id=nd.unique_id[p2], ds=nd.ds[p2], promo=nd.promo[p2])
-        @test forecast(f, 2; new_data=shuf).y_hat == [11.0, 12.0, 21.0, 22.0, 31.0, 32.0]
+        @test forecast(f, 2; future=shuf).y_hat == [11.0, 12.0, 21.0, 22.0, 31.0, 32.0]
 
         @test_throws ArgumentError forecast(f, 2)
         @test_throws "features contain Exogenous(:promo) but forecast() was called " *
-                     "without new_data. Pass a table with columns (:unique_id, :ds, " *
+                     "without `future`. Pass a table with columns (:unique_id, :ds, " *
                      ":promo) covering all 3 series over their 2 forecast steps." (
             forecast(f, 2))
         missing_row = (unique_id=nd.unique_id[1:5], ds=nd.ds[1:5], promo=nd.promo[1:5])
-        err = try forecast(f, 2; new_data=missing_row) catch e; e end
+        err = try forecast(f, 2; future=missing_row) catch e; e end
         @test err isa ArgumentError && occursin("no row for", err.msg)
+        @test_throws "`future` has no row for unique_id=\"s3\" at $(nd.ds[6]), which is " *
+                     "step 2 of that series' forecast. Provide exogenous values for " *
+                     "every series at every forecast timestamp." forecast(
+            f, 2; future=missing_row)
+        @test_throws MethodError forecast(f, 2; new_data=nd)
+        @test_throws "Every `future` row needs a timestamp; drop or fill that row." (
+            forecast(f, 2; future=merge(
+                nd, (ds=Union{Missing,Date}[missing; nd.ds[2:end]],))))
+        plain = fit(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), panel)
+        @test_logs (:warn, "`future` was passed but the feature set has no Exogenous " *
+                           "features; it will be ignored.") forecast(plain, 2; future=nd)
         noid = (ds=nd.ds, promo=nd.promo)
-        err2 = try forecast(f, 2; new_data=noid) catch e; e end
+        err2 = try forecast(f, 2; future=noid) catch e; e end
         @test err2 isa ArgumentError && occursin("unique_id", err2.msg)
-        @test_throws "new_data is missing column :unique_id; a panel forecast needs " *
+        @test_throws "`future` is missing column :unique_id; a panel forecast needs " *
                      "the id column :unique_id, the time column :ds and the exogenous " *
-                     "column :promo." forecast(f, 2; new_data=noid)
+                     "column :promo." forecast(f, 2; future=noid)
         for m in (EvoTreeRegressor(nrounds=5),
                   DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             @test_throws "id column :unique_id not found in the data. Available " *
@@ -241,34 +252,34 @@
             grids = [[s.t_last + Day(i) for i in 1:2] for s in f.series]
             nd = (unique_id=repeat(["s1", "s2", "s3"], inner=2), ds=vcat(grids...),
                   promo=[11.0, 12.0, 21.0, 22.0, 31.0, 32.0])
-            want = forecast(f, 2; new_data=nd)
+            want = forecast(f, 2; future=nd)
             bt = backtest(fc, ex; horizon=5, initial=40, step=10)
             for T in (Union{Missing,Date}, Any)
-                @test forecast(f, 2; new_data=merge(nd, (ds=Vector{T}(nd.ds),))) == want
+                @test forecast(f, 2; future=merge(nd, (ds=Vector{T}(nd.ds),))) == want
                 r = backtest(fc, merge(ex, (ds=Vector{T}(ex.ds),)); horizon=5,
                              initial=40, step=10)
                 @test isequal(r.folds, bt.folds) && isequal(r.metrics, bt.metrics)
             end
             holed = merge(nd, (ds=Vector{Union{Missing,Date}}(nd.ds),))
             holed.ds[4] = missing
-            @test_throws ArgumentError forecast(f, 2; new_data=holed)
-            @test_throws "new_data's time column :ds has a missing value at row 4" forecast(
-                f, 2; new_data=holed)
+            @test_throws ArgumentError forecast(f, 2; future=holed)
+            @test_throws "`future`'s time column :ds has a missing value at row 4" forecast(
+                f, 2; future=holed)
             @test_throws "has element type DateTime at row 1, but the training time " *
-                         "column is Date" forecast(f, 2; new_data=merge(
+                         "column is Date" forecast(f, 2; future=merge(
                              nd, (ds=DateTime.(nd.ds),)))
             dup = (unique_id=[nd.unique_id; "s2"], ds=[nd.ds; nd.ds[3]],
                    promo=[nd.promo; 0.0])
-            @test_throws ArgumentError forecast(f, 2; new_data=dup)
-            @test_throws "new_data has duplicate rows for unique_id=\"s2\" at " *
-                         "$(nd.ds[3]). Deduplicate new_data" forecast(f, 2; new_data=dup)
+            @test_throws ArgumentError forecast(f, 2; future=dup)
+            @test_throws "`future` has duplicate rows for unique_id=\"s2\" at " *
+                         "$(nd.ds[3]). Deduplicate `future`" forecast(f, 2; future=dup)
             gap = merge(nd, (promo=Union{Missing,Float64}[nd.promo...],))
             gap.promo[4] = missing
-            @test_throws ArgumentError forecast(f, 2; new_data=gap)
-            @test_throws "new_data has a missing value in exogenous column :promo for " *
+            @test_throws ArgumentError forecast(f, 2; future=gap)
+            @test_throws "`future` has a missing value in exogenous column :promo for " *
                          "unique_id=\"s2\" at $(nd.ds[4]). Provide complete exogenous " *
                          "values for every series at every forecast step." forecast(
-                f, 2; new_data=gap)
+                f, 2; future=gap)
         end
     end
 
@@ -307,7 +318,7 @@
         future = (unique_id=repeat(["s1", "s2", "s3"], inner=4),
                   ds=repeat(Date(2022, 3, 2) .+ Day.(0:3), 3),
                   promo=[3 * (lv[k] + r) for k in 1:3 for r in rows[k]])
-        got = forecast(fit(fc, dd), 4; new_data=future).y_hat
+        got = forecast(fit(fc, dd), 4; future=future).y_hat
         # Correct anchoring maps promo to y of its own row.
         @test got ≈ [lv[k] + r for k in 1:3 for r in rows[k]]
         # Taking promo from the feature row shifts step i by i - 1.

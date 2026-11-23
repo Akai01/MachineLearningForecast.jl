@@ -108,7 +108,7 @@ A feature's `anchor` is `AtOrigin` or `AtTarget`; see below.
 a `Float64`. The return value is ignored. If the feature reads user columns, also
 define `inputcolumns(f)`, the `Vector{Symbol}` of their names (the default is
 `Symbol[]`; an `ExogenousFeature` without it throws an `ArgumentError`). `forecast` and
-`backtest` use it to pick the columns from `new_data`.
+`backtest` use it to pick the columns from the `future` keyword.
 
 Training calls `featurevalues!` for every row, so by default (unless the feature
 overrides `materialize!`) batch and single-row values cannot diverge. Define

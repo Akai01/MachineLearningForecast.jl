@@ -171,11 +171,11 @@ function _panel_batch(f::FittedForecaster, states, histories, step::Integer,
     return NamedTuple{Tuple(names)}(Tuple(cols))
 end
 
-_forecast_panel(f::FittedForecaster, h::Integer, new_data) =
-    _forecast_panel(f, fill(Int(h), nseries(f)), new_data)
+_forecast_panel(f::FittedForecaster, h::Integer, future) =
+    _forecast_panel(f, fill(Int(h), nseries(f)), future)
 
 # hs[k] is series k's horizon, which backtest may shorten.
-function _forecast_panel(f::FittedForecaster, hs::Vector{Int}, new_data)
+function _forecast_panel(f::FittedForecaster, hs::Vector{Int}, future)
     spec = f.spec
     states = getfield(f, :series)
     grids = [future_grid(st.t_start, spec.freq, st.n_train, hs[k])
@@ -184,15 +184,15 @@ function _forecast_panel(f::FittedForecaster, hs::Vector{Int}, new_data)
     exogcols = exogenous_columns(spec.features)
     exog_rows = nothing
     if !isempty(exogcols)
-        new_data === nothing && throw(ArgumentError(
+        future === nothing && throw(ArgumentError(
             "features contain Exogenous($(join(":" .* string.(exogcols), ", "))) but " *
-            "forecast() was called without new_data. Pass a table with columns " *
+            "forecast() was called without `future`. Pass a table with columns " *
             "(:$(spec.id), :$(spec.time), $(join(":" .* string.(exogcols), ", "))) " *
             "covering all $(length(states)) series over their $(maximum(hs)) " *
             "forecast steps."))
-        exog_rows = _panel_exogenous_rows(spec, exogcols, states, grids, new_data)
-    elseif new_data !== nothing
-        @warn "new_data was passed but the feature set has no Exogenous features; " *
+        exog_rows = _panel_exogenous_rows(spec, exogcols, states, grids, future)
+    elseif future !== nothing
+        @warn "`future` was passed but the feature set has no Exogenous features; " *
               "it will be ignored."
     end
 
@@ -249,12 +249,12 @@ function _panel_predict!(preds, f, strat::Direct, states, histories, grids, exog
     return preds
 end
 
-function _panel_exogenous_rows(spec::Forecaster, exogcols, states, grids, new_data)
-    nd = normalize_table(new_data)
+function _panel_exogenous_rows(spec::Forecaster, exogcols, states, grids, future)
+    nd = normalize_table(future)
     needed = [spec.id; spec.time; exogcols]
     absent = [c for c in needed if !haskey(nd, c)]
     isempty(absent) || throw(ArgumentError(
-        "new_data is missing column$(length(absent) == 1 ? "" : "s") " *
+        "`future` is missing column$(length(absent) == 1 ? "" : "s") " *
         "$(join(":" .* string.(absent), ", ")); a panel forecast needs the id " *
         "column :$(spec.id), the time column :$(spec.time) and the exogenous " *
         "column$(length(exogcols) == 1 ? "" : "s") " *
@@ -264,8 +264,8 @@ function _panel_exogenous_rows(spec::Forecaster, exogcols, states, grids, new_da
     for i in eachindex(tv)
         key = (idv[i], _new_time(tv[i], eltype(first(grids)), spec.time, i))
         haskey(lookup, key) && throw(ArgumentError(
-            "new_data has duplicate rows for $(spec.id)=$(repr(idv[i])) at " *
-            "$(tv[i]). Deduplicate new_data — otherwise which row supplies each " *
+            "`future` has duplicate rows for $(spec.id)=$(repr(idv[i])) at " *
+            "$(tv[i]). Deduplicate `future` — otherwise which row supplies each " *
             "forecast step is arbitrary."))
         lookup[key] = i
     end
@@ -276,13 +276,13 @@ function _panel_exogenous_rows(spec::Forecaster, exogcols, states, grids, new_da
         for (s, t) in enumerate(grids[k])
             i = get(lookup, (st.id, t), nothing)
             i === nothing && throw(ArgumentError(
-                "new_data has no row for $(spec.id)=$(repr(st.id)) at $t, which is " *
+                "`future` has no row for $(spec.id)=$(repr(st.id)) at $t, which is " *
                 "step $s of that series' forecast. Provide exogenous values for " *
                 "every series at every forecast timestamp."))
             row = NamedTuple{names}(Tuple(nd[c][i] for c in exogcols))
             for c in exogcols
                 ismissing(row[c]) && throw(ArgumentError(
-                    "new_data has a missing value in exogenous column :$c for " *
+                    "`future` has a missing value in exogenous column :$c for " *
                     "$(spec.id)=$(repr(st.id)) at $t. Provide complete exogenous " *
                     "values for every series at every forecast step."))
             end

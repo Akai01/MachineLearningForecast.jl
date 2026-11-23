@@ -357,7 +357,7 @@ _training_frame(fc::Forecaster, tbl::NamedTuple) =
     build_training_frame(fc.features, tbl, fc.target, fc.time)
 
 """
-    forecast(f::FittedForecaster, h::Integer; new_data=nothing) -> NamedTuple
+    forecast(f::FittedForecaster, h::Integer; future=nothing) -> NamedTuple
 
 Forecast `h` steps past the end of the training data. Returns a columntable
 (NamedTuple of vectors) with the spec's time column (the future timestamps
@@ -365,61 +365,61 @@ Forecast `h` steps past the end of the training data. Returns a columntable
 Being a columntable, the result is Tables.jl-compatible — pass it to
 `DataFrame`, `CSV.write`, etc. as-is.
 
-If the feature set contains any [`Exogenous`](@ref) feature, `new_data` is
+If the feature set contains any [`Exogenous`](@ref) feature, `future` is
 required: a table with the time column and every exogenous column, covering
 all `h` future timestamps (extra rows are ignored). Without exogenous
-features, `new_data` must be omitted (it is ignored with a warning otherwise).
+features, `future` must be omitted (it is ignored with a warning otherwise).
 
 For a panel forecaster (one with `id` set), the result also has the id column,
 before the time column: `h` rows per series, each series forecast from its own
-last training timestamp. `new_data` must then carry the id column too and cover
+last training timestamp. `future` must then carry the id column too and cover
 every series at each of its `h` future timestamps.
 
 # Example
 ```julia
 fcast = forecast(fitted, 28)
-fcast = forecast(fitted, 28; new_data=future_exog)   # with Exogenous features
-fcast.y_hat                                          # the point forecasts
+fcast = forecast(fitted, 28; future=future_exog)   # with Exogenous features
+fcast.y_hat                                        # the point forecasts
 ```
 """
-function forecast(f::FittedForecaster, h::Integer; new_data=nothing)
+function forecast(f::FittedForecaster, h::Integer; future=nothing)
     _nobool(h, "forecast horizon h", "Pass the number of steps to forecast, e.g. " *
             "forecast(fitted, 28).")
     h ≥ 1 || throw(ArgumentError(
         "forecast horizon h must be ≥ 1, got $h. Pass the number of steps to " *
         "forecast, e.g. forecast(fitted, 28)."))
-    return _forecast_spec(f, f.spec, h, new_data)
+    return _forecast_spec(f, f.spec, h, future)
 end
 
-_forecast_spec(f::FittedForecaster, spec::Forecaster{M,S,Symbol}, h, new_data) where {M,S} =
-    _forecast_panel(f, h, new_data)
+_forecast_spec(f::FittedForecaster, spec::Forecaster{M,S,Symbol}, h, future) where {M,S} =
+    _forecast_panel(f, h, future)
 
 function _forecast_spec(f::FittedForecaster, spec::Forecaster{M,S,Nothing},
-                        h::Integer, new_data) where {M,S}
+                        h::Integer, future) where {M,S}
     st = only(getfield(f, :series))
     grid = future_grid(st.t_start, spec.freq, st.n_train, h)
     exogcols = exogenous_columns(spec.features)
     exog_rows = nothing
     if !isempty(exogcols)
-        new_data === nothing && throw(ArgumentError(
+        future === nothing && throw(ArgumentError(
             "features contain Exogenous($(join(":" .* string.(exogcols), ", "))) but " *
-            "forecast() was called without new_data. Pass a table with columns " *
+            "forecast() was called without `future`. Pass a table with columns " *
             "(:$(spec.time), $(join(":" .* string.(exogcols), ", "))) covering " *
             "$(first(grid)) … $(last(grid))."))
-        exog_rows = _exogenous_rows(spec, exogcols, grid, new_data)
-    elseif new_data !== nothing
-        @warn "new_data was passed but the feature set has no Exogenous features; " *
+        exog_rows = _exogenous_rows(spec, exogcols, grid, future)
+    elseif future !== nothing
+        @warn "`future` was passed but the feature set has no Exogenous features; " *
               "it will be ignored."
     end
     return _forecast(f, spec.strategy, h, grid, exog_rows)
 end
 
-function _exogenous_rows(spec::Forecaster, exogcols::Vector{Symbol}, grid, new_data)
-    nd = normalize_table(new_data)
+function _exogenous_rows(spec::Forecaster, exogcols::Vector{Symbol}, grid, future)
+    nd = normalize_table(future)
     needed = [spec.time; exogcols]
     absent = [c for c in needed if !haskey(nd, c)]
     isempty(absent) || throw(ArgumentError(
-        "new_data is missing column$(length(absent) == 1 ? "" : "s") " *
+        "`future` is missing column$(length(absent) == 1 ? "" : "s") " *
         "$(join(":" .* string.(absent), ", ")); it must contain the time column " *
         ":$(spec.time) and the exogenous column$(length(exogcols) == 1 ? "" : "s") " *
         "$(join(":" .* string.(exogcols), ", "))."))
@@ -428,14 +428,14 @@ function _exogenous_rows(spec::Forecaster, exogcols::Vector{Symbol}, grid, new_d
     for i in eachindex(tcol)
         v = _new_time(tcol[i], eltype(grid), spec.time, i)
         haskey(lookup, v) && throw(ArgumentError(
-            "new_data has duplicate timestamps in column :$(spec.time); first " *
-            "duplicate at $v. Deduplicate new_data — otherwise which row " *
+            "`future` has duplicate timestamps in column :$(spec.time); first " *
+            "duplicate at $v. Deduplicate `future` — otherwise which row " *
             "supplies each forecast step is arbitrary."))
         lookup[v] = i
     end
     absent_t = [t for t in grid if !haskey(lookup, t)]
     isempty(absent_t) || throw(ArgumentError(
-        "new_data is missing $(length(absent_t)) of the $(length(grid)) timestamps " *
+        "`future` is missing $(length(absent_t)) of the $(length(grid)) timestamps " *
         "required for the forecast grid $(first(grid)) … $(last(grid)); first " *
         "missing: $(first(absent_t)). Provide exogenous values for every future step."))
     names = Tuple(exogcols)
@@ -445,7 +445,7 @@ function _exogenous_rows(spec::Forecaster, exogcols::Vector{Symbol}, grid, new_d
         row = NamedTuple{names}(Tuple(nd[c][i] for c in exogcols))
         for c in exogcols
             ismissing(row[c]) && throw(ArgumentError(
-                "new_data has a missing value in exogenous column :$c at time $t. " *
+                "`future` has a missing value in exogenous column :$c at time $t. " *
                 "Provide complete exogenous values for every future step."))
         end
         rows[s] = row
@@ -455,11 +455,11 @@ end
 
 function _new_time(v, T::Type, time::Symbol, i::Integer)
     ismissing(v) && throw(ArgumentError(
-        "new_data's time column :$time has a missing value at row $i. Every " *
-        "new_data row needs a timestamp; drop or fill that row."))
+        "`future`'s time column :$time has a missing value at row $i. Every " *
+        "`future` row needs a timestamp; drop or fill that row."))
     # Name the eltype mismatch, not an obscure Dict key error.
     v isa T || throw(ArgumentError(
-        "new_data's time column :$time has element type $(typeof(v)) at row $i, " *
+        "`future`'s time column :$time has element type $(typeof(v)) at row $i, " *
         "but the training time column is $T. Convert it (e.g. `Date.(col)` / " *
         "`DateTime.(col)`) so timestamps compare equal."))
     return v

@@ -11,7 +11,7 @@ Root of the feature hierarchy. Concrete features are one of:
 - [`TimeFeature`](@ref): computed from the timestamp only (always computable
   for future rows), e.g. [`Calendar`](@ref), [`Fourier`](@ref).
 - [`ExogenousFeature`](@ref): passed through from user data (must be provided
-  for the future via `new_data`), i.e. [`Exogenous`](@ref).
+  for the forecast as `future`), i.e. [`Exogenous`](@ref).
 
 Every concrete feature implements three methods:
 
@@ -86,7 +86,7 @@ abstract type TimeFeature <: AbstractFeature end
     ExogenousFeature
 
 Abstract supertype of the features passed through from the user's columns,
-which must be provided for the future through `new_data`, such as
+which must be passed to `forecast` as `future`, such as
 [`Exogenous`](@ref). Subtype it for your own, implement the methods listed under
 [`AbstractFeature`](@ref), and declare the columns it reads with
 [`inputcolumns`](@ref). Its anchor is `AtTarget` by default.
@@ -531,7 +531,7 @@ end
 
 Pass-through of user-supplied covariate columns that are known in the future
 (e.g. promotions, prices, holidays). At `forecast` time these columns must be
-supplied for the full horizon via the `new_data` keyword; in `backtest` they
+supplied for the full horizon via the `future` keyword; in `backtest` they
 are sliced from the held-out data automatically. Exogenous columns must be
 numeric (`Real` or `Bool`).
 
@@ -565,7 +565,7 @@ minhistory(::ExogenousFeature) = 0
     inputcolumns(f) -> Vector{Symbol}
 
 The user columns the feature `f` reads. `forecast` and `backtest` pick exactly these columns
-from `new_data` (or from the held-out rows), and training reads them from the training data
+from `future` (or from the held-out rows), and training reads them from the training data
 too, so they must be present there: `fit` throws otherwise (unless the feature overrides
 `materialize!`). The default is `Symbol[]`, [`Exogenous`](@ref) returns its columns, and an
 [`ExogenousFeature`](@ref) of your own must define it, otherwise an `ArgumentError` is
@@ -581,7 +581,7 @@ inputcolumns(::AbstractFeature) = Symbol[]
 inputcolumns(f::Exogenous) = f.cols
 inputcolumns(f::ExogenousFeature) = throw(ArgumentError(
     "$(typeof(f)) is an ExogenousFeature but defines no inputcolumns method. " *
-    "forecast and backtest read the columns it needs from new_data through " *
+    "forecast and backtest read the columns it needs from `future` through " *
     "inputcolumns(f). Define MachineLearningForecast.inputcolumns(f::" *
     "$(nameof(typeof(f)))) = [...], a Vector{Symbol}."))
 
@@ -689,7 +689,7 @@ end
 function featurevalues!(out::AbstractVector{Float64}, f::Exogenous, ctx::FeatureContext)
     for (j, c) in enumerate(f.cols)
         haskey(ctx.exog, c) || throw(ArgumentError(
-            "new_data is missing exogenous column :$c required by Exogenous. " *
+            "`future` is missing exogenous column :$c required by Exogenous. " *
             "Provide it for every forecast timestamp."))
         out[j] = _to_float(ctx.exog[c], c)
     end

@@ -90,8 +90,8 @@
         for (c, cut) in enumerate(cuts)
             pre = fit(forecaster(spy(), fs, strat, panel),
                       table(series, [1:k for k in cut]; panel))
-            forecast(pre, 3; new_data=table(series, [(k + 1):(k + 3) for k in cut];
-                                            panel, withy=false))
+            forecast(pre, 3; future=table(series, [(k + 1):(k + 3) for k in cut];
+                                          panel, withy=false))
             ok = true
             for i in 1:hmax
                 X = full.models[strat isa Direct ? i : 1].fitresult.X

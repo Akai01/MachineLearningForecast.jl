@@ -70,7 +70,7 @@ fitted = fit(fc, df)
 future_exog = (ds    = collect(Date(2024, 1, 1):Day(1):Date(2024, 1, 28)),
                promo = rand(Bool, 28))
 
-fcast = forecast(fitted, 28; new_data = future_exog)
+fcast = forecast(fitted, 28; future = future_exog)
 fcast.y_hat            # the 28 point forecasts
 fcast.ds               # the future timestamps
 
@@ -98,7 +98,7 @@ columntables convert straight back: `DataFrame(fcast)`.
 | `Diff(k; lag=1)` | target | `y_{t-lag} - y_{t-lag-k}` |
 | `Calendar(parts...)` | time | `:year`, `:quarter`, `:month`, `:weekofyear`, `:dayofweek`, `:dayofmonth`, `:dayofyear`, `:hour`, `:minute` |
 | `Fourier(period, K)` | time | `sin`/`cos` harmonics on a step index continuing seamlessly into the future; on a panel, the same date has the same values in every series |
-| `Exogenous(cols...)` | exogenous | future-known covariates, supplied via `new_data` at forecast time |
+| `Exogenous(cols...)` | exogenous | future-known covariates, supplied via `future` at forecast time |
 | `CustomFeature(name, f, minhistory)` | target | `f(history)` — any function of the target history strictly before the current row |
 
 **No-leakage guarantee**: every target-history feature uses only information
@@ -290,7 +290,7 @@ Notes:
   or a length, and each forecasts forward from *its own* last timestamp. Series
   shorter than the feature set needs are skipped with a warning rather than
   aborting the fit.
-- **Exogenous covariates** join on `(id, time)`, so `new_data` must carry the id
+- **Exogenous covariates** join on `(id, time)`, so `future` must carry the id
   column too.
 - **Backtesting** with `initial` cuts folds on the *global timestamp grid* — `initial`,
   `step` and `horizon` count distinct timestamps, not rows. With `windows` it instead
@@ -386,7 +386,7 @@ MIT — see [LICENSE](LICENSE).
 
 - **Box-Cox** and other power transforms as built-in `TargetTransform`s.
 - **Static features**: per-series constants given once, not repeated in
-  `new_data`, and per-series encodings (a series-id feature).
+  `future`, and per-series encodings (a series-id feature).
 - **More history features**: expanding mean, exponentially weighted mean,
   seasonal rolling statistics, rolling quantiles, and lags of exogenous columns.
 - **Prediction intervals** around the point forecasts.

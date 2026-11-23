@@ -75,7 +75,7 @@
         fitted = fit(fc, dd)
         future = (ds = collect(dd.ds[end] + Day(1):Day(1):dd.ds[end] + Day(4)),
                   promo = [10.0, 20.0, 30.0, 40.0])
-        got = forecast(fitted, 4; new_data=future).y_hat
+        got = forecast(fitted, 4; future=future).y_hat
         # Correct anchoring maps promo v to 1000+v on every machine.
         @test got ≈ [1010.0, 1020.0, 1030.0, 1040.0]
         # The old, skewed anchoring produced 1000+v+(i-1) instead:

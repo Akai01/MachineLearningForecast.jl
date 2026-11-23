@@ -124,7 +124,7 @@ end
         fse = FeatureSet(Lag(1), Exogenous(:promo))
         future = (ds=df.ds[end] .+ Day.(1:3), promo=[NaN, 1.0, -Inf])
         echo = Forecaster(TestModels.EchoColumn(:promo); features=fse, freq=Day(1))
-        @test isequal(forecast(fit(echo, dfe), 3; new_data=future).y_hat,
+        @test isequal(forecast(fit(echo, dfe), 3; future=future).y_hat,
                       [NaN, 1.0, -Inf])
         X, _, _ = MachineLearningForecast.build_training_frame(fse, dfe, :y, :ds)
         @test isnan(X.promo[19]) && X.promo[29] == Inf
@@ -135,7 +135,7 @@ end
         for m in (EvoTreeRegressor(nrounds=5),
                   DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             f = fit(Forecaster(m; features=fse, freq=Day(1)), clean)
-            @test length(forecast(f, 3; new_data=future).y_hat) == 3
+            @test length(forecast(f, 3; future=future).y_hat) == 3
         end
     end
 
@@ -291,7 +291,7 @@ end
         end
     end
 
-    @testset "new_data: duplicates and eltype mismatches are diagnosed" begin
+    @testset "future: duplicates and eltype mismatches are diagnosed" begin
         fce = Forecaster(TestModels.EchoColumn(:promo);
                          features=FeatureSet(Lag(1), Exogenous(:promo)),
                          strategy=Recursive(), freq=Day(1), target=:y, time=:ds)
@@ -299,21 +299,21 @@ end
         grid = collect(df.ds[end] + Day(1):Day(1):df.ds[end] + Day(3))
 
         dup = (ds=[grid[1], grid[1], grid[2], grid[3]], promo=[1.0, 2.0, 3.0, 4.0])
-        err = try forecast(fitted, 3; new_data=dup) catch e; e end
+        err = try forecast(fitted, 3; future=dup) catch e; e end
         @test err isa ArgumentError
         @test occursin("duplicate timestamps", err.msg)
 
         mism = (ds=DateTime.(grid), promo=[1.0, 2.0, 3.0])
-        err2 = try forecast(fitted, 3; new_data=mism) catch e; e end
+        err2 = try forecast(fitted, 3; future=mism) catch e; e end
         @test err2 isa ArgumentError
         @test occursin("element type", err2.msg)
         @test !occursin("missing", err2.msg)
 
         shuffled = (ds=grid[[3, 1, 2]], promo=[30.0, 10.0, 20.0])
-        @test forecast(fitted, 3; new_data=shuffled).y_hat == [10.0, 20.0, 30.0]
+        @test forecast(fitted, 3; future=shuffled).y_hat == [10.0, 20.0, 30.0]
     end
 
-    @testset "new_data's time column is checked by value, not element type" begin
+    @testset "future's time column is checked by value, not element type" begin
         dfe = (ds=df.ds, y=df.y, promo=Float64.(1:50))
         grid = collect(df.ds[end] + Day(1):Day(1):df.ds[end] + Day(3))
         nd = (ds=grid, promo=[1.0, 2.0, 3.0])
@@ -322,23 +322,24 @@ end
             fce = Forecaster(m; features=FeatureSet(Lag(1), Exogenous(:promo)),
                              freq=Day(1))
             f = fit(fce, dfe)
-            want = forecast(f, 3; new_data=nd)
+            want = forecast(f, 3; future=nd)
             bt = backtest(fce, dfe; horizon=3, initial=40)
             for T in (Union{Missing,Date}, Any)
-                @test forecast(f, 3; new_data=(ds=Vector{T}(grid), promo=nd.promo)) == want
-                # backtest slices new_data from the user's own time column
+                @test forecast(f, 3; future=(ds=Vector{T}(grid), promo=nd.promo)) == want
+                # backtest slices the held-out exogenous rows from the user's
+                # own time column
                 r = backtest(fce, merge(dfe, (ds=Vector{T}(df.ds),)); horizon=3,
                              initial=40)
                 @test isequal(r.folds, bt.folds) && isequal(r.metrics, bt.metrics)
             end
             holed = (ds=Union{Missing,Date}[grid[1], missing, grid[2], grid[3]],
                      promo=[1.0, 9.0, 2.0, 3.0])
-            @test_throws ArgumentError forecast(f, 3; new_data=holed)
-            @test_throws "new_data's time column :ds has a missing value at row 2" forecast(
-                f, 3; new_data=holed)
+            @test_throws ArgumentError forecast(f, 3; future=holed)
+            @test_throws "`future`'s time column :ds has a missing value at row 2" forecast(
+                f, 3; future=holed)
             mixed = (ds=Any[grid[1], DateTime(grid[2]), grid[3]], promo=nd.promo)
             @test_throws "has element type DateTime at row 2, but the training time " *
-                         "column is Date" forecast(f, 3; new_data=mixed)
+                         "column is Date" forecast(f, 3; future=mixed)
         end
     end
 
@@ -404,6 +405,8 @@ end
         @test_throws ArgumentError inputcolumns(ThirdPartyExog.NoCols(:promo))
         nomethod = "NoCols is an ExogenousFeature but defines no inputcolumns method"
         @test_throws nomethod inputcolumns(ThirdPartyExog.NoCols(:promo))
+        @test_throws "forecast and backtest read the columns it needs from `future` " *
+                     "through inputcolumns(f)." inputcolumns(ThirdPartyExog.NoCols(:promo))
         for m in (EvoTreeRegressor(nrounds=5),
                   DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             for Bad in (ThirdPartyExog.NoCols, ThirdPartyExog.PropCols2)
@@ -423,12 +426,12 @@ end
             end
             good = Forecaster(m; freq=Day(1),
                               features=FeatureSet(Lag(1), ThirdPartyExog.Doubled([:promo])))
-            @test all(isfinite, forecast(fit(good, dfe), 3; new_data=future).y_hat)
+            @test all(isfinite, forecast(fit(good, dfe), 3; future=future).y_hat)
             @test length(backtest(good, dfe; horizon=3, initial=40).folds.y_hat) == 9
             prop = Forecaster(m; freq=Day(1),
                               features=FeatureSet(Lag(1), ThirdPartyExog.PropCols(:promo)))
-            @test forecast(fit(prop, dfe), 3; new_data=future) ==
-                  forecast(fit(good, dfe), 3; new_data=future)
+            @test forecast(fit(prop, dfe), 3; future=future) ==
+                  forecast(fit(good, dfe), 3; future=future)
             bp = backtest(prop, dfe; horizon=3, initial=40)
             bg = backtest(good, dfe; horizon=3, initial=40)
             @test isequal(bp.folds, bg.folds) && isequal(bp.metrics, bg.metrics)
@@ -438,11 +441,11 @@ end
         fneeds = fit(needs, dfe)
         @test_throws ArgumentError forecast(fneeds, 3)
         nodata = "features contain Exogenous(:promo) but forecast() was called " *
-                 "without new_data"
+                 "without `future`"
         @test_throws nodata forecast(fneeds, 3)
         echo = Forecaster(TestModels.EchoColumn(:promo_x2); freq=Day(1),
                           features=FeatureSet(Lag(1), ThirdPartyExog.Doubled([:promo])))
-        @test forecast(fit(echo, dfe), 3; new_data=future).y_hat == [2.0, 4.0, 6.0]
+        @test forecast(fit(echo, dfe), 3; future=future).y_hat == [2.0, 4.0, 6.0]
         fs3 = FeatureSet(Lag(1), Exogenous(:a, :b), ThirdPartyExog.Doubled([:c]))
         @test (@inferred MachineLearningForecast.exogenous_columns(fs3)) == [:a, :b, :c]
         @test MachineLearningForecast.exogenous_columns(FeatureSet(Lag(1))) == Symbol[]

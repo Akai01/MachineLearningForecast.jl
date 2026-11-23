@@ -379,7 +379,7 @@ end
                      "Encode categorical columns numerically first." (
             materialize(Exogenous(:label), y, dfs))
         @test_throws ArgumentError rowvalues(Exogenous(:promo), y, t[1], 0, (other=1.0,))
-        @test_throws "new_data is missing exogenous column :promo required by Exogenous. " *
+        @test_throws "`future` is missing exogenous column :promo required by Exogenous. " *
                      "Provide it for every forecast timestamp." (
             rowvalues(Exogenous(:promo), y, t[1], 0, (other=1.0,)))
         @test rowvalues(Exogenous(:promo), y, t[1], 0, (promo=true,)) == [1.0]
@@ -684,14 +684,14 @@ end
         @testset "a feature reading user columns gets them in the context" begin
             future = (ds=ds[end] .+ Day.(1:3), x=[1.0, 2.0, 3.0])
             fitted = fit(echo(:x2, [CF.NeedsX()]), merge(single, (x=Float64.(1:50),)))
-            @test forecast(fitted, 3; new_data=future).y_hat == [2.0, 4.0, 6.0]
+            @test forecast(fitted, 3; future=future).y_hat == [2.0, 4.0, 6.0]
             pdata = merge(panel, (x=Float64.(1:90),))
             pfuture = (unique_id=repeat(["a", "b"], inner=3),
                        ds=[ds[end] .+ Day.(1:3); ds[end] .+ Day.(1:3)],
                        x=repeat([1.0, 2.0, 3.0], 2))
             for strategy in (Recursive(), Direct(3))
                 pf = fit(echo(:x2, [CF.NeedsX()]; strategy, id=:unique_id), pdata)
-                @test forecast(pf, 3; new_data=pfuture).y_hat ==
+                @test forecast(pf, 3; future=pfuture).y_hat ==
                       repeat([2.0, 4.0, 6.0], 2)
             end
             X = only(fit(spec(TestModels.KeepTrain(), [CF.NeedsX()]),

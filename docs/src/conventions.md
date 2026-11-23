@@ -176,7 +176,7 @@ fc = Forecaster(model; features = FeatureSet(Lag(1), holidays), freq = Day(1))
 ```
 
 `ctx.t` is the timestamp of the row's target, so the feature needs no
-`new_data`. See [`featurevalues!`](@ref MachineLearningForecast.featurevalues!)
+`future` table. See [`featurevalues!`](@ref MachineLearningForecast.featurevalues!)
 and [`anchor`](@ref MachineLearningForecast.anchor) for the contract.
 
 ### A parent aggregate as a covariate
@@ -205,10 +205,10 @@ panel_fc = Forecaster(model; features = FeatureSet(Lag(1), Exogenous(:parent_lag
 panel_fitted = fit(panel_fc, train)
 
 stores = unique(panel.unique_id)
-future = collect(dates[end] + Day(1):Day(1):dates[end] + Day(H))
-future_data = (unique_id = repeat(stores, inner = H), ds = repeat(future, length(stores)),
-               parent_lag = [lagged[d] for _ in stores for d in future])
-forecast(panel_fitted, H; new_data = future_data)
+future_dates = collect(dates[end] + Day(1):Day(1):dates[end] + Day(H))
+future_data = (unique_id = repeat(stores, inner = H), ds = repeat(future_dates, length(stores)),
+               parent_lag = [lagged[d] for _ in stores for d in future_dates])
+forecast(panel_fitted, H; future = future_data)
 backtest(panel_fc, train; horizon = H, windows = 2)
 ```
 
@@ -230,8 +230,8 @@ fc = Forecaster(model; features = FeatureSet(Lag(1), Exogenous(:price_lag14)),
 fitted = fit(fc, single)
 
 n = length(df.y)
-new_data = (ds = df.ds[end] .+ Day.(1:h), price_lag14 = price[(n - k + 1):(n - k + h)])
-forecast(fitted, h; new_data)
+future = (ds = df.ds[end] .+ Day.(1:h), price_lag14 = price[(n - k + 1):(n - k + h)])
+forecast(fitted, h; future)
 ```
 
 ### Scaling from the first non-zero value (the M5 rule)

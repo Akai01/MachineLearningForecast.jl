@@ -171,30 +171,30 @@
         err = try forecast(fitted, 3) catch e; e end
         @test err isa ArgumentError
         @test occursin("Exogenous(:promo)", err.msg)
-        @test occursin("new_data", err.msg)
+        @test occursin("future", err.msg)
         @test occursin(string(t[end] + Day(1)), err.msg)
         @test occursin(string(t[end] + Day(3)), err.msg)
 
         bad_cols = (ds=t[end] .+ Day.(1:3), other=zeros(3))
-        err = try forecast(fitted, 3; new_data=bad_cols) catch e; e end
+        err = try forecast(fitted, 3; future=bad_cols) catch e; e end
         @test err isa ArgumentError && occursin(":promo", err.msg)
-        @test_throws "new_data is missing column :promo; it must contain the time " *
+        @test_throws "`future` is missing column :promo; it must contain the time " *
                      "column :ds and the exogenous column :promo." forecast(
-            fitted, 3; new_data=bad_cols)
+            fitted, 3; future=bad_cols)
 
         short = (ds=t[end] .+ Day.(1:2), promo=zeros(2))
-        err = try forecast(fitted, 3; new_data=short) catch e; e end
+        err = try forecast(fitted, 3; future=short) catch e; e end
         @test err isa ArgumentError && occursin(string(t[end] + Day(3)), err.msg)
 
         holed = (ds=t[end] .+ Day.(1:3), promo=[1.0, missing, 0.0])
-        @test_throws ArgumentError forecast(fitted, 3; new_data=holed)
-        @test_throws "new_data has a missing value in exogenous column :promo at time " *
+        @test_throws ArgumentError forecast(fitted, 3; future=holed)
+        @test_throws "`future` has a missing value in exogenous column :promo at time " *
                      "$(t[end] + Day(2)). Provide complete exogenous values for every " *
-                     "future step." forecast(fitted, 3; new_data=holed)
+                     "future step." forecast(fitted, 3; future=holed)
 
         future = (ds=[t[end] + Day(3), t[end] + Day(1), t[end] + Day(2), t[end] + Day(9)],
                   promo=[30.0, 10.0, 20.0, 99.0])
-        fcast = forecast(fitted, 3; new_data=future)
+        fcast = forecast(fitted, 3; future=future)
         @test fcast.y_hat == [10.0, 20.0, 30.0]   # EchoColumn(:promo)
 
         fc2 = Forecaster(TestModels.LinAR(1.0, 0.0);
@@ -210,13 +210,45 @@
         end
     end
 
-    @testset "new_data without exogenous features warns and is ignored" begin
+    @testset "future without exogenous features warns and is ignored" begin
         fc = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
                         freq=Day(1))
         fitted = fit(fc, df)
         extra = (ds=t[end] .+ Day.(1:2), promo=zeros(2))
-        fcast = @test_logs (:warn, r"ignored") forecast(fitted, 2; new_data=extra)
+        fcast = @test_logs (:warn, r"ignored") forecast(fitted, 2; future=extra)
         @test length(fcast.y_hat) == 2
+        warning = "`future` was passed but the feature set has no Exogenous " *
+                  "features; it will be ignored."
+        @test_logs (:warn, warning) forecast(fitted, 2; future=extra)
+    end
+
+    @testset "the keyword is future; new_data is rejected" begin
+        fce = Forecaster(TestModels.EchoColumn(:promo);
+                         features=FeatureSet(Lag(1), Exogenous(:promo)),
+                         strategy=Recursive(), freq=Day(1))
+        fitted = fit(fce, (ds=t, y=y, promo=Float64.(iseven.(1:n))))
+        grid = t[end] .+ Day.(1:3)
+        ok = (ds=grid, promo=[1.0, 2.0, 3.0])
+        @test forecast(fitted, 3; future=ok).y_hat == [1.0, 2.0, 3.0]
+        @test_throws MethodError forecast(fitted, 3; new_data=ok)
+        @test_throws MethodError forecast(fitted, 3; future=ok, new_data=ok)
+
+        dup = (ds=[grid[1], grid[1], grid[2], grid[3]], promo=[1.0, 2.0, 3.0, 4.0])
+        @test_throws "`future` has duplicate timestamps in column :ds; first duplicate " *
+                     "at $(grid[1]). Deduplicate `future` — otherwise which row " *
+                     "supplies each forecast step is arbitrary." (
+            forecast(fitted, 3; future=dup))
+        short = (ds=grid[1:2], promo=[1.0, 2.0])
+        @test_throws "`future` is missing 1 of the 3 timestamps required for the " *
+                     "forecast grid $(grid[1]) … $(grid[3]); first missing: " *
+                     "$(grid[3]). Provide exogenous values for every future step." (
+            forecast(fitted, 3; future=short))
+        @test_throws "without `future`. Pass a table with columns (:ds, :promo)" (
+            forecast(fitted, 3))
+        @test_throws "Every `future` row needs a timestamp; drop or fill that row." (
+            forecast(fitted, 3; future=(
+                ds=Union{Missing,Date}[grid[1], missing, grid[2], grid[3]],
+                promo=[1.0, 9.0, 2.0, 3.0])))
     end
 
     @testset "time column validation" begin

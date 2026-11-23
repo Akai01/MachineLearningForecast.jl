@@ -225,7 +225,7 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, scheme,
         fitted = fit(fc, row_subset(tbl, 1:o))
         nd = isempty(exogcols) ? nothing :
              row_subset(tbl[Tuple([fc.time; exogcols])], (o + 1):(o + horizon))
-        fcast = forecast(fitted, horizon; new_data=nd)
+        fcast = forecast(fitted, horizon; future=nd)
         ytrue = y_all[(o + 1):(o + horizon)]
         yhat = fcast.y_hat
         append!(fold_col, fill(k, horizon))
