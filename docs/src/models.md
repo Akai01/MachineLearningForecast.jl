@@ -182,12 +182,10 @@ spec(model) = Forecaster(model; features, strategy = Recursive(), freq = Month(1
 model on every series' training history, forecasts 18 months for every series
 (each from its own last training month), and scores the forecasts with
 [`smape`](@ref) and [`mase`](@ref) on the original scale. The M3 benchmarks
-scale MASE by the seasonal naive error, so `mase12` calls `mase` with
-seasonality `m = 12`, and
-[`needs_ytrain`](@ref MachineLearningForecast.needs_ytrain) tells `backtest`
-to pass it each series' own training values. `backtest` reports MASE averaged
-over the series and sMAPE over all forecast months, which is the same average
-over the series, since each has 18. sMAPE is shown in percent.
+scale MASE by the seasonal naive error, so `mase12` is [`Mase`](@ref)`(12)`,
+and `backtest` passes it each series' own training values. `backtest` reports
+MASE averaged over the series and sMAPE over all forecast months, which is the
+same average over the series, since each has 18. sMAPE is shown in percent.
 
 !!! note "Why sMAPE"
     This page reports sMAPE only because the M3 competition did, so the
@@ -214,8 +212,7 @@ a series too short for it instead of failing on it.
 ```julia
 import MachineLearningForecast: fit_transform, untransform
 
-mase12(y, ŷ; y_train) = mase(y, ŷ; y_train, m = 12)
-MachineLearningForecast.needs_ytrain(::typeof(mase12)) = true
+const mase12 = Mase(12)
 
 function evaluate(model, data = panel)
     t0 = time()

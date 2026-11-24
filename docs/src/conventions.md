@@ -58,9 +58,10 @@ but not `missing` or `±Inf`.
 
 **Aggregation of metrics.** Unscaled metrics pool the fold's rows; scaled
 metrics are per series, weighted by scored points; the overall row is the
-unweighted mean over folds. Scaled metrics are those that
-[`needs_ytrain`](@ref MachineLearningForecast.needs_ytrain) marks, such as
-[`mase`](@ref) and [`rmsse`](@ref). Scaled metrics follow Hyndman & Koehler
+unweighted mean over folds. Scaled metrics are those whose
+[`metric_inputs`](@ref MachineLearningForecast.metric_inputs) is `Scaled()`, such as
+[`mase`](@ref) and [`rmsse`](@ref), or their callable forms [`Mase`](@ref) and
+[`Rmsse`](@ref). Scaled metrics follow Hyndman & Koehler
 (2006): each series' errors are divided by that series' own training-window
 naive error, then averaged over series (here weighted by scored points, our
 choice). One series with a constant training window has a zero scale, which
@@ -249,6 +250,7 @@ Assimakopoulos 2022; M Open Forecasting Center 2020). To score that way, trim
 
 ```julia
 using MachineLearningForecast
+import MachineLearningForecast: metric_inputs, Scaled
 
 function from_first_nonzero(y_train)
     i = findfirst(!iszero, y_train)
@@ -257,14 +259,15 @@ end
 
 rmsse_m5(y, ŷ; y_train, m = 1) = rmsse(y, ŷ; y_train = from_first_nonzero(y_train), m)
 mase_m5(y, ŷ; y_train, m = 1) = mase(y, ŷ; y_train = from_first_nonzero(y_train), m)
-MachineLearningForecast.needs_ytrain(::typeof(rmsse_m5)) = true
-MachineLearningForecast.needs_ytrain(::typeof(mase_m5)) = true
+metric_inputs(::typeof(rmsse_m5)) = Scaled()
+metric_inputs(::typeof(mase_m5)) = Scaled()
 
 rmsse_m5([2.0, 3.0], [2.0, 2.0]; y_train = [0.0, 0.0, 0.0, 4.0, 6.0, 5.0, 7.0])
 ```
 
 Pass `rmsse_m5` or `mase_m5` to [`backtest`](@ref) or [`tune`](@ref) like any
-metric (see `mase12` in [Models](models.md) for the same pattern).
+metric. A metric with a fixed `m`, such as `Mase(12)`, is a plain `const` (see
+`mase12` in [Models](models.md)).
 
 Trim only when leading zeros mean "not yet launched". Where they are genuine zero
 demand, they belong to the series and trimming discards them. An all-zero window has

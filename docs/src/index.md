@@ -123,7 +123,13 @@ mape
 smape
 mase
 rmsse
-MachineLearningForecast.needs_ytrain
+Mase
+Rmsse
+MachineLearningForecast.metric_inputs
+MachineLearningForecast.metric_name
+MachineLearningForecast.MetricInput
+MachineLearningForecast.Point
+MachineLearningForecast.Scaled
 ```
 
 ### Tuning

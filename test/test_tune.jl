@@ -531,4 +531,71 @@ end
             @test_throws msg run()
         end
     end
+
+    @testset "metric protocol: scaled metrics and up-front checks" begin
+        models = (DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
+                  EvoTreeRegressor(nrounds=5))
+        grid = (model=models,)
+        pd = let ids = String[], ds = Date[], yy = Float64[]
+            for (id, lv, len) in (("a", 100.0, 100), ("b", 5.0, 90)), i in 1:len
+                push!(ids, id); push!(ds, Date(2022, 1, 1) + Day(i - 1))
+                push!(yy, lv + i + 3 * sin(i) + (i % 7))
+            end
+            (unique_id=ids, ds=ds, y=yy)
+        end
+        pbase = Forecaster(models[1]; features=FeatureSet(Lag(1), Lag(7)),
+                           freq=Day(1), id=:unique_id)
+
+        @testset "Mase and Rmsse as the tune metric match backtest" begin
+            for (spec, data) in ((base, df), (pbase, pd)),
+                metric in (Mase(7), Rmsse(), Mase(), Rmsse(3))
+                r = tune(spec, data; grid, horizon=14, initial=70, step=7, metric)
+                @test all(ismissing, r.table.error)
+                for (k, m) in enumerate(models)
+                    bt = backtest(MachineLearningForecast.reconstruct(spec; model=m),
+                                  data; horizon=14, initial=70, step=7, metrics=(metric,))
+                    @test r.table.mean_score[k] ==
+                          only(bt.metrics.value[bt.metrics.fold .== 0])
+                end
+                @test r.best.model == models[argmin(r.table.mean_score)]
+            end
+        end
+
+        @testset "the metric is checked before any fit" begin
+            for bad in ((mae, rmse), [mae], :mae, "smape", :a => mae, (a=mae,),
+                        (Mase(7),))
+                @test_throws ArgumentError tune(base, df; grid, horizon=14, initial=90,
+                                                metric=bad)
+                @test_throws "got $(repr(bad)). Pass e.g. metric=smape" tune(
+                    base, df; grid, horizon=14, initial=90, metric=bad)
+            end
+            @test_throws "tune metric: got the type Mase; pass Mase() or Mase(12)" tune(
+                base, df; grid, horizon=14, initial=90, metric=Mase)
+            @test_throws "tune metric: got the type Rmsse; pass Rmsse() or Rmsse(12)" tune(
+                base, df; grid, horizon=14, initial=90, metric=Rmsse)
+            @test_throws "tune metric: metric_inputs returned true, which is not " *
+                         "Point() or Scaled()." tune(
+                base, df; grid, horizon=14, initial=90, metric=TestModels.badtrait)
+            # A tuner that would fail on its first ask never runs.
+            tuner = ThirdPartyTuning.Fixed(1)
+            @test_throws "tune metric: got the type Mase" tune(
+                base, df; tuner, horizon=14, initial=90, metric=Mase)
+        end
+
+        @testset "a model predicting NaN fails the candidate under Mase" begin
+            r = tune(base, df; grid=(model=[TestModels.NaNModel(), models[1]],),
+                     horizon=14, initial=90, metric=Mase(7))
+            @test ismissing(r.table.mean_score[1])
+            @test occursin("non-finite mean score (NaN)", r.table.error[1])
+            @test r.best.model == models[1]
+            @test_throws "all 1 tuning candidates failed to evaluate" tune(
+                base, df; grid=(model=[TestModels.NaNModel()],), horizon=14,
+                initial=90, metric=Rmsse())
+        end
+
+        @testset "tune does not ask the metric for its name" begin
+            r = tune(base, df; grid, horizon=14, initial=90, metric=TestModels.BadName())
+            @test all(ismissing, r.table.error)
+        end
+    end
 end

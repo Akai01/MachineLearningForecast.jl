@@ -194,33 +194,6 @@ function _exogenous_rows(spec::Forecaster{M,S,Symbol}, states, grids, future,
     return out
 end
 
-"""
-    _panel_metric(m, fc, fitted, ids, y, ŷ) -> Real
-
-Score one panel backtest fold. A metric that needs the training target (see
-[`needs_ytrain`](@ref)) is computed per series, with that series' own training
-values, and averaged with each series weighted by its scored points; any other
-metric pools all scored rows, which weighs them the same way.
-"""
-function _panel_metric(m, fc::Forecaster, fitted::FittedForecaster, ids, y, ŷ)
-    needs_ytrain(m) || return m(y, ŷ)
-    history = Dict(st.id => st.y_history for st in getfield(fitted, :series))
-    rows = Dict{eltype(ids),Vector{Int}}()
-    for (j, id) in enumerate(ids)
-        push!(get!(rows, id, Int[]), j)
-    end
-    total = 0.0
-    # First-appearance order keeps the float sum reproducible.
-    for id in unique(ids)
-        r = rows[id]
-        v = _in_series(fc, id) do
-            m(y[r], ŷ[r]; y_train=history[id])
-        end
-        total += length(r) * v
-    end
-    return total / length(y)
-end
-
 "Each row's 1-based position among the rows of its id so far."
 function _steps_by_id(ids::AbstractVector)
     seen = Dict{eltype(ids),Int}()
@@ -342,15 +315,16 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, scheme, metri
             "with an actual: no series trained on data up to the origin has data " *
             "after it. Choose initial and step so each origin falls inside the data " *
             "of a series."))
-        for m in metrics
+        history = Dict(st.id => st.y_history for st in getfield(fitted, :series))
+        fold = (; fc, history, ids=scored, y=ytrue, ŷ=yhat)
+        for (name, m) in metrics
             push!(m_fold, k)
             push!(m_origin, origin)
-            push!(m_metric, _metric_name(m))
-            push!(m_value, Float64(_panel_metric(m, fc, fitted, scored, ytrue, yhat)))
+            push!(m_metric, name)
+            push!(m_value, Float64(score(metric_inputs(m), m, fold)))
         end
     end
-    for m in metrics
-        name = _metric_name(m)
+    for (name, _) in metrics
         vals = [m_value[i] for i in eachindex(m_value)
                 if m_metric[i] == name && m_fold[i] > 0]
         push!(m_fold, 0)

@@ -105,11 +105,7 @@ mase([10.0, 12.0], [11.0, 11.0]; y_train=[1.0, 3.0, 1.0, 3.0])   # 0.5
 """
 function mase(y::AbstractVector, ŷ::AbstractVector; y_train::AbstractVector, m::Integer=1)
     _validate_metric_args(y, ŷ)
-    _nobool(m, "mase seasonality m", "Pass the season length in steps, e.g. m=7 for " *
-            "weekly seasonality on daily data.")
-    m ≥ 1 || throw(ArgumentError(
-        "mase seasonality m must be ≥ 1, got $m. Pass the season length in steps, " *
-        "e.g. m=7 for weekly seasonality on daily data, or m=1 (the default)."))
+    _check_season("mase", m, "m=7", "m=1 (the default)")
     length(y_train) > m || throw(ArgumentError(
         "mase needs length(y_train) > m; got length(y_train)=$(length(y_train)) " *
         "with m=$m. Pass a longer y_train or a smaller m."))
@@ -162,11 +158,7 @@ rmsse([10.0, 14.0], [11.0, 11.0]; y_train=[1.0, 2.0, 4.0, 7.0])   # ≈ 1.035
 function rmsse(y::AbstractVector, ŷ::AbstractVector; y_train::AbstractVector,
                m::Integer=1)
     _validate_metric_args(y, ŷ)
-    _nobool(m, "rmsse seasonality m", "Pass the season length in steps, e.g. m=7 for " *
-            "weekly seasonality on daily data.")
-    m ≥ 1 || throw(ArgumentError(
-        "rmsse seasonality m must be ≥ 1, got $m. Pass the season length in steps, " *
-        "e.g. m=7 for weekly seasonality on daily data, or m=1 (the default)."))
+    _check_season("rmsse", m, "m=7", "m=1 (the default)")
     length(y_train) > m || throw(ArgumentError(
         "rmsse needs length(y_train) > m; got length(y_train)=$(length(y_train)) " *
         "with m=$m. Pass a longer y_train or a smaller m."))
@@ -180,27 +172,205 @@ function rmsse(y::AbstractVector, ŷ::AbstractVector; y_train::AbstractVector,
     return rmse(y, ŷ) / sqrt(denom)
 end
 
+function _check_season(who, m, ex, dflt)
+    _nobool(m, "$who seasonality m", "Pass the season length in steps, e.g. $ex for " *
+            "weekly seasonality on daily data.")
+    m ≥ 1 || throw(ArgumentError(
+        "$who seasonality m must be ≥ 1, got $m. Pass the season length in steps, " *
+        "e.g. $ex for weekly seasonality on daily data, or $dflt."))
+    return nothing
+end
+
+function _season(who, m)
+    _check_season(who, m, "$who(7)", "$who() (the default)")
+    m ≤ typemax(Int) || throw(ArgumentError(
+        "$who seasonality m must be at most $(typemax(Int)), got $m. Pass the season " *
+        "length in steps, e.g. $who(7) for weekly seasonality on daily data."))
+    return Int(m)
+end
+
 """
-    needs_ytrain(metric) -> Bool
+    Mase(m=1)
 
-Trait declaring that `metric` needs the fold's *training* target in addition to
-the actuals and forecasts. [`backtest`](@ref) calls such metrics as
-`metric(y, ŷ; y_train=...)` and ordinary ones as `metric(y, ŷ)`. On a panel it
-calls them once per series, with that series' own training values.
+Callable form of [`mase`](@ref) with season length `m`, for [`backtest`](@ref) and
+[`tune`](@ref): `Mase(m)(y, ŷ; y_train)` equals `mase(y, ŷ; y_train, m)`. It is scored
+per series with that series' own training window, and named `:mase` for `m=1` and
+`:mase_12` for `m=12` in the `metrics` table.
 
-Defaults to `false`; `true` for [`mase`](@ref) and [`rmsse`](@ref). Define it for
-your own scaled metrics so they can be passed to `backtest` / [`tune`](@ref):
-
+# Example
 ```julia
-my_mase(y, ŷ; y_train) = mae(y, ŷ) / mae(y_train[2:end], y_train[1:end-1])
-MachineLearningForecast.needs_ytrain(::typeof(my_mase)) = true
+Mase()([10.0, 12.0], [11.0, 11.0]; y_train=[1.0, 3.0, 1.0, 3.0, 1.0])   # 0.5
+backtest(fc, df; horizon=12, windows=3, metrics=(mae, Mase(12)))
 ```
 """
-needs_ytrain(::Any) = false
-needs_ytrain(::typeof(mase)) = true
-needs_ytrain(::typeof(rmsse)) = true
+struct Mase
+    m::Int
+    Mase(m::Integer=1) = new(_season("Mase", m))
+end
 
-_apply_metric(metric, y, ŷ, y_train) =
-    needs_ytrain(metric) ? metric(y, ŷ; y_train=y_train) : metric(y, ŷ)
+(s::Mase)(y::AbstractVector, ŷ::AbstractVector; y_train::AbstractVector) =
+    mase(y, ŷ; y_train, m=s.m)
+
+"""
+    Rmsse(m=1)
+
+Callable form of [`rmsse`](@ref) with season length `m`, for [`backtest`](@ref) and
+[`tune`](@ref): `Rmsse(m)(y, ŷ; y_train)` equals `rmsse(y, ŷ; y_train, m)`. It is scored
+per series with that series' own training window, and named `:rmsse` for `m=1` and
+`:rmsse_7` for `m=7` in the `metrics` table.
+
+# Example
+```julia
+Rmsse()([10.0, 14.0], [11.0, 11.0]; y_train=[1.0, 2.0, 4.0, 7.0])   # ≈ 1.035
+backtest(fc, df; horizon=7, windows=3, metrics=(rmse, Rmsse(7)))
+```
+"""
+struct Rmsse
+    m::Int
+    Rmsse(m::Integer=1) = new(_season("Rmsse", m))
+end
+
+(s::Rmsse)(y::AbstractVector, ŷ::AbstractVector; y_train::AbstractVector) =
+    rmsse(y, ŷ; y_train, m=s.m)
+
+"""
+    MetricInput
+
+Supertype of the kinds of inputs a metric takes, returned by [`metric_inputs`](@ref):
+[`Point`](@ref) and [`Scaled`](@ref). Public, not exported.
+
+# Example
+```julia
+import MachineLearningForecast: metric_inputs, MetricInput
+metric_inputs(mae) isa MetricInput   # true
+```
+"""
+abstract type MetricInput end
+
+"""
+    Point()
+
+The [`metric_inputs`](@ref) kind of a metric called as `metric(y, ŷ)`, such as
+[`mae`](@ref). [`backtest`](@ref) pools the fold's rows of all series. The default.
+Public, not exported.
+
+# Example
+```julia
+import MachineLearningForecast: metric_inputs, Point
+metric_inputs(mae) === Point()   # true
+```
+"""
+struct Point <: MetricInput end
+
+"""
+    Scaled()
+
+The [`metric_inputs`](@ref) kind of a metric called as `metric(y, ŷ; y_train)`, such
+as [`mase`](@ref). [`backtest`](@ref) calls it once per series with that series' own
+training values, and weights the series by their scored points. Public, not exported.
+
+# Example
+```julia
+import MachineLearningForecast: metric_inputs, Scaled
+metric_inputs(mase) === Scaled()   # true
+```
+"""
+struct Scaled <: MetricInput end
+
+"""
+    metric_inputs(metric) -> MetricInput
+
+What `metric` is called with, so [`backtest`](@ref) and [`tune`](@ref) know how to score
+it: [`Point`](@ref) (the default) for `metric(y, ŷ)`, [`Scaled`](@ref) for
+`metric(y, ŷ; y_train)`, which also needs the fold's training target. `Scaled` for
+[`mase`](@ref), [`rmsse`](@ref), [`Mase`](@ref) and [`Rmsse`](@ref). Define it for
+your own scaled metrics. Public, not exported.
+
+# Example
+```julia
+using MachineLearningForecast
+import MachineLearningForecast: metric_inputs, Scaled
+my_mase(y, ŷ; y_train) = mae(y, ŷ) / mae(y_train[2:end], y_train[1:end-1])
+metric_inputs(::typeof(my_mase)) = Scaled()
+backtest(fc, df; horizon=12, windows=3, metrics=(mae, my_mase))
+```
+"""
+metric_inputs(::Any) = Point()
+metric_inputs(::typeof(mase)) = Scaled()
+metric_inputs(::typeof(rmsse)) = Scaled()
+metric_inputs(::Mase) = Scaled()
+metric_inputs(::Rmsse) = Scaled()
+
+"""
+    metric_name(metric) -> Symbol
+
+The name of `metric` in the `metrics` table of a [`BacktestResult`](@ref): `Symbol(metric)`
+by default (`:mae` for [`mae`](@ref)), `:mase` or `:mase_12` for [`Mase`](@ref). Two
+metrics of one `backtest` need different names. Define it for a metric object of your
+own, or name a metric in place with a NamedTuple key: `metrics=(error=mae,)`. Public, not
+exported.
+
+# Example
+```julia
+using MachineLearningForecast
+import MachineLearningForecast: metric_inputs, metric_name, Scaled
+struct MyScaled
+    k::Int
+end
+(s::MyScaled)(y, ŷ; y_train) = mae(y, ŷ) / mae(y_train[2:end], y_train[1:end-1])
+metric_inputs(::MyScaled) = Scaled()
+metric_name(s::MyScaled) = Symbol("my_scaled_", s.k)
+metric_name(MyScaled(2))   # :my_scaled_2
+```
+"""
+metric_name(m) = Symbol(m)
+metric_name(m::Mase) = m.m == 1 ? :mase : Symbol("mase_", m.m)
+metric_name(m::Rmsse) = m.m == 1 ? :rmsse : Symbol("rmsse_", m.m)
 
 _iscallable(m) = !isempty(methods(m))
+
+function _check_metric(who, m)
+    m isa Type && throw(ArgumentError(
+        "$who: got the type $(nameof(m)); pass " *
+        (m <: Union{Mase,Rmsse} ? "$(nameof(m))() or $(nameof(m))(12)" :
+         "an instance of it") * "."))
+    metric_inputs(m) isa Union{Point,Scaled} || throw(ArgumentError(
+        "$who: metric_inputs returned $(repr(metric_inputs(m))), which is not Point() " *
+        "or Scaled(). Define metric_inputs for your metric, e.g. " *
+        "MachineLearningForecast.metric_inputs(::typeof(f)) = " *
+        "MachineLearningForecast.Scaled()."))
+    return nothing
+end
+
+function _check_distinct(names)
+    allunique(names) && return nothing
+    name = first(l for l in names if count(==(l), names) > 1)
+    n = count(==(name), names)
+    throw(ArgumentError(
+        "backtest metrics must have distinct names, but $n metrics are named " *
+        "$(repr(name)), so their per-fold rows would be merged into one wrong " *
+        "overall score. Remove the repeated metric, or name each one with a " *
+        "NamedTuple key (closures from one factory share a name), e.g. " *
+        "metrics=(a=mae, b=Mase(12))."))
+end
+
+# A one-shot iterator is read once.
+function _named_metrics(metrics)
+    ms = applicable(iterate, metrics) ? collect(Any, metrics) : nothing
+    ms !== nothing && all(_iscallable, ms) || throw(ArgumentError(
+        "backtest metrics must be a tuple or vector of metric functions, got " *
+        "$(repr(metrics)). Pass e.g. metrics=(mae, rmse), or metrics=(mae,) for one " *
+        "metric. Name a metric with a NamedTuple key, e.g. " *
+        "metrics=(error=mae, scaled=Mase(12)), not with a Pair."))
+    names = metrics isa NamedTuple ? collect(Any, keys(metrics)) :
+            Any[metric_name(m) for m in ms]
+    for (name, m) in zip(names, ms)
+        name isa Symbol || throw(ArgumentError(
+            "backtest metric $(repr(m)): metric_name returned $(repr(name)), which is " *
+            "not a Symbol. Define metric_name for your metric to return one, e.g. " *
+            "MachineLearningForecast.metric_name(::MyMetric) = :my_metric."))
+        _check_metric("backtest metric $(repr(name))", m)
+    end
+    _check_distinct(names)
+    return Pair{Symbol,Any}[n => m for (n, m) in zip(names, ms)]
+end

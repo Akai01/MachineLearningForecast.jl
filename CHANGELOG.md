@@ -8,6 +8,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `Mase(m=1)` and `Rmsse(m=1)` (exported): `mase` and `rmsse` as callable objects with
+  the season length set, for `backtest` and `tune` (`metrics=(mae, Mase(12))`). They
+  are named `:mase` / `:rmsse` for `m=1` and `:mase_12` / `:rmsse_7` otherwise.
+- The metric protocol, public but not exported (`import MachineLearningForecast:
+  metric_inputs, metric_name, Scaled`): `metric_inputs(metric)` returns `Point()` (the
+  default, `metric(y, ŷ)`) or `Scaled()` (`metric(y, ŷ; y_train)`, per series with that
+  series' own training window), and `metric_name(metric)` gives the name in the
+  `metrics` table (`Symbol(metric)` by default). `MetricInput`, `Point` and `Scaled`
+  are public too.
+- `backtest` accepts a NamedTuple of metrics whose keys name them,
+  `metrics=(error=mae, scaled=Mase(12))`, so two closures from one factory can run in
+  one backtest.
 - `dropped_rows(t)`, an optional public trait of a `TargetTransform` (not
   exported, like `fit_transform` and `untransform`): the number of rows the
   transform removes from the start of a series, `0` by default. `Difference(l)`
@@ -19,9 +31,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `rmsse(y, ŷ; y_train, m=1)`: the root mean squared scaled error, the RMSE
   divided by the root of the in-sample mean squared (seasonal) naive error
   (M5's RMSSE, except that M5 computes the scale only from the first non-zero
-  value on, while `rmsse` uses the whole training window). It declares `needs_ytrain`, so
-  `backtest` and `tune` score it per series like `mase`; zero scale warns and
-  returns `Inf`.
+  value on, while `rmsse` uses the whole training window). It declares
+  `metric_inputs` `Scaled()`, so `backtest` and `tune` score it per series like
+  `mase`; zero scale warns and returns `Inf`.
 - A documentation page, "Leakage and conventions": what the package guarantees
   against leakage; the conventions behind forecasts and backtest scores (`Lag`
   under `Direct`, realised covariates in a backtest, the series scored in a
@@ -109,6 +121,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Breaking: the keys of a NamedTuple passed as `backtest` `metrics` now name the
+  metrics (`metrics=(a=mae,)` gives rows named `:a`; before they were named `:mae`
+  and the key was ignored). The duplicate-name `ArgumentError` now advises naming the
+  metrics with NamedTuple keys, and `backtest` and `tune` refuse a type given as a
+  metric (`metrics=(Mase,)`) and a `metric_inputs` that is neither `Point()` nor
+  `Scaled()`; `tune` checks its metric before any fit. No score changes.
 - Breaking: `Exogenous` rejects `±Inf` in the training data (every row the
   transform keeps, including rows the feature set's `minhistory` drops), in
   `future` and in the held-out rows of a backtest, with an `ArgumentError` naming
@@ -325,6 +343,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `CustomFeature` is parametric in its function (`CustomFeature{F}`), so the
   call to it is statically dispatched; behaviour, equality and the printed form
   are unchanged.
+
+### Removed
+
+- Breaking: `needs_ytrain`. Define `metric_inputs(::typeof(f)) = Scaled()` instead (see
+  the metric protocol under Added).
 
 ### Fixed
 

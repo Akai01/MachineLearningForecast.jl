@@ -21,7 +21,9 @@ function _precompile_workload()
         fc = Forecaster(_PrecompileMean(); features=feats, freq=Month(1), strategy,
                         transform, id)
         forecast(fit(fc, data), 3)
-        backtest(fc, data; horizon=3, windows=2, metrics=(mae, smape, mase))
+        metrics = id === nothing ? (mae, smape, mase, Mase(12)) :
+                  (mae=mae, smape=smape, mase=mase, mase_12=Mase(12))
+        backtest(fc, data; horizon=3, windows=2, metrics)
     end
     d = collect(Date(2020, 1, 1):Day(1):Date(2020, 3, 31))
     daily = (ds=d, y=[10 + sin(i) + i / 10 for i in eachindex(d)],

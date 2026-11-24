@@ -26,19 +26,36 @@ struct BacktestResult
     metrics::NamedTuple
 end
 
-_metric_name(m) = Symbol(m)
+"""
+    score(kind, m, fold) -> Real
 
-function _check_metric_names(ms)
-    labels = [_metric_name(m) for m in ms]
-    allunique(labels) && return nothing
-    name = first(l for l in labels if count(==(l), labels) > 1)
-    n = count(==(name), labels)
-    throw(ArgumentError(
-        "backtest metrics must have distinct names, but $n metrics are named " *
-        "$(repr(name)), so their per-fold rows would be merged into one wrong " *
-        "overall score. Remove the repeated metric, or give each variant its own " *
-        "named function (closures from one factory share a name), e.g. " *
-        "metrics=(mae, rmse)."))
+Score metric `m` of input `kind` (see [`metric_inputs`](@ref)) on one backtest fold.
+`fold` holds `fc`, the forecaster, `history`, the fold's training target (a vector
+for a single series, a `Dict` by series id for a panel), `ids` (a panel only, the
+series of each scored row), `y` and `ŷ`.
+"""
+score(::Point, m, fold::NamedTuple) = m(fold.y, fold.ŷ)
+score(::Scaled, m, fold::NamedTuple) = _score_scaled(fold.fc, m, fold)
+
+_score_scaled(::Forecaster{M,S,Nothing}, m, fold) where {M,S<:ForecastStrategy} =
+    m(fold.y, fold.ŷ; y_train=fold.history)
+
+# First-appearance order keeps the float sum reproducible.
+function _score_scaled(fc::Forecaster, m, fold)
+    ids = fold.ids
+    rows = Dict{eltype(ids),Vector{Int}}()
+    for (j, id) in enumerate(ids)
+        push!(get!(rows, id, Int[]), j)
+    end
+    total = 0.0
+    for id in unique(ids)
+        r = rows[id]
+        v = _in_series(fc, id) do
+            m(fold.y[r], fold.ŷ[r]; y_train=fold.history[id])
+        end
+        total += length(r) * v
+    end
+    return total / length(fold.y)
 end
 
 "Where backtest folds start: from the data's start, or from each series' end."
@@ -137,12 +154,15 @@ A fold does not score a series that has no rows up to the fold's origin, too few
 to train on (it is skipped with a warning), or no actuals after it, so the set of scored
 series can change from fold to fold.
 
-`metrics` is a tuple of callables `(y, ŷ) -> Float64` (e.g. [`mae`](@ref),
-[`rmse`](@ref), [`smape`](@ref)). Scaled metrics that also need the fold's
-training target — [`mase`](@ref), [`rmsse`](@ref), or your own, declared via
-[`needs_ytrain`](@ref) — are called as `metric(y, ŷ; y_train=...)` with that
+`metrics` is a tuple, vector or NamedTuple of callables `(y, ŷ) -> Float64` (e.g.
+[`mae`](@ref), [`rmse`](@ref), [`smape`](@ref)). Each is named by
+[`metric_name`](@ref) (`:mae`, `:mase_12` for [`Mase`](@ref)`(12)`) in the `metrics`
+table, or by its key in a NamedTuple, `metrics=(error=mae, scaled=Mase(12))`; the names
+must be distinct. Scaled metrics that also need the fold's training target —
+[`mase`](@ref), [`rmsse`](@ref), [`Mase`](@ref), [`Rmsse`](@ref), or your own, declared
+via [`metric_inputs`](@ref) — are called as `metric(y, ŷ; y_train=...)` with that
 fold's training window supplied automatically (on a panel, each series' own, so a
-scale never mixes series).
+scale never mixes series). Pass `Mase(12)`, not the type `Mase`.
 Unscaled metrics pool the fold's rows; scaled metrics are per series, weighted by scored
 points; the overall row is the unweighted mean over folds. Scaled metrics follow Hyndman
 & Koehler (2006): each series' errors are divided by that series' own training-window
@@ -163,7 +183,7 @@ covariate values that were available at the origin (a forecast, or a lagged colu
 # Example
 ```julia
 results = backtest(fc, df; horizon=28, initial=730, step=28,
-                   metrics=(mae, rmse, smape))
+                   metrics=(mae, rmse, smape, Mase(7)))
 results.metrics   # per-fold and overall scores
 ```
 """
@@ -183,18 +203,9 @@ function backtest(fc::Forecaster, data; horizon::Integer,
         "backtest step must be ≥ 1, got $step. Pass how many steps each fold moves " *
         "the origin, e.g. step=$horizon, which equals horizon (the default)."))
     _check_horizon(fc, horizon)
-    iterable = applicable(iterate, metrics)
-    # A one-shot iterator must survive validation and every fold.
-    ms = iterable && !(metrics isa Union{Tuple,NamedTuple,AbstractVector}) ?
-         collect(metrics) : metrics
-    iterable && all(_iscallable, ms) ||
-        throw(ArgumentError(
-            "backtest metrics must be a tuple or vector of metric functions, got " *
-            "$(repr(metrics)). Pass e.g. metrics=(mae, rmse), or metrics=(mae,) " *
-            "for one metric."))
-    _check_metric_names(ms)
+    named = _named_metrics(metrics)
     tbl = normalize_table(data)
-    return _backtest_spec(fc, tbl, horizon, scheme, ms)
+    return _backtest_spec(fc, tbl, horizon, scheme, named)
 end
 
 _backtest_spec(fc::Forecaster{M,S,Symbol}, tbl, horizon, scheme,
@@ -233,15 +244,15 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, scheme,
         append!(time_col, fcast[fc.time])
         append!(y_col, ytrue)
         append!(yhat_col, yhat)
-        for m in metrics
+        fold = (; fc, history=y_all[1:o], y=ytrue, ŷ=yhat)
+        for (name, m) in metrics
             push!(m_fold, k)
             push!(m_origin, t_all[o])
-            push!(m_metric, _metric_name(m))
-            push!(m_value, Float64(_apply_metric(m, ytrue, yhat, y_all[1:o])))
+            push!(m_metric, name)
+            push!(m_value, Float64(score(metric_inputs(m), m, fold)))
         end
     end
-    for m in metrics
-        name = _metric_name(m)
+    for (name, _) in metrics
         vals = [m_value[i] for i in eachindex(m_value)
                 if m_metric[i] == name && m_fold[i] > 0]
         push!(m_fold, 0)

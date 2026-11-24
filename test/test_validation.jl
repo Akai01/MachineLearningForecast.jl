@@ -283,9 +283,14 @@ end
     @testset "export surface is pinned" begin
         # The README quotes these counts; keep them honest.
         exports = setdiff(names(MachineLearningForecast), [:MachineLearningForecast])
-        @test length(exports) == 44
+        @test length(exports) == 46
         @test :Forecaster in exports && :tune in exports && :mase in exports
         @test :rmsse in exports
+        @test :Mase in exports && :Rmsse in exports
+        for name in (:Point, :Scaled, :MetricInput, :metric_inputs, :metric_name,
+                     :needs_ytrain)
+            @test !(name in exports)
+        end
         @test :TransformChain in exports
         # Types are exported; extension functions are imported.
         for name in (:TargetFeature, :TimeFeature, :ExogenousFeature, :ForecastStrategy)
@@ -423,8 +428,8 @@ end
         vals = [res.metrics.value[i] for i in eachindex(res.metrics.fold)
                 if res.metrics.metric[i] == :mase && res.metrics.fold[i] > 0]
         @test all(isfinite, vals) && all(>(0), vals)
-        @test MachineLearningForecast.needs_ytrain(mase)
-        @test !MachineLearningForecast.needs_ytrain(mae)
+        @test MachineLearningForecast.metric_inputs(mase) isa MachineLearningForecast.Scaled
+        @test MachineLearningForecast.metric_inputs(mae) isa MachineLearningForecast.Point
     end
 
     @testset "features of the three families have their default anchor" begin

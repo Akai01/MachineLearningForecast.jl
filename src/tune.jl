@@ -267,10 +267,12 @@ Tune the whole forecasting pipeline on backtest score. Each candidate is a
 NamedTuple of [`Forecaster`](@ref) field overrides (e.g. `model`, `features`,
 `strategy`); the candidate spec is rebuilt from `fc` with those overrides,
 backtested with [`backtest`](@ref)`(spec, data; horizon, initial, step,
-metrics=(metric,))`, or with `windows` in place of `initial`, and scored by the
-mean of `metric` across folds (lower is better). Pass exactly one of `initial`
-and `windows`; `windows` counts each series' folds back from its own end (see
-[`backtest`](@ref) for the caveat when the series are not aligned in calendar time).
+metrics=(score=metric,))`, or with `windows` in place of `initial`, and scored by the
+mean of `metric` across folds (lower is better). `metric` is one point or scaled metric
+([`metric_inputs`](@ref)), e.g. `smape` or `Mase(7)`, checked before any fit. Pass
+exactly one of `initial` and `windows`; `windows` counts each series' folds back from
+its own end (see [`backtest`](@ref) for the caveat when the series are not aligned in
+calendar time).
 
 - `grid`: NamedTuple mapping `Forecaster` field names (`model`, `features`,
   `strategy`, `transform`) to candidate value lists.
@@ -327,6 +329,7 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
     _iscallable(metric) || throw(ArgumentError(
         "tune metric must be one metric function, got $(repr(metric)). Pass e.g. " *
         "metric=smape; tune ranks candidates by a single metric."))
+    _check_metric("tune metric", metric)
     tbl = normalize_table(data)
     seq = _sequence(tuner, grid)
     # max_evals truncates the queue: warn only for real fits.
@@ -387,7 +390,8 @@ end
 function _evaluate_candidate(fc, cand, tbl, horizon, scheme, metric)
     try
         cfc = reconstruct(fc; cand...)
-        res = backtest(cfc, tbl; horizon, _scheme_kwargs(scheme)..., metrics=(metric,))
+        res = backtest(cfc, tbl; horizon, _scheme_kwargs(scheme)...,
+                       metrics=(score=metric,))
         vals = [res.metrics.value[i] for i in eachindex(res.metrics.fold)
                 if res.metrics.fold[i] > 0]
         m = Float64(Statistics.mean(vals))

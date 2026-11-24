@@ -263,6 +263,38 @@ MachineLearningForecast.untransform(::UnderDeclared, z::AbstractVector{Float64},
                                     ::Nothing) = collect(z)
 MachineLearningForecast.dropped_rows(t::UnderDeclared) = t.d
 
+"""
+A user scaled metric: MAE over the in-sample naive MAE of `y_train`.
+Records every `y_train` it receives, and names itself after `k`.
+"""
+struct NaiveScaled
+    k::Int
+    seen::Vector{Vector{Float64}}
+end
+NaiveScaled(k::Int=1) = NaiveScaled(k, Vector{Float64}[])
+function (s::NaiveScaled)(y, ŷ; y_train)
+    push!(s.seen, collect(Float64, y_train))
+    return MachineLearningForecast.mae(y, ŷ) /
+           MachineLearningForecast.mae(y_train[2:end], y_train[1:(end - 1)])
+end
+MachineLearningForecast.metric_inputs(::NaiveScaled) = MachineLearningForecast.Scaled()
+MachineLearningForecast.metric_name(s::NaiveScaled) = Symbol("naive_scaled_", s.k)
+
+"A scaled metric left on the default name, `Symbol(x)`."
+struct UnnamedScaled end
+(::UnnamedScaled)(y, ŷ; y_train) = 1.0
+MachineLearningForecast.metric_inputs(::UnnamedScaled) = MachineLearningForecast.Scaled()
+
+"Metrics that break the protocol."
+badtrait(y, ŷ) = MachineLearningForecast.mae(y, ŷ)
+MachineLearningForecast.metric_inputs(::typeof(badtrait)) = true
+struct OtherInput <: MachineLearningForecast.MetricInput end
+otherkind(y, ŷ) = MachineLearningForecast.mae(y, ŷ)
+MachineLearningForecast.metric_inputs(::typeof(otherkind)) = OtherInput()
+struct BadName end
+(::BadName)(y, ŷ) = 1.0
+MachineLearningForecast.metric_name(::BadName) = "bad"
+
 end
 
 # Test-side views of the feature contract.

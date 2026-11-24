@@ -1636,4 +1636,133 @@
             @test perstep <= pbytes + np * 64 * length(nf) + 256
         end
     end
+
+    @testset "metric protocol on a panel" begin
+        # a climbs 1 a day, b 10, as in the test above.
+        function trends(nb; na=50)
+            ids = String[]; ds = Date[]; y = Float64[]
+            for i in 1:50, (id, slope, n) in (("a", 1.0, na), ("b", 10.0, nb))
+                i ≤ n || continue
+                push!(ids, id); push!(ds, Date(2022, 1, 1) + Day(i - 1))
+                push!(y, (id == "a" ? 0.0 : 1000.0) + slope * i)
+            end
+            return (unique_id=ids, ds=ds, y=y)
+        end
+        function wiggly(na, nb)
+            ids = String[]; ds = Date[]; y = Float64[]
+            for (id, lv, n) in (("a", 100.0, na), ("b", 5.0, nb)), i in 1:n
+                push!(ids, id); push!(ds, Date(2022, 1, 1) + Day(i - 1))
+                push!(y, lv + i + 3 * sin(i) + (i % 7))
+            end
+            return (unique_id=ids, ds=ds, y=y)
+        end
+        # Per-series scores of each fold, weighted by scored points.
+        function manual(f, pd, r)
+            vals = Float64[]
+            for k in sort(unique(r.folds.fold))
+                tot = 0.0; cnt = 0
+                for id in unique(pd.unique_id)
+                    sel = (r.folds.fold .== k) .& (r.folds.unique_id .== id)
+                    any(sel) || continue
+                    tr = pd.y[(pd.unique_id .== id) .& (pd.ds .<= r.folds.origin[sel][1])]
+                    tot += sum(sel) * f(r.folds.y[sel], r.folds.y_hat[sel], tr)
+                    cnt += sum(sel)
+                end
+                push!(vals, tot / cnt)
+            end
+            return vals
+        end
+        models = (TestModels.LinAR(1.0, 0.0), EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+        val(r, name) = r.metrics.value[(r.metrics.fold .> 0) .& (r.metrics.metric .== name)]
+
+        @testset "Mase(m) and Rmsse(m) are per series and point-weighted" begin
+            fc = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
+            r = backtest(fc, trends(47); horizon=5, initial=40, step=5,
+                         metrics=(Mase(2), Rmsse(2), Mase()))
+            @test unique(r.metrics.metric) == [:mase_2, :rmsse_2, :mase]
+            # Lag-2 scale is 2 slopes, the naive miss averages 3 slopes.
+            @test val(r, :mase_2) ≈ [1.5, (5 * 1.5 + 2 * 0.75) / 7]
+            @test val(r, :mase) ≈ [3.0, (5 * 3.0 + 2 * 1.5) / 7]
+            for m in models
+                pd = wiggly(55, 52)
+                rr = backtest(mk(m, FeatureSet(Lag(1))), pd; horizon=5, initial=40,
+                              step=5, metrics=(Mase(12), Rmsse(7), mae))
+                @test unique(rr.metrics.metric) == [:mase_12, :rmsse_7, :mae]
+                @test val(rr, :mase_12) ≈
+                      manual((y, ŷ, tr) -> mase(y, ŷ; y_train=tr, m=12), pd, rr)
+                @test val(rr, :rmsse_7) ≈
+                      manual((y, ŷ, tr) -> rmsse(y, ŷ; y_train=tr, m=7), pd, rr)
+                ro = backtest(mk(m, FeatureSet(Lag(1))), pd; horizon=5, initial=40,
+                              step=5, metrics=(mase, rmsse))
+                rn = backtest(mk(m, FeatureSet(Lag(1))), pd; horizon=5, initial=40,
+                              step=5, metrics=(Mase(), Rmsse()))
+                @test isequal(ro.metrics, rn.metrics)
+            end
+        end
+
+        @testset "a fold that scores one series keeps the weighted mean" begin
+            # Bits differ by Julia version, so one case must show.
+            shows = Bool[]
+            for (m, metric, h) in ((TestModels.LinAR(1.0, 0.0), Rmsse(7), 6),
+                                   (DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
+                                    Mase(7), 12))
+                # b ends early, so fold 3 scores a alone.
+                pd = wiggly(40 + 3h, 40 + 2h)
+                r = backtest(mk(m, FeatureSet(Lag(1))), pd; horizon=h, initial=40,
+                             step=h, metrics=(metric,))
+                last_fold = r.folds.fold .== 3
+                @test unique(r.folds.unique_id[last_fold]) == ["a"]
+                o = r.folds.origin[last_fold][1]
+                tr = pd.y[(pd.unique_id .== "a") .& (pd.ds .<= o)]
+                v = metric(r.folds.y[last_fold], r.folds.y_hat[last_fold]; y_train=tr)
+                push!(shows, (h * v) / h != v)
+                @test val(r, metric isa Mase ? :mase_7 : :rmsse_7)[3] == (h * v) / h
+            end
+            @test any(shows)
+        end
+
+        @testset "series errors name the series" begin
+            fc = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
+            @test_throws "series unique_id=\"a\": mase needs length(y_train) > m; got " *
+                         "length(y_train)=40 with m=40. Pass a longer y_train or a " *
+                         "smaller m." backtest(fc, trends(50); horizon=5, initial=40,
+                                               step=5, metrics=(Mase(40),))
+            @test_throws "series unique_id=\"a\": rmsse needs length(y_train) > m" backtest(
+                fc, trends(50); horizon=5, initial=40, step=5, metrics=(Rmsse(40),))
+        end
+
+        @testset "custom scaled and point metrics side by side" begin
+            fc = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
+            pd = trends(50)
+            ns = TestModels.NaiveScaled(2)
+            f = (a, b) -> mae(a, b)
+            r = backtest(fc, pd; horizon=5, initial=40, step=5, metrics=(f, ns, Mase(2)))
+            @test unique(r.metrics.metric) == [Symbol(f), :naive_scaled_2, :mase_2]
+            ya = pd.y[pd.unique_id .== "a"]; yb = pd.y[pd.unique_id .== "b"]
+            @test ns.seen == [ya[1:40], yb[1:40], ya[1:45], yb[1:45]]
+            @test val(r, :naive_scaled_2) ≈ [3.0, 3.0]
+            @test val(r, Symbol(f)) ≈ [16.5, 16.5]
+        end
+
+        @testset "horizon 1 on a ragged panel" begin
+            fc = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
+            r = backtest(fc, trends(47); horizon=1, initial=45, step=1,
+                         metrics=(Mase(2), Rmsse(2)))
+            @test length(val(r, :mase_2)) == 5 && length(val(r, :rmsse_2)) == 5
+            @test val(r, :mase_2) ≈ fill(0.5, 5)
+            @test val(r, :rmsse_2) ≈ fill(0.5, 5)
+            for m in models
+                r2 = backtest(mk(m, FeatureSet(Lag(1))), wiggly(55, 52); horizon=1,
+                              initial=48, step=1, metrics=(Mase(12),))
+                @test all(isfinite, r2.metrics.value)
+            end
+        end
+
+        @testset "a type is not a metric" begin
+            fc = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
+            @test_throws "got the type Mase; pass Mase() or Mase(12)" backtest(
+                fc, trends(50); horizon=5, initial=40, metrics=(Mase,))
+        end
+    end
 end

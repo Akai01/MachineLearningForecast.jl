@@ -320,6 +320,13 @@ better. `mape` and `smape` return fractions (0.10 = 10%);
 root of the in-sample mean squared seasonal-naive error (M5's RMSSE, except that M5
 starts the scale at the first non-zero value, while `rmsse` uses the whole training
 window).
+`Mase(m)` and `Rmsse(m)` are the same metrics as callable objects with the season length
+set, for `backtest` and `tune`: `metrics=(mae, Mase(12))`. `backtest` names each metric
+in its `metrics` table by `metric_name` (`:mae`, `:mase`, `:mase_12`), or by the key of a
+NamedTuple, `metrics=(error=mae, scaled=Mase(12))`; the names must be distinct. A metric
+of your own that needs the training target defines
+`MachineLearningForecast.metric_inputs(::typeof(f)) = MachineLearningForecast.Scaled()`
+(and `metric_name` for a metric object); both are public, not exported.
 In `backtest`, unscaled metrics pool the fold's rows; scaled metrics are per series,
 weighted by scored points; the overall row is the unweighted mean over folds.
 Scaled metrics follow Hyndman & Koehler (2006): each series' errors are divided by that
@@ -367,7 +374,7 @@ Reindex your data or resample before fitting.
        horizon=28, initial=730)
   ```
 
-  The other 40 exports are collision-free. Note that MachineLearningForecast's `mae`/`rmse`
+  The other 42 exports are collision-free. Note that MachineLearningForecast's `mae`/`rmse`
   are plain functions of two vectors, whereas MLJ's are measure objects — they
   are not interchangeable, which is exactly why the choice must be explicit.
 - **Multiple dispatch over configuration flags**: strategies, features, and
