@@ -50,13 +50,19 @@ function panel_groups(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
     return out
 end
 
-function _in_series(f, fc::Forecaster{M,S,Symbol}, key) where {M,S}
+function _in_series(f, id::Symbol, key)
     try
         return f()
     catch err
-        err isa ArgumentError || rethrow()
-        throw(ArgumentError("series $(fc.id)=$(repr(key)): " * err.msg))
+        _rethrow_in(id, err, key)
     end
+end
+
+# Must run inside a catch block, for rethrow().
+_rethrow_in(::Nothing, err, key) = rethrow()
+function _rethrow_in(id::Symbol, err, key)
+    err isa ArgumentError || rethrow()
+    throw(ArgumentError("series $id=$(repr(key)): " * err.msg))
 end
 
 _series_groups(fc::Forecaster{M,S,Symbol}, tbl::NamedTuple,

@@ -385,6 +385,40 @@ end
         @test rowvalues(Exogenous(:promo), y, t[1], 0, (promo=true,)) == [1.0]
     end
 
+    @testset "Exogenous rejects infinities but keeps NaN, large and Bool values" begin
+        tail = "Infinite values turn into Inf or NaN in the model's arithmetic; " *
+               "replace or clip them (NaN is allowed and passes through to the " *
+               "model as a missing marker)."
+        for bad in (Inf, -Inf)
+            promo = Float64.(1:10); promo[4] = bad
+            @test_throws ArgumentError materialize(Exogenous(:promo), y,
+                                                   (ds=t, y=y, promo=promo))
+            @test_throws "exogenous column :promo has the infinite value $bad at time " *
+                         "2021-03-04 in the training data. $tail" materialize(
+                Exogenous(:promo), y, (ds=t, y=y, promo=promo))
+            # The second column is read after the first passes.
+            @test_throws "exogenous column :price has the infinite value $bad at time " *
+                         "2021-03-04 in the training data" materialize(
+                Exogenous(:promo, :price), y,
+                (ds=t, y=y, promo=Float64.(1:10), price=promo))
+            @test_throws ArgumentError rowvalues(Exogenous(:promo), y, t[2], 1,
+                                                 (promo=bad,))
+            @test_throws "exogenous column :promo has the infinite value $bad at time " *
+                         "2021-03-02 in `future` (or the held-out rows). $tail" rowvalues(
+                Exogenous(:promo), y, t[2], 1, (promo=bad,))
+            # Every real type is converted before the check.
+            @test_throws "has the infinite value $bad" rowvalues(
+                Exogenous(:promo), y, t[2], 1, (promo=Float32(bad),))
+        end
+        for ok in (1e300, -1e300, floatmax(Float64), 5, true, Float32(2.5), 1 // 2)
+            @test rowvalues(Exogenous(:promo), y, t[1], 0, (promo=ok,)) == [Float64(ok)]
+        end
+        @test isnan(only(rowvalues(Exogenous(:promo), y, t[1], 0, (promo=NaN,))))
+        promo = Float64.(1:10); promo[4] = NaN; promo[5] = 1e300
+        out = materialize(Exogenous(:promo), y, (ds=t, y=y, promo=promo))
+        @test isequal(out.promo, promo)
+    end
+
     @testset "forecast-row and Exogenous hot paths are type-stable" begin
         M = MachineLearningForecast
         rt = Base.return_types(M.featurevalues!,
@@ -465,6 +499,95 @@ end
             @test_throws BoundsError forecast(fp, 3)
             @test_throws "access 10-element Vector{Float64} at index [11]" forecast(fp, 3)
         end
+    end
+
+    @testset "CustomFeature rejects NaN and infinite values" begin
+        # std of one value is NaN: minhistory 1 is too small.
+        nan1 = CustomFeature(:v, std, 1)
+        @test_throws ArgumentError materialize(nan1)
+        @test_throws "CustomFeature(:v) returned NaN at time 2021-03-02, where f sees " *
+                     "1 history value, but f must return a finite number. Guard the " *
+                     "computation (a variance over too few values, 0/0), or raise " *
+                     "minhistory (now 1)." materialize(nan1)
+        two = CustomFeature(:w, h -> length(h) == 2 ? NaN : 1.0, 0)
+        @test_throws "CustomFeature(:w) returned NaN at time 2021-03-03, where f sees " *
+                     "2 history values, but f must return a finite number" rowvalues(
+            two, y[1:2], t[3])
+        @test_throws ArgumentError rowvalues(nan1, y[1:1], t[2])
+        @test all(isfinite, materialize(CustomFeature(:v, std, 2)).v[3:end])
+        for (name, g, shown) in ((:pinf, h -> h[end] / 0, "Inf"),
+                                 (:ninf, h -> -h[end] / 0, "-Inf"),
+                                 (:zz, h -> 0 / 0, "NaN"),
+                                 (:f32, h -> Float32(NaN), "NaN"))
+            bad = CustomFeature(name, g, 1)
+            @test_throws "CustomFeature(:$name) returned $shown at time 2021-03-02, " *
+                         "where f sees 1 history value, but f must return a finite " *
+                         "number." materialize(bad)
+            @test_throws "returned $shown at time 2021-03-02" rowvalues(bad, y[1:1], t[2])
+        end
+        # A non-real value still gets the message that comes first.
+        @test_throws "f must return one real number" materialize(
+            CustomFeature(:r, h -> "x", 1))
+        @test_throws "f must return one real number" rowvalues(
+            CustomFeature(:r, h -> missing, 0), y, t[1])
+        # Large finite values are fine.
+        @test materialize(CustomFeature(:big, h -> 1e300, 0)).big == fill(1e300, 10)
+        @test rowvalues(CustomFeature(:big, h -> -1e300, 0), y, t[1]) == [-1e300]
+    end
+
+    @testset "CustomFeature NaN stops fit and every strategy's forecast" begin
+        n = 50
+        ds50 = collect(Date(2022, 1, 1):Day(1):Date(2022, 2, 19))
+        y50 = Float64.(1:n)
+        d50 = (ds=ds50, y=y50)
+        for m in (TestModels.LinAR(1.0, 0.0), EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+            # Training: std of one value is NaN.
+            fcb = Forecaster(m; features=FeatureSet(Lag(1), CustomFeature(:v, std, 1)),
+                             freq=Day(1))
+            @test_throws "CustomFeature(:v) returned NaN at time 2022-01-02, where f " *
+                         "sees 1 history value" fit(fcb, d50)
+            fcd = Forecaster(m; features=FeatureSet(Lag(1), CustomFeature(:v, std, 1)),
+                             strategy=Direct(3), freq=Day(1))
+            @test_throws "CustomFeature(:v) returned NaN at time" fit(fcd, d50)
+            # Forecast only: training sees at most n - 1 values.
+            late = CustomFeature(:late, h -> length(h) ≥ n + 2 ? NaN : 1.0, 0)
+            fcr = Forecaster(m; features=FeatureSet(Lag(1), late), freq=Day(1))
+            fr = fit(fcr, d50)
+            @test all(isfinite, forecast(fr, 2).y_hat)
+            @test_throws "CustomFeature(:late) returned NaN at time 2022-02-22, where " *
+                         "f sees 52 history values, but f must return a finite " *
+                         "number" forecast(fr, 3)
+            origin = CustomFeature(:origin, h -> length(h) ≥ n ? NaN : 1.0, 0)
+            fcd2 = Forecaster(m; features=FeatureSet(Lag(1), origin),
+                              strategy=Direct(3), freq=Day(1))
+            fd = fit(fcd2, d50)
+            @test_throws "CustomFeature(:origin) returned NaN at time" forecast(fd, 3)
+        end
+        # Only a prediction can push h[end] past 100.
+        blow = CustomFeature(:blow, h -> h[end] > 100 ? NaN : h[end], 1)
+        fl = fit(Forecaster(TestModels.LinAR(20.0, 0.0);
+                            features=FeatureSet(Lag(1), blow), freq=Day(1)), df)
+        @test_throws "CustomFeature(:blow) returned NaN at time 2021-03-13, where f " *
+                     "sees 12 history values" forecast(fl, 3)
+        @test all(isfinite, forecast(fl, 2).y_hat)
+        # A NaN prediction in the history is not f's fault.
+        dfp = (ds=t, y=y, promo=Float64.(1:10))
+        fm = fit(Forecaster(TestModels.EchoColumn(:promo);
+                            features=FeatureSet(Lag(1), Exogenous(:promo),
+                                                CustomFeature(:m, mean, 1)),
+                            freq=Day(1)), dfp)
+        futm = (ds=t[end] .+ Day.(1:3), promo=[1.0, NaN, 3.0])
+        @test_throws "CustomFeature(:m) returned NaN at time 2021-03-13, where f " *
+                     "sees 12 history values, but f must return a finite number. Its " *
+                     "history holds a non-finite value. Under Recursive the history " *
+                     "includes earlier predictions, so a non-finite prediction (for " *
+                     "example from a NaN exogenous value fed to a learner that " *
+                     "cannot handle it) is the likely cause. Impute the NaN " *
+                     "exogenous values or use a learner that handles missing " *
+                     "values." forecast(fm, 3;
+                                                                       future=futm)
+        @test isequal(forecast(fm, 2; future=futm).y_hat, [1.0, NaN])
     end
 
     @testset "CustomFeature is typed by its function" begin

@@ -53,6 +53,8 @@ cut at the same timestamp, which avoids it.
 duplicates or missing timestamps, and a target with `missing` or non-finite
 values. Fill them causally (forward fill, or the mean of past values) before
 fitting, because a fill that uses later values, such as interpolation, leaks.
+`Exogenous` columns may hold `NaN`, which reaches the model as a missing marker,
+but not `missing` or `±Inf`.
 
 **Aggregation of metrics.** Unscaled metrics pool the fold's rows; scaled
 metrics are per series, weighted by scored points; the overall row is the

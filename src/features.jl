@@ -89,7 +89,8 @@ Abstract supertype of the features passed through from the user's columns,
 which must be passed to `forecast` as `future`, such as
 [`Exogenous`](@ref). Subtype it for your own, implement the methods listed under
 [`AbstractFeature`](@ref), and declare the columns it reads with
-[`inputcolumns`](@ref). Its anchor is `AtTarget` by default.
+[`inputcolumns`](@ref). Its anchor is `AtTarget` by default. A feature that reads
+`ctx.exog` itself must check its own values: only [`Exogenous`](@ref) rejects `±Inf`.
 
 # Example
 ```julia
@@ -533,7 +534,15 @@ Pass-through of user-supplied covariate columns that are known in the future
 (e.g. promotions, prices, holidays). At `forecast` time these columns must be
 supplied for the full horizon via the `future` keyword; in `backtest` they
 are sliced from the held-out data automatically. Exogenous columns must be
-numeric (`Real` or `Bool`).
+numeric (`Real` or `Bool`). `missing` and `±Inf` throw an `ArgumentError`.
+
+`NaN` is passed to the model unchanged. Learners built for missing values read it as
+missing: sparsity-aware trees learn a default direction for it (Chen & Guestrin 2016,
+KDD, §3.4), as does "missing incorporated in attributes" (Twala, Jones & Hand 2008,
+Pattern Recognition Letters 29(7), 950-956), which Josse et al. (2019,
+arXiv:1902.06931) recommend over imputation for trees. XGBoost, the system of the
+first citation, is one such learner. Learners without missing-value handling may
+treat NaN as an extreme value or refuse it; impute for those.
 
 A backtest uses the realised values of the covariates, so it scores ex-post forecasts
 (Hyndman & Athanasopoulos 2021, §7.6). For covariates not known at the origin (a
@@ -664,26 +673,32 @@ anchor(f::AbstractFeature) = throw(ArgumentError(
 function materialize!(out::ColumnAccumulator, f::Exogenous, s::TrainingSeries)
     for c in f.cols
         _require_input_column(s.data, c)
-        push!(out, c => _exog_column(s.data[c], c))
+        push!(out, c => _exog_column(s.data[c], c, s.t))
     end
     return out
 end
 
 # A function barrier: data[c] is only known at run time.
-function _exog_column(raw, c::Symbol)
+function _exog_column(raw, c::Symbol, t)
     vals = Vector{Union{Missing,Float64}}(missing, length(raw))
     for i in eachindex(raw)
-        ismissing(raw[i]) || (vals[i] = _to_float(raw[i], c))
+        ismissing(raw[i]) || (vals[i] = _to_float(raw[i], c, t[i], "the training data"))
     end
     return vals
 end
 
-function _to_float(v, name::Symbol)
-    v isa Real && return Float64(v)
-    throw(ArgumentError(
+function _to_float(v, name::Symbol, t, source::AbstractString)
+    v isa Real || throw(ArgumentError(
         "exogenous column :$name has non-numeric value $(repr(v)) " *
         "(type $(typeof(v))). Exogenous columns must be numeric (Real or " *
         "Bool). Encode categorical columns numerically first."))
+    x = Float64(v)
+    isinf(x) && throw(ArgumentError(
+        "exogenous column :$name has the infinite value $x at time $t in $source. " *
+        "Infinite values turn into Inf or NaN in the model's arithmetic; replace " *
+        "or clip them (NaN is allowed and passes through to the model as a " *
+        "missing marker)."))
+    return x
 end
 
 function featurevalues!(out::AbstractVector{Float64}, f::Exogenous, ctx::FeatureContext)
@@ -691,7 +706,7 @@ function featurevalues!(out::AbstractVector{Float64}, f::Exogenous, ctx::Feature
         haskey(ctx.exog, c) || throw(ArgumentError(
             "`future` is missing exogenous column :$c required by Exogenous. " *
             "Provide it for every forecast timestamp."))
-        out[j] = _to_float(ctx.exog[c], c)
+        out[j] = _to_float(ctx.exog[c], c, ctx.t, "`future` (or the held-out rows)")
     end
     return nothing
 end
@@ -700,10 +715,10 @@ end
     CustomFeature(name, f, minhistory)
 
 A user-defined target-history feature. `f` is a function of the target history
-vector *up to and excluding* the current row, returning one scalar (the value
-of the feature for that row). `minhistory` is the minimum number of history
-values `f` needs; rows with less history get `missing` during training and are
-dropped.
+vector *up to and excluding* the current row, returning one finite real number
+(the value of the feature for that row). NaN and ±Inf throw an `ArgumentError`.
+`minhistory` is the minimum number of history values `f` needs; rows with less
+history get `missing` during training and are dropped.
 
 During recursive forecasting, `f` is called on the growing history vector
 (actuals followed by earlier predictions), so it sees exactly the same kind of
@@ -772,8 +787,21 @@ function _custom_value(f::CustomFeature, h::AbstractVector, t)
     v isa Real || applicable(Float64, v) || throw(ArgumentError(
         "CustomFeature(:$(f.name)) returned $(repr(v)) at time $t, where f sees " *
         "$(_nvalues(h)), but f must return one real number, e.g. mean(h)."))
-    return Float64(v)
+    x = Float64(v)
+    isfinite(x) || throw(ArgumentError(
+        "CustomFeature(:$(f.name)) returned $x at time $t, where f sees " *
+        "$(_nvalues(h)), but f must return a finite number. " * _nonfinite_fix(f, h)))
+    return x
 end
+
+# Only Recursive histories hold predictions.
+_nonfinite_fix(f::CustomFeature, h) = any(!isfinite, h) ?
+    "Its history holds a non-finite value. Under Recursive the history includes " *
+    "earlier predictions, so a non-finite prediction (for example from a NaN exogenous " *
+    "value fed to a learner that cannot handle it) is the likely cause. Impute " *
+    "the NaN exogenous values or use a learner that handles missing values." :
+    "Guard the computation (a variance over too few values, 0/0), or raise " *
+    "minhistory (now $(f.minhistory))."
 
 _nvalues(h) = string(length(h), " history value", length(h) == 1 ? "" : "s")
 

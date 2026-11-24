@@ -117,17 +117,16 @@ end
         end
     end
 
-    @testset "non-finite exogenous values pass through to the model" begin
-        # Rejecting them like targets was considered and declined.
-        promo = Float64.(1:50); promo[20] = NaN; promo[30] = Inf
+    @testset "NaN in an exogenous column passes through to the model" begin
+        # Rejecting NaN like targets was declined; Inf is rejected.
+        promo = Float64.(1:50); promo[20] = NaN
         dfe = (ds=df.ds, y=df.y, promo=promo)
         fse = FeatureSet(Lag(1), Exogenous(:promo))
-        future = (ds=df.ds[end] .+ Day.(1:3), promo=[NaN, 1.0, -Inf])
+        future = (ds=df.ds[end] .+ Day.(1:3), promo=[NaN, 1.0, 2.0])
         echo = Forecaster(TestModels.EchoColumn(:promo); features=fse, freq=Day(1))
-        @test isequal(forecast(fit(echo, dfe), 3; future=future).y_hat,
-                      [NaN, 1.0, -Inf])
+        @test isequal(forecast(fit(echo, dfe), 3; future=future).y_hat, [NaN, 1.0, 2.0])
         X, _, _ = MachineLearningForecast.build_training_frame(fse, dfe, :y, :ds)
-        @test isnan(X.promo[19]) && X.promo[29] == Inf
+        @test isnan(X.promo[19])
         dt = Forecaster(DecisionTreeRegressor(max_depth=2, rng=StableRNG(1));
                         features=fse, freq=Day(1))
         @test length(backtest(dt, dfe; horizon=3, initial=40).folds.y_hat) == 9
@@ -137,6 +136,48 @@ end
             f = fit(Forecaster(m; features=fse, freq=Day(1)), clean)
             @test length(forecast(f, 3; future=future).y_hat) == 3
         end
+    end
+
+    @testset "infinite exogenous values are rejected, in training and forecasting" begin
+        fse = FeatureSet(Lag(1), Exogenous(:promo))
+        tail = "Infinite values turn into Inf or NaN in the model's arithmetic; " *
+               "replace or clip them (NaN is allowed and passes through to the " *
+               "model as a missing marker)."
+        clean = (ds=df.ds, y=df.y, promo=Float64.(1:50))
+        for bad in (Inf, -Inf), strat in (Recursive(), Direct(3)),
+            m in (TestModels.LinAR(1.0, 0.0), EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
+            fc = Forecaster(m; features=fse, strategy=strat, freq=Day(1))
+            promo = Float64.(1:50); promo[30] = bad
+            @test_throws "exogenous column :promo has the infinite value $bad at time " *
+                         "2022-01-30 in the training data. $tail" fit(
+                fc, (ds=df.ds, y=df.y, promo=promo))
+            # A row that minhistory drops is still checked.
+            promo = Float64.(1:50); promo[1] = bad
+            @test_throws "has the infinite value $bad at time 2022-01-01 in the " *
+                         "training data" fit(fc, (ds=df.ds, y=df.y, promo=promo))
+            fut = (ds=df.ds[end] .+ Day.(1:3), promo=[1.0, bad, 3.0])
+            f = fit(fc, clean)
+            @test_throws "exogenous column :promo has the infinite value $bad at time " *
+                         "2022-02-21 in `future` (or the held-out rows). $tail" forecast(
+                f, 3; future=fut)
+            promo = Float64.(1:50); promo[46] = bad
+            @test_throws "has the infinite value $bad at time 2022-02-15 in " *
+                         "`future`" backtest(
+                fc, (ds=df.ds, y=df.y, promo=promo); horizon=3, initial=40)
+        end
+    end
+
+    @testset "large finite and Bool exogenous values stay legal" begin
+        fse = FeatureSet(Lag(1), Exogenous(:promo))
+        echo = Forecaster(TestModels.EchoColumn(:promo); features=fse, freq=Day(1))
+        big = Float64.(1:50); big[10] = 1e300; big[11] = -1e300
+        fut = (ds=df.ds[end] .+ Day.(1:3), promo=[1e300, -1e300, 0.0])
+        @test forecast(fit(echo, (ds=df.ds, y=df.y, promo=big)), 3; future=fut).y_hat ==
+              [1e300, -1e300, 0.0]
+        flags = (ds=df.ds, y=df.y, promo=isodd.(1:50))
+        futb = (ds=df.ds[end] .+ Day.(1:3), promo=[true, false, true])
+        @test forecast(fit(echo, flags), 3; future=futb).y_hat == [1.0, 0.0, 1.0]
     end
 
     @testset "time column type must support + freq" begin

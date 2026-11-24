@@ -196,6 +196,76 @@
         @test err isa ArgumentError && occursin("no series has enough rows", err.msg)
     end
 
+    @testset "infinite exogenous and non-finite custom values name the series" begin
+        promo = Float64.(eachindex(panel.y))
+        promo[45] = Inf               # s2, row 5: 2022-01-05
+        ex = (unique_id=panel.unique_id, ds=panel.ds, y=panel.y, promo=promo)
+        tail = "Infinite values turn into Inf or NaN in the model's arithmetic; " *
+               "replace or clip them (NaN is allowed and passes through to the " *
+               "model as a missing marker)."
+        nanc = CustomFeature(:c, h -> h[end] < 20 ? NaN : h[end], 1)
+        for m in (TestModels.LinAR(1.0, 0.0), EvoTreeRegressor(nrounds=5),
+                  DecisionTreeRegressor(max_depth=2, rng=StableRNG(1))),
+            strat in (Recursive(), Direct(2))
+            fc = mk(m, FeatureSet(Lag(1), Exogenous(:promo)); strat)
+            @test_throws "series unique_id=\"s2\": exogenous column :promo has the " *
+                         "infinite value Inf at time 2022-01-05 in the training data. " *
+                         "$tail" fit(fc, ex)
+            @test_throws "series unique_id=\"s2\": CustomFeature(:c) returned NaN at " *
+                         "time 2022-01-02, where f sees 1 history value, but f must " *
+                         "return a finite number." fit(
+                mk(m, FeatureSet(Lag(1), nanc); strat), panel)
+        end
+        fc = mk(TestModels.EchoColumn(:promo), FeatureSet(Lag(1), Exogenous(:promo)))
+        f = fit(fc, (unique_id=panel.unique_id, ds=panel.ds, y=panel.y,
+                     promo=Float64.(eachindex(panel.y))))
+        grids = [[s.t_last + Day(i) for i in 1:2] for s in f.series]
+        fpromo = [11.0, 12.0, 21.0, 22.0, 31.0, -Inf]
+        nd = (unique_id=repeat(["s1", "s2", "s3"], inner=2), ds=vcat(grids...),
+              promo=fpromo)
+        @test_throws "series unique_id=\"s3\": exogenous column :promo has the " *
+                     "infinite value -Inf at time $(grids[3][2]) in `future` (or the " *
+                     "held-out rows)" forecast(f, 2; future=nd)
+        fpromo[6] = NaN
+        @test isnan(forecast(f, 2; future=nd).y_hat[6])
+        # The series is named once, not once per layer.
+        blow = CustomFeature(:blow, h -> h[end] > 1000 ? NaN : h[end], 1)
+        fb = fit(mk(TestModels.LinAR(20.0, 0.0), FeatureSet(Lag(1), blow)), panel)
+        @test_throws "series unique_id=\"s1\": CustomFeature(:blow) returned NaN at " *
+                     "time $(fb.series[1].t_last + Day(2)), where f sees 41 history " *
+                     "values, but f must return a finite number" forecast(fb, 3)
+        @test all(isfinite, forecast(fb, 1).y_hat)
+        # Only ArgumentErrors get the series prefix.
+        dom = CustomFeature(:dom, h -> h[end] > 1000 ? throw(DomainError(h[end], "big")) :
+                                  h[end], 1)
+        fd = fit(mk(TestModels.LinAR(20.0, 0.0), FeatureSet(Lag(1), dom)), panel)
+        err = try forecast(fd, 3) catch e; e end
+        @test err isa DomainError && err.msg == "big"
+        late = copy(promo); late[45] = 1.0; late[104] = Inf   # s3, row 34
+        @test_throws "series unique_id=\"s3\": exogenous column :promo has the " *
+                     "infinite value Inf at time 2022-02-03 in `future` (or the " *
+                     "held-out rows)" backtest(
+            mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1), Exogenous(:promo))),
+            (unique_id=panel.unique_id, ds=panel.ds, y=panel.y, promo=late);
+            horizon=2, initial=20)
+        pre = "series unique_id=\"s3\": "
+        msg = try forecast(f, 2; future=merge(nd, (promo=[11.0, 12.0, 21.0, 22.0, 31.0,
+                                                          -Inf],))) catch e; e.msg end
+        @test startswith(msg, pre) && count(pre, msg) == 1
+        msg = try
+            backtest(mk(TestModels.LinAR(1.0, 0.0),
+                        FeatureSet(Lag(1), Exogenous(:promo))),
+                     (unique_id=panel.unique_id, ds=panel.ds, y=panel.y, promo=late);
+                     horizon=2, initial=20)
+        catch e; e.msg end
+        @test startswith(msg, pre) && count(pre, msg) == 1
+        bt = (unique_id=panel.unique_id, ds=panel.ds, y=panel.y, promo=promo)
+        @test_throws "series unique_id=\"s2\": exogenous column :promo has the " *
+                     "infinite value Inf at time 2022-01-05" backtest(
+            mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1), Exogenous(:promo))), bt;
+            horizon=2, initial=20)
+    end
+
     @testset "exogenous covariates join on (id, time)" begin
         ex = (unique_id=panel.unique_id, ds=panel.ds, y=panel.y,
               promo=Float64.(eachindex(panel.y)))

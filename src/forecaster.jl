@@ -482,7 +482,8 @@ function _series_groups(fc::Forecaster{M,S,Nothing}, tbl::NamedTuple,
     return [(nothing, tbl, base)]
 end
 
-_in_series(f, ::Forecaster{M,S,Nothing}, key) where {M,S} = f()
+_in_series(f, ::Nothing, key) = f()
+_in_series(f, fc::Forecaster, key) = _in_series(f, fc.id, key)
 
 function _prepare_series(fc::Forecaster, id, sub::NamedTuple, rows)
     return _in_series(fc, id) do
@@ -642,7 +643,7 @@ function _StepRun(features::FeatureSet, strategy, names::Vector{Symbol}, states,
 end
 
 # One row per series still being forecast.
-function _fill_step!(run::_StepRun, s::Int)
+function _fill_step!(run::_StepRun, s::Int, id::Union{Nothing,Symbol})
     active, hs = run.active, run.hs
     m = 0
     for k in active
@@ -662,7 +663,12 @@ function _fill_step!(run::_StepRun, s::Int)
         k = active[r]
         ex = run.exog_rows === nothing ? nothing : run.exog_rows[k][s]
         ctx = _context(run.states[k], run.histories[k], run.grids[k][s], s, ex)
-        _fill_row!(run.scratch, run.bufs, run.features, ctx)
+        # A closure here would allocate on every row.
+        try
+            _fill_row!(run.scratch, run.bufs, run.features, ctx)
+        catch err
+            _rethrow_in(id, err, run.states[k].id)
+        end
         for j in eachindex(run.cols)
             run.cols[j][r] = run.scratch[j][1]
         end
@@ -694,7 +700,9 @@ function _forecast_states(f::FittedForecaster, states, hs::Vector{Int}, grids, e
     # Reused across steps: a model must not keep Xnew.
     row = NamedTuple{Tuple(f.feature_names)}(Tuple(run.cols))
     for s in 1:hmax
-        _fill_step!(run, s) && (row = NamedTuple{Tuple(f.feature_names)}(Tuple(run.cols)))
+        if _fill_step!(run, s, spec.id)
+            row = NamedTuple{Tuple(f.feature_names)}(Tuple(run.cols))
+        end
         trained = _model_at(f.models, strategy, s)
         _store_step!(run, s, _predict(trained, row), trained)
     end

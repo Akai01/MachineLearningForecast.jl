@@ -109,6 +109,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Breaking: `Exogenous` rejects `±Inf` in the training data (every row the
+  transform keeps, including rows the feature set's `minhistory` drops), in
+  `future` and in the held-out rows of a backtest, with an `ArgumentError` naming
+  the column, the value and the time (the series id in a panel). `NaN` is kept
+  and passes through to the model as a missing marker; the `Exogenous` docstring
+  says which learners handle it.
+  Before, `±Inf` also passed through.
+- Breaking: a `CustomFeature` whose `f` returns `NaN` or `±Inf` throws an
+  `ArgumentError` naming the feature, the time and the history length, at every row
+  where it is computed, in `fit` and in `Recursive` forecasting. Before, the value went
+  into the model.
+- In a panel, an `ArgumentError` raised while `forecast` or `backtest` builds a
+  forecast row (a bad `future` value, a `CustomFeature` result) names the series, as
+  `fit` already did.
 - The "too short" errors and the panel skip warning count the rows you gave, not
   the rows left after the transform, and say how many rows the transform drops:
   `fit` ("not enough data", "no series has enough rows to train on",
