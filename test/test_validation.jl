@@ -129,7 +129,7 @@ end
         @test isnan(X.promo[19])
         dt = Forecaster(DecisionTreeRegressor(max_depth=2, rng=StableRNG(1));
                         features=fse, freq=Day(1))
-        @test length(backtest(dt, dfe; horizon=3, initial=40).folds.y_hat) == 9
+        @test length(backtest(dt, dfe; horizon=3, initial=40).forecasts.y_hat) == 9
         clean = (ds=df.ds, y=df.y, promo=Float64.(1:50))
         for m in (EvoTreeRegressor(nrounds=5),
                   DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
@@ -274,7 +274,7 @@ end
         fcb = Forecaster(TestModels.LinAR(1.0, 0.0); features=FeatureSet(Lag(1)),
                          strategy=Recursive(), freq=Day(1))
         r = backtest(fcb, df3; horizon=10, initial=60, step=10, metrics=())
-        nfolds = length(unique(r.folds.origin))
+        nfolds = length(unique(r.forecasts.origin))
         @test nfolds > 1
         @test occursin("$nfolds fold", sprint(show, MIME"text/plain"(), r))
         @test occursin("$nfolds folds", sprint(show, r))
@@ -283,7 +283,8 @@ end
     @testset "export surface is pinned" begin
         # The README quotes these counts; keep them honest.
         exports = setdiff(names(MachineLearningForecast), [:MachineLearningForecast])
-        @test length(exports) == 46
+        @test length(exports) == 47
+        @test :summarize in exports && summarize isa Function
         @test :Forecaster in exports && :tune in exports && :mase in exports
         @test :rmsse in exports
         @test :Mase in exports && :Rmsse in exports
@@ -376,7 +377,7 @@ end
                 # own time column
                 r = backtest(fce, merge(dfe, (ds=Vector{T}(df.ds),)); horizon=3,
                              initial=40)
-                @test isequal(r.folds, bt.folds) && isequal(r.metrics, bt.metrics)
+                @test isequal(r.forecasts, bt.forecasts) && isequal(r.scores, bt.scores)
             end
             holed = (ds=Union{Missing,Date}[grid[1], missing, grid[2], grid[3]],
                      promo=[1.0, 9.0, 2.0, 3.0])
@@ -424,9 +425,9 @@ end
         fcb = Forecaster(TestModels.LinAR(1.0, 0.0); features=fs, strategy=Recursive(),
                          freq=Day(1))
         res = backtest(fcb, df; horizon=7, initial=30, step=10, metrics=(mae, mase))
-        @test :mase in res.metrics.metric
-        vals = [res.metrics.value[i] for i in eachindex(res.metrics.fold)
-                if res.metrics.metric[i] == :mase && res.metrics.fold[i] > 0]
+        @test :mase in res.scores.metric
+        vals = [res.scores.value[i] for i in eachindex(res.scores.fold)
+                if res.scores.metric[i] == :mase]
         @test all(isfinite, vals) && all(>(0), vals)
         @test MachineLearningForecast.metric_inputs(mase) isa MachineLearningForecast.Scaled
         @test MachineLearningForecast.metric_inputs(mae) isa MachineLearningForecast.Point
@@ -473,14 +474,14 @@ end
             good = Forecaster(m; freq=Day(1),
                               features=FeatureSet(Lag(1), ThirdPartyExog.Doubled([:promo])))
             @test all(isfinite, forecast(fit(good, dfe), 3; future=future).y_hat)
-            @test length(backtest(good, dfe; horizon=3, initial=40).folds.y_hat) == 9
+            @test length(backtest(good, dfe; horizon=3, initial=40).forecasts.y_hat) == 9
             prop = Forecaster(m; freq=Day(1),
                               features=FeatureSet(Lag(1), ThirdPartyExog.PropCols(:promo)))
             @test forecast(fit(prop, dfe), 3; future=future) ==
                   forecast(fit(good, dfe), 3; future=future)
             bp = backtest(prop, dfe; horizon=3, initial=40)
             bg = backtest(good, dfe; horizon=3, initial=40)
-            @test isequal(bp.folds, bg.folds) && isequal(bp.metrics, bg.metrics)
+            @test isequal(bp.forecasts, bg.forecasts) && isequal(bp.scores, bg.scores)
         end
         needs = Forecaster(TestModels.LinAR(1.0, 0.0); freq=Day(1),
                            features=FeatureSet(Lag(1), ThirdPartyExog.NeedsPromo()))

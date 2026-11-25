@@ -20,8 +20,9 @@ interface: any MLJ `Deterministic` regressor is a valid base model, and a
 - Panel (multi-series) forecasting: set `id` on [`Forecaster`](@ref) to fit
   one global model across many series ([`nseries`](@ref), [`SeriesState`](@ref)).
 - [`fit`](@ref) / [`forecast`](@ref) as a functional pair; [`backtest`](@ref)
-  for expanding-window cross-validation; [`tune`](@ref) for pipeline tuning
-  with an extensible ask!/tell! [`TuningStrategy`](@ref) interface.
+  for expanding-window cross-validation, [`summarize`](@ref) for its scores;
+  [`tune`](@ref) for pipeline tuning with an extensible ask!/tell!
+  [`TuningStrategy`](@ref) interface.
 - Metrics: [`mae`](@ref), [`rmse`](@ref), [`mape`](@ref), [`smape`](@ref),
   [`mase`](@ref), [`rmsse`](@ref), and their callable forms [`Mase`](@ref) and
   [`Rmsse`](@ref); your own metric implements `metric_inputs` and, to be named,
@@ -39,7 +40,7 @@ import Random
 import Statistics
 import Tables
 
-export Forecaster, FittedForecaster, fit, forecast, backtest, BacktestResult,
+export Forecaster, FittedForecaster, fit, forecast, backtest, BacktestResult, summarize,
        FeatureSet, Lag, RollingMean, RollingStd, RollingMin, RollingMax,
        Diff, Calendar, Fourier, Exogenous, CustomFeature,
        TargetFeature, TimeFeature, ExogenousFeature,

@@ -143,16 +143,16 @@ import MachineLearningForecast: fit_transform, untransform
         bumpy = (ds=trend.ds, y=trend.y .+ [isodd(t) ? 1.0 : -1.0 for t in 1:40])
         fc = naive(LastScale(5))
         r = backtest(fc, bumpy; horizon=3, initial=30, step=4)
-        for o in unique(r.folds.origin)
+        for o in unique(r.forecasts.origin)
             k = findfirst(==(o), bumpy.ds)
             manual = forecast(fit(fc, map(c -> c[1:k], bumpy)), 3).y_hat
-            @test r.folds.y_hat[r.folds.origin .== o] == manual
+            @test r.forecasts.y_hat[r.forecasts.origin .== o] == manual
         end
         # Data after an origin cannot change that fold's forecasts.
         later = (ds=bumpy.ds, y=[bumpy.y[1:33]; 1000 .* bumpy.y[34:40]])
         r2 = backtest(fc, later; horizon=3, initial=30, step=4)
-        first_fold = r.folds.origin .== bumpy.ds[30]
-        @test r2.folds.y_hat[first_fold] == r.folds.y_hat[first_fold]
+        first_fold = r.forecasts.origin .== bumpy.ds[30]
+        @test r2.forecasts.y_hat[first_fold] == r.forecasts.y_hat[first_fold]
     end
 
     @testset "tune searches over transforms" begin

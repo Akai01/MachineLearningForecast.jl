@@ -16,8 +16,7 @@
     origins = initial:step:(n - horizon)
     snaive_smape = mean(smape(y[(o+1):(o+horizon)], snaive(o, horizon, 7)) for o in origins)
 
-    overall_smape(res) = only(res.metrics.value[(res.metrics.fold .== 0) .&
-                                                (res.metrics.metric .== :smape)])
+    overall_smape(res) = (s = summarize(res); only(s.mean[s.metric .== :smape]))
 
     @testset "EvoTrees beats seasonal naive" begin
         model = EvoTreeRegressor(nrounds=200, eta=0.05, max_depth=4, seed=123)

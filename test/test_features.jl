@@ -743,8 +743,8 @@ end
                         fc = spec(m, feats; strategy, id)
                         @test all(isfinite, forecast(fit(fc, data), 3).y_hat)
                         bt = backtest(fc, data; horizon=3, windows=3)
-                        @test length(bt.folds.y_hat) == nfold
-                        @test all(isfinite, bt.folds.y_hat)
+                        @test length(bt.forecasts.y_hat) == nfold
+                        @test all(isfinite, bt.forecasts.y_hat)
                     end
                 end
             end

@@ -117,6 +117,7 @@ TransformChain
 ```@docs
 backtest
 BacktestResult
+summarize
 mae
 rmse
 mape

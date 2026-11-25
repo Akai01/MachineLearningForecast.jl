@@ -77,7 +77,7 @@ fcast.ds               # the future timestamps
 # Backtesting (expanding window)
 results = backtest(fc, df; horizon=28, initial=730, step=28,
                    metrics=(mae, rmse, smape))
-results.metrics        # per-fold and overall scores
+summarize(results)    # mean and std of each score over folds
 
 # Or hold out the last 3 folds, counted back from the end
 results = backtest(fc, df; horizon=28, windows=3)
@@ -322,13 +322,13 @@ starts the scale at the first non-zero value, while `rmsse` uses the whole train
 window).
 `Mase(m)` and `Rmsse(m)` are the same metrics as callable objects with the season length
 set, for `backtest` and `tune`: `metrics=(mae, Mase(12))`. `backtest` names each metric
-in its `metrics` table by `metric_name` (`:mae`, `:mase`, `:mase_12`), or by the key of a
+in its `scores` table by `metric_name` (`:mae`, `:mase`, `:mase_12`), or by the key of a
 NamedTuple, `metrics=(error=mae, scaled=Mase(12))`; the names must be distinct. A metric
 of your own that needs the training target defines
 `MachineLearningForecast.metric_inputs(::typeof(f)) = MachineLearningForecast.Scaled()`
 (and `metric_name` for a metric object); both are public, not exported.
 In `backtest`, unscaled metrics pool the fold's rows; scaled metrics are per series,
-weighted by scored points; the overall row is the unweighted mean over folds.
+weighted by scored points; `summarize` gives the unweighted mean over folds.
 Scaled metrics follow Hyndman & Koehler (2006): each series' errors are divided by that
 series' own training-window naive error, then averaged over series (here weighted by
 scored points, our choice). Unscaled metrics are pooled across series, so on a panel
@@ -374,7 +374,7 @@ Reindex your data or resample before fitting.
        horizon=28, initial=730)
   ```
 
-  The other 42 exports are collision-free. Note that MachineLearningForecast's `mae`/`rmse`
+  The other 43 exports are collision-free. Note that MachineLearningForecast's `mae`/`rmse`
   are plain functions of two vectors, whereas MLJ's are measure objects — they
   are not interchangeable, which is exactly why the choice must be explicit.
 - **Multiple dispatch over configuration flags**: strategies, features, and

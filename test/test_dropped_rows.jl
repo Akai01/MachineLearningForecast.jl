@@ -294,16 +294,16 @@ import MachineLearningForecast as M
                      "the transform's lag/window, or provide more data.",
                      backtest(fc, d; horizon=3, windows=7, step=3))
         r = backtest(fc, d; horizon=3, initial=14)
-        @test r.folds.origin[1] == d.ds[14]
+        @test r.forecasts.origin[1] == d.ds[14]
         manual = forecast(fit(fc, map(c -> c[1:14], d)), 3).y_hat
-        @test r.folds.y_hat[r.folds.fold .== 1] == manual
+        @test r.forecasts.y_hat[r.forecasts.fold .== 1] == manual
         @test backtest(fc, d; horizon=1, windows=3, step=1) isa BacktestResult
         # first == minhistory(fc) throws, one more row trains.
         @test_throws "would train its first fold on 13 of the 30 rows" backtest(
             fc, d; horizon=3, windows=15, step=1)
-        @test backtest(fc, d; horizon=3, windows=14, step=1).folds.origin[1] == d.ds[14]
+        @test backtest(fc, d; horizon=3, windows=14, step=1).forecasts.origin[1] == d.ds[14]
         r5 = backtest(fc, d; horizon=3, windows=5, step=3)
-        @test r5.folds.origin[1] == d.ds[15]
+        @test r5.forecasts.origin[1] == d.ds[15]
         # Without a transform the old text stays.
         @test_throws("must exceed the feature set's minimum history (1 rows) so the " *
                      "first training window", backtest(
@@ -329,9 +329,9 @@ import MachineLearningForecast as M
         @test_throws "would train its first fold on at most 13 rows" backtest(
             fc, panel("a" => 30, "b" => 30); horizon=3, windows=15, step=1)
         r = backtest(fc, panel("a" => 30, "b" => 30); horizon=3, windows=14, step=1)
-        @test r.folds.origin[1] == t0 + Day(13)
+        @test r.forecasts.origin[1] == t0 + Day(13)
         r = backtest(fc, panel("a" => 30, "b" => 30); horizon=3, initial=14, step=13)
-        @test r.folds.origin[1] == t0 + Day(13)
+        @test r.forecasts.origin[1] == t0 + Day(13)
         # The short series sits out; the long one fits as alone.
         for model in models()
             fcm = spec(model)
@@ -339,9 +339,9 @@ import MachineLearningForecast as M
             r = @test_logs (:warn, skipmsg(10)) match_mode = :any backtest(
                 fcm, both; horizon=3, initial=20, step=10)
             solo = backtest(fcm, panel("long" => 60); horizon=3, initial=20, step=10)
-            @test r.folds.y_hat == solo.folds.y_hat
-            @test all(==("long"), r.folds.unique_id)
-            @test r.metrics.value == solo.metrics.value
+            @test r.forecasts.y_hat == solo.forecasts.y_hat
+            @test all(==("long"), r.forecasts.unique_id)
+            @test r.scores.value == solo.scores.value
         end
     end
 end

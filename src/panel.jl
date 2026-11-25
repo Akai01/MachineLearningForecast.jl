@@ -255,13 +255,13 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, scheme, metri
     cuts = _panel_cuts(scheme, fc, groups, t_all, horizon)
     exogcols = exogenous_columns(fc.features)
 
-    actual = Dict{Tuple{Any,Any},Float64}()
+    T = eltype(t_all)
+    I = eltype(ids)
+    actual = Dict{Tuple{I,T},Float64}()
     for i in eachindex(y_all)
         actual[(ids[i], t_all[i])] = y_all[i]
     end
 
-    T = eltype(t_all)
-    I = eltype(ids)
     fold_col = Int[]
     origin_col = T[]
     step_col = Int[]
@@ -324,16 +324,8 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, scheme, metri
             push!(m_value, Float64(score(metric_inputs(m), m, fold)))
         end
     end
-    for (name, _) in metrics
-        vals = [m_value[i] for i in eachindex(m_value)
-                if m_metric[i] == name && m_fold[i] > 0]
-        push!(m_fold, 0)
-        push!(m_origin, missing)
-        push!(m_metric, name)
-        push!(m_value, Statistics.mean(vals))
-    end
-    folds = NamedTuple{(:fold, :origin, :step, fc.id, fc.time, :y, :y_hat)}(
+    forecasts = NamedTuple{(:fold, :origin, :step, fc.id, fc.time, :y, :y_hat)}(
         (fold_col, origin_col, step_col, id_col, time_col, y_col, yhat_col))
-    return BacktestResult(folds, (fold=m_fold, origin=m_origin,
-                                  metric=m_metric, value=m_value))
+    scores = (fold=m_fold, origin=m_origin, metric=m_metric, value=m_value)
+    return BacktestResult(forecasts, scores)
 end

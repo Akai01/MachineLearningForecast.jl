@@ -185,16 +185,16 @@
         combos = [(make, strat) for make in learners for strat in (Recursive(), Direct(3))]
         @testset "$(nameof(typeof(make()))), $strat" for (make, strat) in combos
             base = bt(make(), strat, y)
-            @test unique(base.folds.fold) == [1, 2, 3]
+            @test unique(base.forecasts.fold) == [1, 2, 3]
             for k in 1:3
                 y2 = copy(y)
                 after = (20 + 5 * (k - 1) + 1):n
                 y2[after] .= 1e6 .* (-1.0) .^ (1:length(after))
                 alt = bt(make(), strat, y2)
-                kept = base.folds.fold .<= k
-                @test base.folds.y_hat[kept] == alt.folds.y_hat[kept]
+                kept = base.forecasts.fold .<= k
+                @test base.forecasts.y_hat[kept] == alt.forecasts.y_hat[kept]
                 # The rewrite does reach the later folds that train on it.
-                k < 3 && @test base.folds.y_hat[.!kept] != alt.folds.y_hat[.!kept]
+                k < 3 && @test base.forecasts.y_hat[.!kept] != alt.forecasts.y_hat[.!kept]
             end
         end
     end
@@ -209,16 +209,16 @@
             merge(tbl, (y=yv,)); horizon=3, initial=18, step=5, metrics=(mae,))
         @testset "$strat" for strat in (Recursive(), Direct(3))
             base = bt(strat, tbl.y)
-            @test unique(base.folds.fold) == [1, 2, 3]
+            @test unique(base.forecasts.fold) == [1, 2, 3]
             for k in 1:3
                 origin = t[1] + Day(18 + 5 * (k - 1) - 1)
                 later = findall(>(origin), tbl.ds)
                 y2 = copy(tbl.y)
                 y2[later] .= 1e6 .* (-1.0) .^ (1:length(later))
                 alt = bt(strat, y2)
-                kept = base.folds.fold .<= k
-                @test base.folds.y_hat[kept] == alt.folds.y_hat[kept]
-                k < 3 && @test base.folds.y_hat[.!kept] != alt.folds.y_hat[.!kept]
+                kept = base.forecasts.fold .<= k
+                @test base.forecasts.y_hat[kept] == alt.forecasts.y_hat[kept]
+                k < 3 && @test base.forecasts.y_hat[.!kept] != alt.forecasts.y_hat[.!kept]
             end
         end
     end

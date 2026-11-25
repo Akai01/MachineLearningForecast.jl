@@ -8,6 +8,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `summarize(r)` (exported): one row per metric of a `BacktestResult`, with the
+  `:mean`, the sample `:std` over folds (`NaN` with one fold) and `:nfolds`. Its mean
+  is the number the `fold = 0` rows held.
 - `Mase(m=1)` and `Rmsse(m=1)` (exported): `mase` and `rmsse` as callable objects with
   the season length set, for `backtest` and `tune` (`metrics=(mae, Mase(12))`). They
   are named `:mase` / `:rmsse` for `m=1` and `:mase_12` / `:rmsse_7` otherwise.
@@ -121,6 +124,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Breaking: `BacktestResult` has the fields `forecasts` and `scores` (were `folds` and
+  `metrics`) and is parametric in their types. The `scores` table no longer has the
+  `fold = 0` summary rows: use `summarize(r)`, which adds `std` and `nfolds`. `tune`
+  reads its score through `summarize`. No score changes.
 - Breaking: the keys of a NamedTuple passed as `backtest` `metrics` now name the
   metrics (`metrics=(a=mae,)` gives rows named `:a`; before they were named `:mae`
   and the key was ignored). The duplicate-name `ArgumentError` now advises naming the

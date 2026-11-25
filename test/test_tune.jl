@@ -498,6 +498,32 @@ end
             base, df; grid=big, max_evals=20, horizon=14, initial=90)
     end
 
+    @testset "mean_score and std_score come from summarize" begin
+        grid = (model=[DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
+                       TestModels.LinAR(1.0, 0.0)],)
+        for kw in ((initial=70, step=14), (windows=3, step=7))
+            r = tune(base, df; grid, horizon=7, kw..., metric=mae)
+            for (k, m) in enumerate(grid.model)
+                bt = backtest(MachineLearningForecast.reconstruct(base; model=m), df;
+                              horizon=7, kw..., metrics=(mae,))
+                s = summarize(bt)
+                @test r.table.mean_score[k] == only(s.mean)
+                @test r.table.std_score[k] == only(s.std)
+                @test only(s.nfolds) > 1
+            end
+        end
+        # One fold: summarize gives NaN, the table keeps missing.
+        r1 = tune(base, df; grid, horizon=7, windows=1, metric=mae)
+        @test r1.table.std_score isa Vector{Union{Missing,Float64}}
+        @test all(ismissing, r1.table.std_score)
+        for (k, m) in enumerate(grid.model)
+            s = summarize(backtest(MachineLearningForecast.reconstruct(base; model=m),
+                                   df; horizon=7, windows=1, metrics=(mae,)))
+            @test only(s.nfolds) == 1 && isnan(only(s.std))
+            @test r1.table.mean_score[k] == only(s.mean)
+        end
+    end
+
     @testset "edge cases: horizon 1 and bad data" begin
         grid = (model=[DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)),
                        EvoTreeRegressor(nrounds=5)],)
@@ -506,7 +532,7 @@ end
         for (k, m) in enumerate(grid.model)
             bt = backtest(Forecaster(m; features=base.features, freq=Day(1)), df;
                           horizon=1, initial=110, metrics=(mae,))
-            @test r.table.mean_score[k] == only(bt.metrics.value[bt.metrics.fold .== 0])
+            @test r.table.mean_score[k] == only(summarize(bt).mean)
         end
         @test length(forecast(r.best_fitted, 1).y_hat) == 1
         @test_throws TypeError tune(base, df; grid=grid, horizon=1.5, initial=110)
@@ -554,8 +580,7 @@ end
                 for (k, m) in enumerate(models)
                     bt = backtest(MachineLearningForecast.reconstruct(spec; model=m),
                                   data; horizon=14, initial=70, step=7, metrics=(metric,))
-                    @test r.table.mean_score[k] ==
-                          only(bt.metrics.value[bt.metrics.fold .== 0])
+                    @test r.table.mean_score[k] == only(summarize(bt).mean)
                 end
                 @test r.best.model == models[argmin(r.table.mean_score)]
             end

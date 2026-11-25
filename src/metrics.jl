@@ -96,7 +96,8 @@ MASE, can favour forecasts close to zero; the M5 competition used a squared-erro
 scaled measure (RMSSE) for this reason (Makridakis, Spiliotis & Assimakopoulos 2022);
 use [`rmsse`](@ref) for such series. If the naive error is zero (constant training
 series), a warning is emitted and `Inf` is returned. One series with a constant
-training window makes that fold's score, and so the overall score, `Inf`.
+training window makes that fold's score, and so its mean over folds in
+[`summarize`](@ref), `Inf`.
 
 # Example
 ```julia
@@ -147,8 +148,8 @@ emitted and `Inf` is returned.
 
 In [`backtest`](@ref) it is computed per series, aggregated across series weighted by
 scored points, then averaged over folds. This is not the dollar-weighted WRMSSE of M5.
-One series with a constant training window makes that fold's score, and so the overall
-score, `Inf`.
+One series with a constant training window makes that fold's score, and so its mean
+over folds in [`summarize`](@ref), `Inf`.
 
 # Example
 ```julia
@@ -195,7 +196,7 @@ end
 Callable form of [`mase`](@ref) with season length `m`, for [`backtest`](@ref) and
 [`tune`](@ref): `Mase(m)(y, ŷ; y_train)` equals `mase(y, ŷ; y_train, m)`. It is scored
 per series with that series' own training window, and named `:mase` for `m=1` and
-`:mase_12` for `m=12` in the `metrics` table.
+`:mase_12` for `m=12` in the `scores` table.
 
 # Example
 ```julia
@@ -217,7 +218,7 @@ end
 Callable form of [`rmsse`](@ref) with season length `m`, for [`backtest`](@ref) and
 [`tune`](@ref): `Rmsse(m)(y, ŷ; y_train)` equals `rmsse(y, ŷ; y_train, m)`. It is scored
 per series with that series' own training window, and named `:rmsse` for `m=1` and
-`:rmsse_7` for `m=7` in the `metrics` table.
+`:rmsse_7` for `m=7` in the `scores` table.
 
 # Example
 ```julia
@@ -304,7 +305,7 @@ metric_inputs(::Rmsse) = Scaled()
 """
     metric_name(metric) -> Symbol
 
-The name of `metric` in the `metrics` table of a [`BacktestResult`](@ref): `Symbol(metric)`
+The name of `metric` in the `scores` table of a [`BacktestResult`](@ref): `Symbol(metric)`
 by default (`:mae` for [`mae`](@ref)), `:mase` or `:mase_12` for [`Mase`](@ref). Two
 metrics of one `backtest` need different names. Define it for a metric object of your
 own, or name a metric in place with a NamedTuple key: `metrics=(error=mae,)`. Public, not
@@ -348,8 +349,8 @@ function _check_distinct(names)
     n = count(==(name), names)
     throw(ArgumentError(
         "backtest metrics must have distinct names, but $n metrics are named " *
-        "$(repr(name)), so their per-fold rows would be merged into one wrong " *
-        "overall score. Remove the repeated metric, or name each one with a " *
+        "$(repr(name)), so summarize would merge their per-fold rows into one " *
+        "wrong mean. Remove the repeated metric, or name each one with a " *
         "NamedTuple key (closures from one factory share a name), e.g. " *
         "metrics=(a=mae, b=Mase(12))."))
 end

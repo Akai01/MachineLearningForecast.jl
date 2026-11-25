@@ -102,7 +102,7 @@
         truth = [10 + 5 * sin(2π * i / 7) for i in n .+ (1:7)]
         @test maximum(abs.(out.y_hat .- truth)) < 1
         r = backtest(fc, week; horizon=7, windows=2)
-        @test all(isfinite, r.folds.y_hat)
+        @test all(isfinite, r.forecasts.y_hat)
     end
 
     @testset "the precompile workload runs without logging" begin

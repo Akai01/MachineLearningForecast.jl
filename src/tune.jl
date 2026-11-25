@@ -392,14 +392,13 @@ function _evaluate_candidate(fc, cand, tbl, horizon, scheme, metric)
         cfc = reconstruct(fc; cand...)
         res = backtest(cfc, tbl; horizon, _scheme_kwargs(scheme)...,
                        metrics=(score=metric,))
-        vals = [res.metrics.value[i] for i in eachindex(res.metrics.fold)
-                if res.metrics.fold[i] > 0]
-        m = Float64(Statistics.mean(vals))
+        s = summarize(res)
+        m = only(s.mean)
         isfinite(m) || return missing, missing,
             "the metric returned a non-finite mean score ($m) over the backtest " *
             "folds, so this candidate cannot be ranked. The model likely predicts " *
             "NaN or Inf; check its hyperparameters and the training data."
-        sd = length(vals) > 1 ? Statistics.std(vals) : missing
+        sd = only(s.nfolds) > 1 ? only(s.std) : missing
         return m, sd, missing
     catch e
         e isa InterruptException && rethrow()

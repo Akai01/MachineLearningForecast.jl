@@ -328,7 +328,7 @@
                 @test forecast(f, 2; future=merge(nd, (ds=Vector{T}(nd.ds),))) == want
                 r = backtest(fc, merge(ex, (ds=Vector{T}(ex.ds),)); horizon=5,
                              initial=40, step=10)
-                @test isequal(r.folds, bt.folds) && isequal(r.metrics, bt.metrics)
+                @test isequal(r.forecasts, bt.forecasts) && isequal(r.scores, bt.scores)
             end
             holed = merge(nd, (ds=Vector{Union{Missing,Date}}(nd.ds),))
             holed.ds[4] = missing
@@ -463,27 +463,27 @@
         @test_throws "2 metrics are named :mae" backtest(
             fcd, panel; horizon=5, windows=2, step=5, metrics=(mae, mae))
         r = backtest(fcd, panel; horizon=5, initial=20, metrics=(mae, rmse))
-        @test Set(r.metrics.metric) == Set([:mae, :rmse])
+        @test Set(r.scores.metric) == Set([:mae, :rmse])
     end
 
     @testset "backtest cuts folds on the global timestamp grid" begin
         big = makepanel(lens=(60, 50, 55))
         fc = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
         r = backtest(fc, big; horizon=5, initial=40, step=10, metrics=(mae, rmse))
-        @test keys(r.folds) == (:fold, :origin, :step, :unique_id, :ds, :y, :y_hat)
-        @test issorted(r.folds.fold) && unique(r.folds.fold) == 1:2
-        @test length(unique(r.folds.origin)) == length(40:10:(60 - 5))
-        @test extrema(r.folds.step) == (1, 5)
-        @test Set(unique(r.folds.unique_id)) ⊆ Set(["s1", "s2", "s3"])
+        @test keys(r.forecasts) == (:fold, :origin, :step, :unique_id, :ds, :y, :y_hat)
+        @test issorted(r.forecasts.fold) && unique(r.forecasts.fold) == 1:2
+        @test length(unique(r.forecasts.origin)) == length(40:10:(60 - 5))
+        @test extrema(r.forecasts.step) == (1, 5)
+        @test Set(unique(r.forecasts.unique_id)) ⊆ Set(["s1", "s2", "s3"])
         actual = Dict((big.unique_id[i], big.ds[i]) => big.y[i] for i in eachindex(big.y))
-        @test all(actual[(r.folds.unique_id[j], r.folds.ds[j])] == r.folds.y[j]
-                  for j in eachindex(r.folds.y))
+        @test all(actual[(r.forecasts.unique_id[j], r.forecasts.ds[j])] == r.forecasts.y[j]
+                  for j in eachindex(r.forecasts.y))
         # LinAR(1, 0) is naive: each step repeats the origin's actual.
         @test all(yh == actual[(id, o)] for (yh, id, o) in
-                  zip(r.folds.y_hat, r.folds.unique_id, r.folds.origin))
+                  zip(r.forecasts.y_hat, r.forecasts.unique_id, r.forecasts.origin))
         # y climbs 1 a day, so step s misses by s in every fold.
-        @test r.metrics.fold == [1, 1, 2, 2, 0, 0]
-        @test r.metrics.value ≈ repeat([3.0, sqrt(11.0)], 3)
+        @test r.scores.fold == [1, 1, 2, 2]
+        @test r.scores.value ≈ repeat([3.0, sqrt(11.0)], 2)
         @test occursin("horizon 5", sprint(show, MIME"text/plain"(), r))
         @test occursin("folds", sprint(show, r))
         @test_throws ArgumentError backtest(mk(TestModels.LinAR(1.0, 0.0),
@@ -517,16 +517,15 @@
         fc = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
         scores(pd) = backtest(fc, pd; horizon=5, initial=40, step=5, metrics=(mae, mase))
         r = scores(trends(50))
-        folds = r.metrics.fold .> 0
         # Naive misses step s by s*slope: MAE 3 and 30, MASE 3 each.
-        @test r.metrics.value[folds .& (r.metrics.metric .== :mase)] ≈ [3.0, 3.0]
-        @test r.metrics.value[folds .& (r.metrics.metric .== :mae)] ≈ [16.5, 16.5]
+        @test r.scores.value[r.scores.metric .== :mase] ≈ [3.0, 3.0]
+        @test r.scores.value[r.scores.metric .== :mae] ≈ [16.5, 16.5]
         pd = trends(50)
         shuffled = map(c -> c[shuffle(StableRNG(2), 1:length(pd.y))], pd)
-        @test scores(shuffled).metrics.value ≈ r.metrics.value
+        @test scores(shuffled).scores.value ≈ r.scores.value
         # b ends 2 days into the last fold: weigh series by their points.
         rr = scores(trends(47))
-        @test rr.metrics.value[(rr.metrics.fold .> 0) .& (rr.metrics.metric .== :mase)] ≈
+        @test rr.scores.value[rr.scores.metric .== :mase] ≈
               [3.0, (5 * 3.0 + 2 * 1.5) / 7]
     end
 
@@ -544,14 +543,16 @@
         end
         function manual(pd, r)
             vals = Float64[]
-            for k in sort(unique(r.folds.fold))
+            for k in sort(unique(r.forecasts.fold))
                 tot = 0.0; cnt = 0
                 for id in unique(pd.unique_id)
-                    sel = (r.folds.fold .== k) .& (r.folds.unique_id .== id)
+                    sel = (r.forecasts.fold .== k) .& (r.forecasts.unique_id .== id)
                     any(sel) || continue
-                    tr = pd.y[(pd.unique_id .== id) .& (pd.ds .<= r.folds.origin[sel][1])]
+                    o = r.forecasts.origin[sel][1]
+                    tr = pd.y[(pd.unique_id .== id) .& (pd.ds .<= o)]
                     sc = mean(abs2(tr[i] - tr[i - 1]) for i in 2:length(tr))
-                    tot += sum(sel) * rmse(r.folds.y[sel], r.folds.y_hat[sel]) / sqrt(sc)
+                    e = rmse(r.forecasts.y[sel], r.forecasts.y_hat[sel])
+                    tot += sum(sel) * e / sqrt(sc)
                     cnt += sum(sel)
                 end
                 push!(vals, tot / cnt)
@@ -564,15 +565,15 @@
                   DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
             pd = wiggly(1.0)
             r = score(m, pd)
-            vals = r.metrics.value[r.metrics.fold .> 0]
+            vals = r.scores.value
             @test length(vals) == 3
             @test vals ≈ manual(pd, r)
-            @test r.metrics.value[r.metrics.fold .== 0] ≈ [mean(vals)]
+            @test summarize(r).mean ≈ [mean(vals)]
         end
         # Naive is equivariant, so a rescaled series is a no-op.
         naive = TestModels.LinAR(1.0, 0.0)
-        @test score(naive, wiggly(1000.0)).metrics.value ≈
-              score(naive, wiggly(1.0)).metrics.value
+        @test score(naive, wiggly(1000.0)).scores.value ≈
+              score(naive, wiggly(1.0)).scores.value
     end
 
     @testset "windows counts each series' folds back from its own end" begin
@@ -580,35 +581,84 @@
                        starts=[Date(2022, 1, 1), Date(2022, 1, 10), Date(2022, 1, 3)])
         fc = mk(TestModels.MeanModel(), FeatureSet(Lag(1)))
         r = backtest(fc, pd; horizon=5, windows=1, metrics=(mae, mase))
-        @test unique(r.folds.fold) == [1]
+        @test unique(r.forecasts.fold) == [1]
         for (id, n) in (("s1", 40), ("s2", 30), ("s3", 35))
             ds = pd.ds[pd.unique_id .== id]
-            sel = r.folds.unique_id .== id
-            @test r.folds.ds[sel] == ds[(n - 4):n]
-            @test all(==(ds[n - 5]), r.folds.origin[sel])
+            sel = r.forecasts.unique_id .== id
+            @test r.forecasts.ds[sel] == ds[(n - 4):n]
+            @test all(==(ds[n - 5]), r.forecasts.origin[sel])
         end
         # The series' cutoffs differ, so the fold has no single origin.
-        @test ismissing(r.metrics.origin[1])
+        @test ismissing(r.scores.origin[1])
         @test occursin("1 fold, horizon 5", sprint(show, MIME"text/plain"(), r))
         # windows=1 is the M competitions' holdout of each series' end.
         keep = reduce(vcat, [findall(==(id), pd.unique_id)[1:(end - 5)]
                              for id in ("s1", "s2", "s3")])
         manual = forecast(fit(fc, map(c -> c[keep], pd)), 5)
         byrow = Dict(zip(zip(manual.unique_id, manual.ds), manual.y_hat))
-        @test r.folds.y_hat == [byrow[k] for k in zip(r.folds.unique_id, r.folds.ds)]
+        rows = zip(r.forecasts.unique_id, r.forecasts.ds)
+        @test r.forecasts.y_hat == [byrow[k] for k in rows]
         r2 = backtest(fc, pd; horizon=5, windows=2, step=3)
-        s2 = r2.folds.unique_id .== "s2"
-        @test unique(r2.folds.origin[s2]) == pd.ds[pd.unique_id .== "s2"][[22, 25]]
+        s2 = r2.forecasts.unique_id .== "s2"
+        @test unique(r2.forecasts.origin[s2]) == pd.ds[pd.unique_id .== "s2"][[22, 25]]
         pdx = merge(pd, (promo=ones(length(pd.y)),))
         fcx = mk(TestModels.MeanModel(), FeatureSet(Lag(1), Exogenous(:promo)))
-        @test backtest(fcx, pdx; horizon=5, windows=2, step=3).folds.y_hat ==
-              r2.folds.y_hat
+        @test backtest(fcx, pdx; horizon=5, windows=2, step=3).forecasts.y_hat ==
+              r2.forecasts.y_hat
         @test_throws("would train its first fold on at most -10 rows of the longest " *
                      "series (40 rows)", backtest(fc, pd; horizon=5, windows=10, step=5))
         res = tune(fc, pd; grid=(features=[FeatureSet(Lag(1)), FeatureSet(Lag(2))],),
                    horizon=5, windows=1, metric=mae)
         @test res.table.mean_score[1] ≈
-              backtest(fc, pd; horizon=5, windows=1, metrics=(mae,)).metrics.value[end]
+              only(summarize(backtest(fc, pd; horizon=5, windows=1, metrics=(mae,))).mean)
+    end
+
+    @testset "BacktestResult and summarize on a ragged panel" begin
+        pd = makepanel(lens=(40, 30, 35),
+                       starts=[Date(2022, 1, 1), Date(2022, 1, 10), Date(2022, 1, 3)])
+        fc = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
+        for kw in ((windows=3, step=3), (initial=15, step=5))
+            r = backtest(fc, pd; horizon=5, kw..., metrics=(mae, rmse, Mase(2)))
+            @test keys(r.forecasts) == (:fold, :origin, :step, :unique_id, :ds, :y, :y_hat)
+            @test keys(r.scores) == (:fold, :origin, :metric, :value)
+            @test !hasproperty(r, :folds) && !hasproperty(r, :metrics)
+            nf = length(unique(r.forecasts.fold))
+            @test 0 ∉ r.scores.fold && length(r.scores.fold) == 3nf
+            s = summarize(r)
+            @test s.metric == [:mae, :rmse, :mase_2] && s.nfolds == fill(nf, 3)
+            for (i, name) in enumerate(s.metric)
+                v = r.scores.value[r.scores.metric .== name]
+                @test s.mean[i] ≈ sum(v) / nf
+                @test s.std[i] ≈ sqrt(sum(abs2, v .- sum(v) / nf) / (nf - 1))
+            end
+            @test Tables.istable(r.forecasts) && Tables.istable(summarize(r))
+        end
+        # Different cutoffs leave a fold's origin missing.
+        rw = backtest(fc, pd; horizon=5, windows=2, step=3)
+        @test eltype(rw.scores.origin) == Union{Missing,Date}
+        @test all(ismissing, rw.scores.origin)
+        ri = backtest(fc, pd; horizon=5, initial=15, step=5)
+        @test eltype(ri.scores.origin) == Union{Missing,Date}
+        @test !any(ismissing, ri.scores.origin)
+        @test ri.scores.origin[1] == minimum(pd.ds) + Day(14)
+    end
+
+    @testset "a panel backtest scores ids of any element type" begin
+        for ids in (Int, Any, Symbol)
+            raw = makepanel()
+            conv(x) = ids === Int ? parse.(Int, replace.(x, "s" => "")) :
+                      ids === Symbol ? Symbol.(x) : Any[x...]
+            pd = merge(raw, (unique_id=conv(raw.unique_id),))
+            r = backtest(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), pd;
+                         horizon=5, initial=20, step=5, metrics=(mae,))
+            ref = backtest(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), raw;
+                           horizon=5, initial=20, step=5, metrics=(mae,))
+            @test r.forecasts.y == ref.forecasts.y
+            @test r.forecasts.y_hat == ref.forecasts.y_hat
+            @test r.scores.value == ref.scores.value
+            @test eltype(r.forecasts.unique_id) == eltype(pd.unique_id)
+            @test summarize(r).mean == summarize(ref).mean
+        end
     end
 
     @testset "the step column is each row's position in its series' forecast" begin
@@ -622,9 +672,10 @@
         r = backtest(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1))), big;
                      horizon=5, initial=40, step=10)
         @test all(Dates.value(d - o) == s
-                  for (d, o, s) in zip(r.folds.ds, r.folds.origin, r.folds.step))
-        @test r.folds.step[(r.folds.origin .== Date(2022, 2, 19)) .&
-                           (r.folds.unique_id .== "s2")] == [1, 2]
+                  for (d, o, s) in zip(r.forecasts.ds, r.forecasts.origin,
+                                       r.forecasts.step))
+        @test r.forecasts.step[(r.forecasts.origin .== Date(2022, 2, 19)) .&
+                           (r.forecasts.unique_id .== "s2")] == [1, 2]
     end
 
     @testset "Fourier is locked to the calendar across ragged series" begin
@@ -774,13 +825,13 @@
             # s3 starts after the first origin and joins at the second.
             r = backtest(mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)); strat=s), rag;
                          horizon=5, initial=15, step=10)
-            @test unique(r.folds.origin) == Date(2022, 1, 15) .+ Day.(0:10:40)
-            first_fold = r.folds.origin .== Date(2022, 1, 15)
-            @test unique(r.folds.unique_id[first_fold]) == ["s1", "s2"]
-            @test count(==("s3"), r.folds.unique_id) == 4 * 5
+            @test unique(r.forecasts.origin) == Date(2022, 1, 15) .+ Day.(0:10:40)
+            first_fold = r.forecasts.origin .== Date(2022, 1, 15)
+            @test unique(r.forecasts.unique_id[first_fold]) == ["s1", "s2"]
+            @test count(==("s3"), r.forecasts.unique_id) == 4 * 5
             @test all(yh == actual[(id, o)] for (yh, id, o) in
-                      zip(r.folds.y_hat, r.folds.unique_id, r.folds.origin))
-            @test all(==(3.0), r.metrics.value[r.metrics.metric .== :mae])
+                      zip(r.forecasts.y_hat, r.forecasts.unique_id, r.forecasts.origin))
+            @test all(==(3.0), r.scores.value[r.scores.metric .== :mae])
         end
     end
 
@@ -829,10 +880,10 @@
                               data; horizon=h, initial=init, step=stp)
             plain = bt(FeatureSet(Lag(1)))
             exog = bt(FeatureSet(Lag(1), Exogenous(:promo)))
-            @test exog.folds.origin == plain.folds.origin
-            @test exog.folds.step == plain.folds.step
-            @test exog.folds.unique_id == plain.folds.unique_id
-            @test exog.folds.ds == plain.folds.ds
+            @test exog.forecasts.origin == plain.forecasts.origin
+            @test exog.forecasts.step == plain.forecasts.step
+            @test exog.forecasts.unique_id == plain.forecasts.unique_id
+            @test exog.forecasts.ds == plain.forecasts.ds
         end
         # EchoColumn shows each step reads its own (id, time) row.
         for (data, freq, h, init, stp) in cases
@@ -841,8 +892,8 @@
             r = backtest(fc, data; horizon=h, initial=init, step=stp)
             promo = Dict((data.unique_id[i], data.ds[i]) => data.promo[i]
                          for i in eachindex(data.promo))
-            @test r.folds.y_hat == [promo[(r.folds.unique_id[j], r.folds.ds[j])]
-                                    for j in eachindex(r.folds.ds)]
+            @test r.forecasts.y_hat == [promo[(r.forecasts.unique_id[j], r.forecasts.ds[j])]
+                                    for j in eachindex(r.forecasts.ds)]
         end
     end
 
@@ -889,9 +940,11 @@
             r = backtest(fc, noisy; horizon=4, initial=40, step=10)
             ref = backtest(mk(TestModels.LinAR(1.0, 0.0), fs; strat=s), noisy;
                            horizon=4, initial=40, step=10)
-            @test r.folds.origin == ref.folds.origin && r.folds.ds == ref.folds.ds
-            @test r.folds.unique_id == ref.folds.unique_id && r.folds.y == ref.folds.y
-            @test all(isfinite, r.folds.y_hat) && all(isfinite, r.metrics.value)
+            @test r.forecasts.origin == ref.forecasts.origin
+            @test r.forecasts.ds == ref.forecasts.ds
+            @test r.forecasts.unique_id == ref.forecasts.unique_id
+            @test r.forecasts.y == ref.forecasts.y
+            @test all(isfinite, r.forecasts.y_hat) && all(isfinite, r.scores.value)
         end
     end
 
@@ -1184,7 +1237,7 @@
                            "left out of the step models beyond their row count: " *
                            "unique_id=\"s2\" (19 training rows)")
             r = @test_logs wrn wrn2 backtest(fc, p; horizon=5, initial=40, step=10)
-            @test unique(r.folds.fold) == [1, 2]
+            @test unique(r.forecasts.fold) == [1, 2]
         end
     end
 
@@ -1659,13 +1712,14 @@
         # Per-series scores of each fold, weighted by scored points.
         function manual(f, pd, r)
             vals = Float64[]
-            for k in sort(unique(r.folds.fold))
+            for k in sort(unique(r.forecasts.fold))
                 tot = 0.0; cnt = 0
                 for id in unique(pd.unique_id)
-                    sel = (r.folds.fold .== k) .& (r.folds.unique_id .== id)
+                    sel = (r.forecasts.fold .== k) .& (r.forecasts.unique_id .== id)
                     any(sel) || continue
-                    tr = pd.y[(pd.unique_id .== id) .& (pd.ds .<= r.folds.origin[sel][1])]
-                    tot += sum(sel) * f(r.folds.y[sel], r.folds.y_hat[sel], tr)
+                    o = r.forecasts.origin[sel][1]
+                    tr = pd.y[(pd.unique_id .== id) .& (pd.ds .<= o)]
+                    tot += sum(sel) * f(r.forecasts.y[sel], r.forecasts.y_hat[sel], tr)
                     cnt += sum(sel)
                 end
                 push!(vals, tot / cnt)
@@ -1674,13 +1728,13 @@
         end
         models = (TestModels.LinAR(1.0, 0.0), EvoTreeRegressor(nrounds=5),
                   DecisionTreeRegressor(max_depth=2, rng=StableRNG(1)))
-        val(r, name) = r.metrics.value[(r.metrics.fold .> 0) .& (r.metrics.metric .== name)]
+        val(r, name) = r.scores.value[r.scores.metric .== name]
 
         @testset "Mase(m) and Rmsse(m) are per series and point-weighted" begin
             fc = mk(TestModels.LinAR(1.0, 0.0), FeatureSet(Lag(1)))
             r = backtest(fc, trends(47); horizon=5, initial=40, step=5,
                          metrics=(Mase(2), Rmsse(2), Mase()))
-            @test unique(r.metrics.metric) == [:mase_2, :rmsse_2, :mase]
+            @test unique(r.scores.metric) == [:mase_2, :rmsse_2, :mase]
             # Lag-2 scale is 2 slopes, the naive miss averages 3 slopes.
             @test val(r, :mase_2) ≈ [1.5, (5 * 1.5 + 2 * 0.75) / 7]
             @test val(r, :mase) ≈ [3.0, (5 * 3.0 + 2 * 1.5) / 7]
@@ -1688,7 +1742,7 @@
                 pd = wiggly(55, 52)
                 rr = backtest(mk(m, FeatureSet(Lag(1))), pd; horizon=5, initial=40,
                               step=5, metrics=(Mase(12), Rmsse(7), mae))
-                @test unique(rr.metrics.metric) == [:mase_12, :rmsse_7, :mae]
+                @test unique(rr.scores.metric) == [:mase_12, :rmsse_7, :mae]
                 @test val(rr, :mase_12) ≈
                       manual((y, ŷ, tr) -> mase(y, ŷ; y_train=tr, m=12), pd, rr)
                 @test val(rr, :rmsse_7) ≈
@@ -1697,7 +1751,7 @@
                               step=5, metrics=(mase, rmsse))
                 rn = backtest(mk(m, FeatureSet(Lag(1))), pd; horizon=5, initial=40,
                               step=5, metrics=(Mase(), Rmsse()))
-                @test isequal(ro.metrics, rn.metrics)
+                @test isequal(ro.scores, rn.scores)
             end
         end
 
@@ -1711,11 +1765,12 @@
                 pd = wiggly(40 + 3h, 40 + 2h)
                 r = backtest(mk(m, FeatureSet(Lag(1))), pd; horizon=h, initial=40,
                              step=h, metrics=(metric,))
-                last_fold = r.folds.fold .== 3
-                @test unique(r.folds.unique_id[last_fold]) == ["a"]
-                o = r.folds.origin[last_fold][1]
+                last_fold = r.forecasts.fold .== 3
+                @test unique(r.forecasts.unique_id[last_fold]) == ["a"]
+                o = r.forecasts.origin[last_fold][1]
                 tr = pd.y[(pd.unique_id .== "a") .& (pd.ds .<= o)]
-                v = metric(r.folds.y[last_fold], r.folds.y_hat[last_fold]; y_train=tr)
+                v = metric(r.forecasts.y[last_fold], r.forecasts.y_hat[last_fold];
+                           y_train=tr)
                 push!(shows, (h * v) / h != v)
                 @test val(r, metric isa Mase ? :mase_7 : :rmsse_7)[3] == (h * v) / h
             end
@@ -1738,7 +1793,7 @@
             ns = TestModels.NaiveScaled(2)
             f = (a, b) -> mae(a, b)
             r = backtest(fc, pd; horizon=5, initial=40, step=5, metrics=(f, ns, Mase(2)))
-            @test unique(r.metrics.metric) == [Symbol(f), :naive_scaled_2, :mase_2]
+            @test unique(r.scores.metric) == [Symbol(f), :naive_scaled_2, :mase_2]
             ya = pd.y[pd.unique_id .== "a"]; yb = pd.y[pd.unique_id .== "b"]
             @test ns.seen == [ya[1:40], yb[1:40], ya[1:45], yb[1:45]]
             @test val(r, :naive_scaled_2) ≈ [3.0, 3.0]
@@ -1755,7 +1810,7 @@
             for m in models
                 r2 = backtest(mk(m, FeatureSet(Lag(1))), wiggly(55, 52); horizon=1,
                               initial=48, step=1, metrics=(Mase(12),))
-                @test all(isfinite, r2.metrics.value)
+                @test all(isfinite, r2.scores.value)
             end
         end
 

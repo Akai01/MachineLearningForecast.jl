@@ -218,7 +218,7 @@ function evaluate(model, data = panel)
     t0 = time()
     r = backtest(spec(model), data; horizon = h, windows = 1, metrics = (smape, mase12))
     seconds = time() - t0
-    s, m = r.metrics.value[r.metrics.fold .== 1]
+    s, m = summarize(r).mean
     return 100 * s, m, seconds
 end
 

@@ -57,7 +57,7 @@ fitting, because a fill that uses later values, such as interpolation, leaks.
 but not `missing` or `±Inf`.
 
 **Aggregation of metrics.** Unscaled metrics pool the fold's rows; scaled
-metrics are per series, weighted by scored points; the overall row is the
+metrics are per series, weighted by scored points; [`summarize`](@ref) gives the
 unweighted mean over folds. Scaled metrics are those whose
 [`metric_inputs`](@ref MachineLearningForecast.metric_inputs) is `Scaled()`, such as
 [`mase`](@ref) and [`rmsse`](@ref), or their callable forms [`Mase`](@ref) and
@@ -65,9 +65,9 @@ unweighted mean over folds. Scaled metrics are those whose
 (2006): each series' errors are divided by that series' own training-window
 naive error, then averaged over series (here weighted by scored points, our
 choice). One series with a constant training window has a zero scale, which
-makes that fold's score, and so the overall score, `Inf`. Unscaled metrics are
-pooled across series, so on a panel they are dominated by the large-scale
-series; use a scaled metric to compare series of different scale.
+makes that fold's score, and so its mean over folds in [`summarize`](@ref), `Inf`.
+Unscaled metrics are pooled across series, so on a panel they are dominated by the
+large-scale series; use a scaled metric to compare series of different scale.
 On intermittent series (many zeros), MAE-based measures, including MASE, can
 favour forecasts close to zero; the M5 competition used a squared-error scaled
 measure (RMSSE) for this reason (Makridakis, Spiliotis & Assimakopoulos 2022);
@@ -280,14 +280,14 @@ over such a series fails.
 
 ### Scores per horizon step and per series
 
-`BacktestResult.folds` has one row per fold, step and series with `:step`,
+`BacktestResult.forecasts` has one row per fold, step and series with `:step`,
 `:y` and `:y_hat` (and the id column for a panel), so any score is a few lines.
 This one scores `panel_fc`, `train` and `H` from the parent aggregate recipe:
 
 ```julia
 using Statistics
 r = backtest(panel_fc, train; horizon = H, windows = 3)
-f = r.folds
+f = r.forecasts
 err = abs.(f.y .- f.y_hat)
 by_step = [mean(err[f.step .== s]) for s in sort(unique(f.step))]
 by_series = Dict(id => mean(err[f.unique_id .== id]) for id in unique(f.unique_id))
@@ -313,7 +313,7 @@ MMI.input_scitype(::Type{NaiveLast}) = MMI.Table(MMI.Continuous)
 MMI.target_scitype(::Type{NaiveLast}) = AbstractVector{MMI.Continuous}
 
 naive = Forecaster(NaiveLast(); features = FeatureSet(Lag(1)), freq = Day(1))
-backtest(naive, df; horizon = 7, windows = 3, metrics = (mae, smape)).metrics
+summarize(backtest(naive, df; horizon = 7, windows = 3, metrics = (mae, smape)))
 ```
 
 ### A seasonal naive forecaster as a baseline
@@ -341,7 +341,7 @@ MMI.target_scitype(::Type{SeasonalNaive}) = AbstractVector{MMI.Continuous}
 
 m = 7
 snaive = Forecaster(SeasonalNaive(m); features = FeatureSet(Lag(m)), freq = Day(1))
-backtest(snaive, df; horizon = 14, windows = 3, metrics = (mae, smape)).metrics
+summarize(backtest(snaive, df; horizon = 14, windows = 3, metrics = (mae, smape)))
 ```
 
 ## References

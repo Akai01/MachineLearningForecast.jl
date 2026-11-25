@@ -4,26 +4,61 @@
 Result of [`backtest`](@ref). Both fields are columntables (NamedTuples of
 vectors, Tables.jl-compatible):
 
-- `folds`: one row per fold × horizon step, with columns `:fold`, `:origin`
+- `forecasts`: one row per fold × horizon step, with columns `:fold`, `:origin`
   (the last training timestamp the row's forecast starts from), `:step`
   (1..horizon), the spec's time column, `:y` (actual), and `:y_hat` (forecast).
   A panel backtest adds the id column after `:step`.
-- `metrics`: one row per fold × metric (columns `:fold`, `:origin`, `:metric`,
-  `:value`), plus one overall summary row per metric with `fold=0` (`:value`
-  is the mean of the per-fold values, `:origin` is `missing`). A fold's
-  `:origin` is `missing` when its series start their forecasts at different
-  timestamps.
+- `scores`: one row per fold × metric (columns `:fold`, `:origin`, `:metric`,
+  `:value`). A fold's `:origin` is `missing` when its series start their
+  forecasts at different timestamps. [`summarize`](@ref) reduces it to the mean
+  and standard deviation of each metric over the folds.
 
 # Example
 ```julia
 results = backtest(fc, df; horizon=28, initial=730)
-results.folds.y_hat   # every forecast, fold by fold
-results.metrics       # per-fold and overall scores
+results.forecasts.y_hat   # every forecast, fold by fold
+results.scores            # the score of each fold and metric
+summarize(results)        # mean and std of each metric over folds
 ```
 """
-struct BacktestResult
-    folds::NamedTuple
-    metrics::NamedTuple
+struct BacktestResult{F<:NamedTuple,S<:NamedTuple}
+    forecasts::F
+    scores::S
+end
+
+"""
+    summarize(r::BacktestResult) -> NamedTuple
+
+Summarize the per-fold scores of a [`backtest`](@ref): one row per metric, in the
+order the metrics were given, with columns `:metric` (`Symbol`), `:mean` (the
+unweighted mean of the metric over folds), `:std` (the sample standard deviation
+over folds, with divisor `n - 1`) and `:nfolds` (`Int`). `:mean` and `:std` are
+`Float64`. With a single fold `:std` is `NaN`. A `NaN` or `Inf` score in any fold
+makes `:mean` (and `:std`) non-finite. With `metrics=()` every column is empty.
+
+`std` is the spread of the per-fold scores. Expanding-window folds share their
+training data and, when `step < horizon`, their test rows, so it describes the
+variability across origins and is not a standard error of `mean`.
+
+# Example
+```julia
+r = backtest(fc, df; horizon=28, initial=730, metrics=(mae, rmse))
+summarize(r).mean   # [mae, rmse] averaged over folds
+```
+"""
+function summarize(r::BacktestResult)
+    sc = r.scores
+    metric = unique(sc.metric)
+    means = Float64[]
+    stds = Float64[]
+    nfolds = Int[]
+    for name in metric
+        vals = sc.value[sc.metric .== name]
+        push!(means, Statistics.mean(vals))
+        push!(stds, Statistics.std(vals))
+        push!(nfolds, length(vals))
+    end
+    return (metric=metric, mean=means, std=stds, nfolds=nfolds)
 end
 
 """
@@ -148,15 +183,15 @@ trains on its rows up to its own cutoff, and one global model is fitted on all
 of them. If the series are not aligned in calendar time, the training set of a fold
 can contain values from after another series' cutoff, a known pitfall of global
 models (Hewamalage, Ackermann & Bergmeir 2023). With `initial`, all series are cut at
-the same timestamp, which avoids it. For a panel, the `folds` table carries the id column
-too.
+the same timestamp, which avoids it. For a panel, the `forecasts` table carries the id
+column too.
 A fold does not score a series that has no rows up to the fold's origin, too few of them
 to train on (it is skipped with a warning), or no actuals after it, so the set of scored
 series can change from fold to fold.
 
 `metrics` is a tuple, vector or NamedTuple of callables `(y, ŷ) -> Float64` (e.g.
 [`mae`](@ref), [`rmse`](@ref), [`smape`](@ref)). Each is named by
-[`metric_name`](@ref) (`:mae`, `:mase_12` for [`Mase`](@ref)`(12)`) in the `metrics`
+[`metric_name`](@ref) (`:mae`, `:mase_12` for [`Mase`](@ref)`(12)`) in the `scores`
 table, or by its key in a NamedTuple, `metrics=(error=mae, scaled=Mase(12))`; the names
 must be distinct. Scaled metrics that also need the fold's training target —
 [`mase`](@ref), [`rmsse`](@ref), [`Mase`](@ref), [`Rmsse`](@ref), or your own, declared
@@ -164,11 +199,11 @@ via [`metric_inputs`](@ref) — are called as `metric(y, ŷ; y_train=...)` with 
 fold's training window supplied automatically (on a panel, each series' own, so a
 scale never mixes series). Pass `Mase(12)`, not the type `Mase`.
 Unscaled metrics pool the fold's rows; scaled metrics are per series, weighted by scored
-points; the overall row is the unweighted mean over folds. Scaled metrics follow Hyndman
-& Koehler (2006): each series' errors are divided by that series' own training-window
-naive error, then averaged over series (here weighted by scored points, our choice).
-Unscaled metrics are pooled across series, so on a panel they are dominated by the
-large-scale series; use a scaled metric to compare series of different scale.
+points; [`summarize`](@ref) gives the unweighted mean over folds. Scaled metrics follow
+Hyndman & Koehler (2006): each series' errors are divided by that series' own
+training-window naive error, then averaged over series (here weighted by scored points,
+our choice). Unscaled metrics are pooled across series, so on a panel they are dominated
+by the large-scale series; use a scaled metric to compare series of different scale.
 
 When the feature set includes [`Exogenous`](@ref) columns, they are sliced from
 the held-out data automatically (they are "known" in a backtest).
@@ -184,7 +219,7 @@ covariate values that were available at the origin (a forecast, or a lagged colu
 ```julia
 results = backtest(fc, df; horizon=28, initial=730, step=28,
                    metrics=(mae, rmse, smape, Mase(7)))
-results.metrics   # per-fold and overall scores
+summarize(results)   # mean and std of each metric over folds
 ```
 """
 function backtest(fc::Forecaster, data; horizon::Integer,
@@ -252,32 +287,24 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, scheme,
             push!(m_value, Float64(score(metric_inputs(m), m, fold)))
         end
     end
-    for (name, _) in metrics
-        vals = [m_value[i] for i in eachindex(m_value)
-                if m_metric[i] == name && m_fold[i] > 0]
-        push!(m_fold, 0)
-        push!(m_origin, missing)
-        push!(m_metric, name)
-        push!(m_value, Statistics.mean(vals))
-    end
-    folds = NamedTuple{(:fold, :origin, :step, fc.time, :y, :y_hat)}(
+    forecasts = NamedTuple{(:fold, :origin, :step, fc.time, :y, :y_hat)}(
         (fold_col, origin_col, step_col, time_col, y_col, yhat_col))
-    mtable = (fold=m_fold, origin=m_origin, metric=m_metric, value=m_value)
-    return BacktestResult(folds, mtable)
+    scores = (fold=m_fold, origin=m_origin, metric=m_metric, value=m_value)
+    return BacktestResult(forecasts, scores)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", r::BacktestResult)
-    # Count from folds: it is filled even when metrics=().
-    h = isempty(r.folds.step) ? 0 : maximum(r.folds.step)
-    nfolds = length(unique(r.folds.fold))
+    # Count from forecasts: it is filled even when metrics=().
+    h = isempty(r.forecasts.step) ? 0 : maximum(r.forecasts.step)
+    nfolds = length(unique(r.forecasts.fold))
     println(io, "BacktestResult: $nfolds fold$(nfolds == 1 ? "" : "s"), horizon $h")
-    for i in eachindex(r.metrics.fold)
-        r.metrics.fold[i] == 0 || continue
-        println(io, "  ", rpad(string(r.metrics.metric[i]), 8), " = ",
-                round(r.metrics.value[i]; sigdigits=5), "  (mean over folds)")
+    s = summarize(r)
+    for i in eachindex(s.metric)
+        println(io, "  ", rpad(string(s.metric[i]), 8), " = ",
+                round(s.mean[i]; sigdigits=5), "  (mean over folds)")
     end
-    print(io, "  (see .folds and .metrics for details)")
+    print(io, "  (see .forecasts and .scores; summarize(r) for mean and std)")
 end
 
 Base.show(io::IO, r::BacktestResult) =
-    print(io, "BacktestResult(", length(unique(r.folds.fold)), " folds)")
+    print(io, "BacktestResult(", length(unique(r.forecasts.fold)), " folds)")

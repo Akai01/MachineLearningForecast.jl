@@ -231,8 +231,8 @@ end
 
     @testset "metric names must be distinct" begin
         msg(n, name) = "backtest metrics must have distinct names, but $n metrics are " *
-                       "named $name, so their per-fold rows would be merged into one " *
-                       "wrong overall score. Remove the repeated metric, or name each " *
+                       "named $name, so summarize would merge their per-fold rows " *
+                       "into one wrong mean. Remove the repeated metric, or name each " *
                        "one with a NamedTuple key (closures from one factory share a " *
                        "name), e.g. metrics=(a=mae, b=Mase(12))."
         @test_throws ArgumentError named((mae, mae))
