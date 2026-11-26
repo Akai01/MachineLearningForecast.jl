@@ -64,6 +64,7 @@ include("seasonalnaive.jl")
 include("forecaster.jl")
 include("backtest.jl")
 include("panel.jl")
+include("conformal.jl")
 include("tune.jl")
 include("precompile.jl")
 

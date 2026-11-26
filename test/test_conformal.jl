@@ -84,4 +84,193 @@
         @test MMI.input_scitype(SeasonalNaive) == MMI.Table(MMI.Continuous)
         @test MMI.target_scitype(SeasonalNaive) == AbstractVector{MMI.Continuous}
     end
+
+    @testset "signed seasonal-difference pool" begin
+        y = [t + 10.0 * (t % 4 == 0) for t in 1:20]
+        @test @inferred(C._seasonal_differences(y, 4, 0.5)) == fill(4.0, 10)
+        @test length(C._seasonal_differences(y, 4, 1.0)) == 16
+        @test isempty(C._seasonal_differences(y[1:4], 4, 0.5))
+        @test C._seasonal_differences([1.0, 4.0, 2.0], 1, 1.0) == [3.0, -2.0]
+        # floor(0.05 * 13) = 0: no calibration value at all.
+        @test isempty(C._seasonal_differences(y[1:13], 4, 0.05))
+        @test isempty(C._seasonal_differences(Float64[], 4, 0.5))
+        # R comes from the latest ρT steps, not the first.
+        @test C._seasonal_differences(Float64.(1:10) .^ 2, 1, 0.3) == [15.0, 17.0, 19.0]
+    end
+
+    @testset "seasonal pool and recency weights" begin
+        y = Float64.(1:10)
+        vals, cw = @inferred C._seasonal_pool(y, 1, 3, 0.0)
+        @test vals == [2.0, 5.0, 8.0] && cw == [1.0, 2.0, 3.0]
+        vals, cw = C._seasonal_pool(y, 1, 3, 0.5)
+        # The newest value has weight 1.
+        @test diff([0; cw]) ≈ exp.(-0.5 .* [6, 3, 0])
+        # The pool sits at the phase of T + h.
+        @test first(C._seasonal_pool(y, 2, 3, 0.0)) == [3.0, 6.0, 9.0]
+        @test isempty(first(C._seasonal_pool(Float64.(1:5), 1, 12, 0.0)))
+        # No seasonality: every value is in the pool.
+        @test first(C._seasonal_pool(y, 4, 1, 0.0)) == y
+        @test @inferred(C._draw(StableRNG(1), [1.0, 2.0, 3.0])) in 1:3
+        # A large rate must not underflow every weight to zero.
+        yl = Float64.(1:400)
+        _, cwl = C._seasonal_pool(yl, 1, 12, 100.0)
+        @test cwl[end] > 0 && issorted(cwl)
+        Sl = C._pool_samples(StableRNG(9), yl, [-1e6], [0.0],
+                             C.PoolIntervals(12; weight=C.FixedWeight(1.0),
+                                             recency=100.0, samples=200))
+        @test all(==(389.0), Sl)
+    end
+
+    @testset "mixture weights follow Algorithm 1" begin
+        @test @inferred(C._mixture_weight(C.AdaptiveWeight(), 1, 50)) == 0.0
+        @test C._mixture_weight(C.AdaptiveWeight(), 12, 2) == 0.3
+        @test C._mixture_weight(C.AdaptiveWeight(), 12, 3) == 0.5
+        @test C._mixture_weight(C.FixedWeight(), 1, 0) == 0.5
+        @test C._mixture_weight(C.FixedWeight(0.2), 12, 9) == 0.2
+        @test C.FixedWeight(1).w === 1.0
+        @test_throws("FixedWeight needs a seasonal-pool weight in [0, 1], got 1.2. " *
+                     "Pass e.g. FixedWeight(0.5), the paper's CSP-Fixed.",
+                     C.FixedWeight(1.2))
+        @test_throws "got NaN" C.FixedWeight(NaN)
+        @test_throws("FixedWeight weight must be a number in [0, 1], not the Bool " *
+                     "true. Pass e.g. FixedWeight(0.5), the paper's CSP-Fixed.",
+                     C.FixedWeight(true))
+        @test_throws("FixedWeight needs a seasonal-pool weight in [0, 1], got \"a\".",
+                     C.FixedWeight("a"))
+        @test sprint(show, C.AdaptiveWeight()) == "AdaptiveWeight()"
+    end
+
+    @testset "the sampler mixes the two pools in proportion w_h" begin
+        y = 100 .+ Float64.(1:48)
+        cp = C.PoolIntervals(12; samples=20_000, rng=StableRNG(1))
+        S = C._pool_samples(copy(cp.rng), y, fill(-1e6, 3), [0.0], cp)
+        @test size(S) == (3, 20_000)
+        # Four same-season values, so the Adaptive weight is 0.5.
+        @test all(abs(mean(S[j, :] .> 0) - 0.5) < 0.02 for j in 1:3)
+        @test all(v -> v == -1e6 || v in y, S)
+
+        # Two same-season values (T = 30): the Adaptive weight is 0.3.
+        S3 = C._pool_samples(StableRNG(5), y[1:30], fill(-1e6, 1), [0.0], cp)
+        @test abs(mean(S3[1, :] .> 0) - 0.3) < 0.02
+        # Exactly three same-season values (T = 36): back to 0.5.
+        S4 = C._pool_samples(StableRNG(6), y[1:36], fill(-1e6, 1), [0.0], cp)
+        @test abs(mean(S4[1, :] .> 0) - 0.5) < 0.02
+
+        # m = 1: the Adaptive weight is 0.
+        S1 = C._pool_samples(StableRNG(2), y, fill(-1e6, 2), [0.0],
+                             C.PoolIntervals(1; samples=500))
+        @test all(==(-1e6), S1)
+
+        # Weight 0: centre plus a residual, uniformly.
+        R = [1.0, 2.0, 3.0]
+        S0 = C._pool_samples(StableRNG(3), y, [10.0, 20.0], R,
+                             C.PoolIntervals(12; weight=C.FixedWeight(0.0),
+                                             samples=30_000))
+        @test all(in((11.0, 12.0, 13.0)), S0[1, :])
+        @test all(in((21.0, 22.0, 23.0)), S0[2, :])
+        @test all(abs(mean(S0[1, :] .== 10.0 + r) - 1 / 3) < 0.02 for r in R)
+
+        # Weight 1: seasonal values only, recent ones more often.
+        S2 = C._pool_samples(StableRNG(4), y, [-1e6], [0.0],
+                             C.PoolIntervals(12; weight=C.FixedWeight(1.0), recency=0.05,
+                                             samples=40_000))
+        _, cw = C._seasonal_pool(y, 1, 12, 0.05)
+        p = diff([0; cw]) ./ cw[end]
+        @test p[end] > p[1]
+        @test all(abs(mean(S2[1, :] .== v) - p[k]) < 0.015
+                  for (k, v) in enumerate(y[1:12:48]))
+    end
+
+    @testset "sampling is reproducible from a copied rng" begin
+        cp = C.PoolIntervals(12; rng=StableRNG(7))
+        yy = 10 .+ sin.(2π .* (1:60) ./ 12)
+        R = C._seasonal_differences(yy, 12, 0.5)
+        centre = [yy[60 + j - 12] for j in 1:6]
+        a = C._pool_samples(copy(cp.rng), yy, centre, R, cp)
+        @test a == C._pool_samples(copy(cp.rng), yy, centre, R, cp)
+        @test a != C._pool_samples(StableRNG(8), yy, centre, R, cp)
+        @test @inferred(C._pool_samples(copy(cp.rng), yy, centre, R, cp)) == a
+        # The default Xoshiro rng is inferred too.
+        cx = C.PoolIntervals(12)
+        Sx = @inferred C._pool_samples(copy(cx.rng), yy, centre, R, cx)
+        @test Sx isa Matrix{Float64}
+        # No horizons: an empty matrix, not an error.
+        @test size(C._pool_samples(copy(cp.rng), yy, Float64[], R, cp)) == (0, 100)
+    end
+
+    @testset "edge cases of the pools" begin
+        # An empty seasonal pool falls back to the residual pool.
+        S = C._pool_samples(StableRNG(1), Float64.(1:5), [100.0], [1.0, 2.0],
+                            C.PoolIntervals(12; weight=C.FixedWeight(1.0), samples=50))
+        @test all(in((101.0, 102.0)), S)
+        # An empty residual pool is only an error when it is needed.
+        short = Float64.(1:12)
+        @test size(C._pool_samples(StableRNG(1), short, fill(1.0, 2), Float64[],
+                                   C.PoolIntervals(12; weight=C.FixedWeight(1.0),
+                                                   samples=5))) == (2, 5)
+        @test_throws("the residual pool for step 1 is empty: the last calibration=0.5 " *
+                     "of the 12 training values hold no seasonal difference y[t] - " *
+                     "y[t - 12]. Raise calibration or provide a longer series.",
+                     C._pool_samples(StableRNG(1), short, fill(1.0, 2), Float64[],
+                                     C.PoolIntervals(12)))
+    end
+
+    @testset "invalid sampler settings" begin
+        @test_throws("PoolIntervals needs a seasonal period ≥ 1 in steps of freq, got " *
+                     "0. Pass e.g. 12 for monthly data, or 1 for no seasonality.",
+                     C.PoolIntervals(0))
+        @test_throws("PoolIntervals period must be a whole number, not the Bool true.",
+                     C.PoolIntervals(true))
+        @test_throws("PoolIntervals period must be a whole number, got 12.0. Pass the " *
+                     "season length in steps, e.g. 12 for monthly data, or 1 for no " *
+                     "seasonality.", C.PoolIntervals(12.0))
+        @test_throws("PoolIntervals period must be a whole number, got \"12\".",
+                     C.PoolIntervals("12"))
+        @test C.PoolIntervals(Int32(4)).period === 4
+        @test_throws("calibration must be in (0, 1], the share of each series' history " *
+                     "whose seasonal differences form the residual pool, got 0. Pass " *
+                     "e.g. calibration=0.5.", C.PoolIntervals(12; calibration=0))
+        @test_throws "calibration must be in (0, 1]" C.PoolIntervals(12; calibration=1.5)
+        @test_throws "calibration must be in (0, 1]" C.PoolIntervals(12; calibration=NaN)
+        @test_throws "calibration must be in (0, 1]" C.PoolIntervals(12; calibration="a")
+        @test_throws("calibration must be a number in (0, 1], not the Bool true. Pass " *
+                     "e.g. calibration=0.5.", C.PoolIntervals(12; calibration=true))
+        @test_throws("recency must be a finite rate ≥ 0 (the decay per step of the " *
+                     "seasonal-pool weights), got -1. Pass e.g. recency=0.01, or 0 to " *
+                     "weigh the pool equally.", C.PoolIntervals(12; recency=-1))
+        @test_throws "recency must be a finite rate" C.PoolIntervals(12; recency=Inf)
+        @test_throws "recency must be a finite rate" C.PoolIntervals(12; recency="a")
+        @test_throws("recency must be a number ≥ 0, not the Bool false. Pass e.g. " *
+                     "recency=0.01, or 0 to weigh the pool equally.",
+                     C.PoolIntervals(12; recency=false))
+        @test C.PoolIntervals(12; recency=0).recency === 0.0
+        @test_throws("samples must be a whole number ≥ 1, got 0. Pass e.g. samples=100.",
+                     C.PoolIntervals(12; samples=0))
+        @test_throws("samples must be a whole number, not the Bool true. Pass the " *
+                     "number of draws per horizon, e.g. samples=100.",
+                     C.PoolIntervals(12; samples=true))
+        @test_throws("samples must be a whole number, got 2.5.",
+                     C.PoolIntervals(12; samples=2.5))
+        @test_throws("weight must be an AdaptiveWeight() or a FixedWeight(w), got " *
+                     "\"half\". Pass e.g. weight=FixedWeight(0.5).",
+                     C.PoolIntervals(12; weight="half"))
+        @test sprint(show, C.PoolIntervals(12)) == "PoolIntervals(12, AdaptiveWeight())"
+        @test sprint(show, C.PoolIntervals(12; weight=C.FixedWeight(0.3))) ==
+              "PoolIntervals(12, FixedWeight(0.3))"
+    end
+
+    @testset "Monte Carlo: coverage on an iid seasonal series" begin
+        rng = StableRNG(11)
+        hits = map(1:200) do rep
+            y = [10 + 3 * sin(2π * t / 12) + randn(rng) for t in 1:132]
+            hist, fut = y[1:120], y[121:132]
+            cp = C.PoolIntervals(12; rng=StableRNG(rep))
+            centre = [hist[120 + j - 12] for j in 1:12]
+            S = C._pool_samples(copy(cp.rng), hist, centre,
+                                C._seasonal_differences(hist, 12, 0.5), cp)
+            Coverage(95)(fut, S)
+        end
+        # No guarantee; this only catches a broken sampler.
+        @test mean(hits) > 0.9
+    end
 end
