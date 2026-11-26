@@ -2,7 +2,7 @@
 Column names used by `forecast`/`backtest` result tables; the time column may
 not shadow them.
 """
-const RESERVED_OUTPUT_NAMES = (:origin, :step, :y, :y_hat, :sample)
+const RESERVED_OUTPUT_NAMES = (:origin, :step, :y, :y_hat, :sample, :fold)
 
 """
     Forecaster(model; features, strategy=Recursive(), freq, target=:y, time=:ds, id=nothing,

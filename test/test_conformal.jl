@@ -599,8 +599,8 @@
 
         # :sample is reserved; intervals may not clash.
         @test_throws "time=:sample collides with a column name reserved by forecast()/" *
-                     "backtest() results (:origin, :step, :y, :y_hat, :sample). Rename " *
-                     "the time column in your data." csp(time=:sample)
+                     "backtest() results (:origin, :step, :y, :y_hat, :sample, :fold). " *
+                     "Rename the time column in your data." csp(time=:sample)
         @test_throws "id=:sample collides" csp(id=:sample)
         clash = fit(csp(time=:lo_95), (lo_95=monthly, y=yseas))
         @test_throws "the interval column :lo_95 would overwrite a column of the " *

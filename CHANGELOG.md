@@ -413,6 +413,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A time column or an id column named `:fold` crashed `backtest` with
+  "duplicate field name in NamedTuple", because `:fold` is a column of the
+  results but was missing from the reserved names. `Forecaster` now refuses it
+  with the usual "collides with a column name reserved by forecast()/backtest()
+  results" error, which lists `:fold` after `:sample`. The list is shared, so
+  `forecast` and `fit` also refuse a `:fold` time or id column, although
+  `forecast` alone would not collide: rename the column.
 - A panel with a series too short for a row-dropping transform (for example
   `TransformChain(Difference(12), LastScale(3))` and a 10-row series) aborted
   the whole fit with a `NaN` scale error. The series is now skipped with the

@@ -89,15 +89,23 @@ end
     end
 
     @testset "time column may not shadow reserved result columns" begin
-        for bad in (:origin, :step, :y_hat)
+        for bad in (:origin, :step, :y_hat, :fold)
             err = try mk(target=:v, time=bad) catch e; e end
             @test err isa ArgumentError
             @test occursin("reserved", err.msg)
         end
         @test_throws ArgumentError mk(target=:v, time=:y)   # collides with folds.y
         @test_throws "time=:y collides with a column name reserved by forecast()/" *
-                     "backtest() results (:origin, :step, :y, :y_hat, :sample). Rename " *
-                     "the time column" mk(target=:v, time=:y)
+                     "backtest() results (:origin, :step, :y, :y_hat, :sample, :fold). " *
+                     "Rename the time column" mk(target=:v, time=:y)
+        msg = "time=:fold collides with a column name reserved by forecast()/" *
+              "backtest() results (:origin, :step, :y, :y_hat, :sample, :fold). Rename " *
+              "the time column in your data."
+        @test_throws msg mk(time=:fold)
+        # refused at construction, so no fold is ever fitted
+        @test_throws msg backtest(mk(time=:fold), (fold=df.ds, y=df.y);
+                                  horizon=3, initial=40)
+        @test_throws msg fit(mk(time=:fold), (fold=df.ds, y=df.y))
     end
 
     @testset "ragged tables are rejected by name and length" begin

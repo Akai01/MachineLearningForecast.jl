@@ -11,9 +11,9 @@
         return (unique_id=ids, ds=ds, y=y)
     end
     panel = makepanel()
-    mk(model, feats; strat=Recursive()) =
+    mk(model, feats; strat=Recursive(), id=:unique_id) =
         Forecaster(model; features=feats, strategy=strat, freq=Day(1),
-                   target=:y, time=:ds, id=:unique_id)
+                   target=:y, time=:ds, id=id)
 
     @testset "construction validates the id column" begin
         f = FeatureSet(Lag(1))
@@ -34,6 +34,23 @@
         @test_throws "id=:y_hat collides with a column name reserved by forecast()/" *
                      "backtest() results" Forecaster(TestModels.LinAR(1.0, 0.0);
             features=f, freq=Day(1), target=:y, time=:ds, id=:y_hat)
+        idmsg = "id=:fold collides with a column name reserved by forecast()/" *
+                "backtest() results (:origin, :step, :y, :y_hat, :sample, :fold). " *
+                "Rename the id column in your data."
+        @test_throws idmsg mk(TestModels.LinAR(1.0, 0.0), f; id=:fold)
+        # refused at construction, so no fold is ever fitted
+        @test_throws idmsg backtest(
+            mk(TestModels.LinAR(1.0, 0.0), f; id=:fold),
+            (fold=panel.unique_id, ds=panel.ds, y=panel.y); horizon=5, initial=20)
+        @test_throws idmsg fit(mk(TestModels.LinAR(1.0, 0.0), f; id=:fold),
+                               (fold=panel.unique_id, ds=panel.ds, y=panel.y))
+        tmsg = "time=:fold collides with a column name reserved by forecast()/" *
+               "backtest() results (:origin, :step, :y, :y_hat, :sample, :fold). " *
+               "Rename the time column in your data."
+        @test_throws tmsg backtest(
+            Forecaster(TestModels.LinAR(1.0, 0.0); features=f, freq=Day(1), target=:y,
+                       time=:fold, id=:unique_id),
+            (unique_id=panel.unique_id, fold=panel.ds, y=panel.y); horizon=5, initial=20)
         err = try Forecaster(TestModels.LinAR(1.0, 0.0);
                              features=FeatureSet(Lag(1), Exogenous(:sid)),
                              freq=Day(1), target=:y, time=:ds, id=:sid) catch e; e end
