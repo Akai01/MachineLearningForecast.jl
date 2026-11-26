@@ -623,4 +623,21 @@ end
             @test all(ismissing, r.table.error)
         end
     end
+
+    @testset "tune refuses a metric that scores samples" begin
+        d = (ds=collect(Date(2022, 1, 1):Day(1):Date(2022, 1, 1) + Day(59)),
+             y=Float64.(1:60))
+        spec = Forecaster(TestModels.EchoColumn(:y_lag_1); features=FeatureSet(Lag(1)),
+                          freq=Day(1))
+        for metric in (crps, fair_crps, pinball_loss, Coverage(95), IntervalWidth(80))
+            @test_throws ArgumentError tune(
+                spec, d; grid=(strategy=[Recursive()],), horizon=5, initial=40, metric)
+            @test_throws "tune ranks candidates by a point-forecast metric, but " *
+                         "$(repr(metric)) scores sampled forecasts, which tune does not " *
+                         "produce. Pass a point metric such as smape or Mase(12), and " *
+                         "compare interval settings with backtest(...; metrics=(crps, " *
+                         "Coverage(95)))." tune(
+                spec, d; grid=(strategy=[Recursive()],), horizon=5, initial=40, metric)
+        end
+    end
 end

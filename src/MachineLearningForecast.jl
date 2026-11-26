@@ -25,9 +25,10 @@ interface: any MLJ `Deterministic` regressor is a valid base model, and a
   [`TuningStrategy`](@ref) interface.
 - Metrics: [`mae`](@ref), [`rmse`](@ref), [`mape`](@ref), [`smape`](@ref),
   [`mase`](@ref), [`rmsse`](@ref), and their callable forms [`Mase`](@ref) and
-  [`Rmsse`](@ref); your own metric implements `metric_inputs` and, to be named,
-  `metric_name` (public, not exported: `import MachineLearningForecast: metric_inputs,
-  metric_name`).
+  [`Rmsse`](@ref); the probabilistic scores [`crps`](@ref), [`fair_crps`](@ref),
+  [`pinball_loss`](@ref), [`Coverage`](@ref) and [`IntervalWidth`](@ref); your own
+  metric implements `metric_inputs` and, to be named, `metric_name` (public, not
+  exported: `import MachineLearningForecast: metric_inputs, metric_name`).
 """
 module MachineLearningForecast
 
@@ -46,6 +47,7 @@ export Forecaster, FittedForecaster, fit, forecast, backtest, BacktestResult, su
        TargetFeature, TimeFeature, ExogenousFeature,
        ForecastStrategy, Recursive, Direct,
        mae, rmse, mape, smape, mase, rmsse, Mase, Rmsse,
+       crps, fair_crps, pinball_loss, Coverage, IntervalWidth,
        tune, TuneResult, TuningStrategy, GridSearch, RandomSearch,
        SeriesState, nseries,
        TargetTransform, NoTransform, MeanScale, LastScale,

@@ -133,6 +133,17 @@ MachineLearningForecast.Point
 MachineLearningForecast.Scaled
 ```
 
+### Probabilistic forecasts
+
+```@docs
+crps
+fair_crps
+pinball_loss
+Coverage
+IntervalWidth
+MachineLearningForecast.Samples
+```
+
 ### Tuning
 
 ```@docs

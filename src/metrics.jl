@@ -238,7 +238,7 @@ end
     MetricInput
 
 Supertype of the kinds of inputs a metric takes, returned by [`metric_inputs`](@ref):
-[`Point`](@ref) and [`Scaled`](@ref). Public, not exported.
+[`Point`](@ref), [`Scaled`](@ref) and [`Samples`](@ref). Public, not exported.
 
 # Example
 ```julia
@@ -283,7 +283,9 @@ struct Scaled <: MetricInput end
 
 What `metric` is called with, so [`backtest`](@ref) and [`tune`](@ref) know how to score
 it: [`Point`](@ref) (the default) for `metric(y, ŷ)`, [`Scaled`](@ref) for
-`metric(y, ŷ; y_train)`, which also needs the fold's training target. `Scaled` for
+`metric(y, ŷ; y_train)`, which also needs the fold's training target, and
+[`Samples`](@ref) for `metric(y, S)`, which scores sampled forecasts (`tune` refuses
+it). `Scaled` for
 [`mase`](@ref), [`rmsse`](@ref), [`Mase`](@ref) and [`Rmsse`](@ref). Define it for
 your own scaled metrics. Public, not exported.
 
@@ -375,3 +377,229 @@ function _named_metrics(metrics)
     _check_distinct(names)
     return Pair{Symbol,Any}[n => m for (n, m) in zip(names, ms)]
 end
+
+"""
+    Samples()
+
+The [`metric_inputs`](@ref) kind of a metric called as `metric(y, S)`, where row `i` of
+the matrix `S` holds the sampled forecasts for `y[i]`, such as [`crps`](@ref).
+[`backtest`](@ref) does not score it yet, and [`tune`](@ref) refuses it. Public, not
+exported.
+
+# Example
+```julia
+import MachineLearningForecast: metric_inputs, Samples
+metric_inputs(crps) === Samples()   # true
+```
+"""
+struct Samples <: MetricInput end
+
+function _check_sample_args(y::AbstractVector, S::AbstractMatrix)
+    length(y) == size(S, 1) || throw(ArgumentError(
+        "y has $(length(y)) values but S has $(size(S, 1)) rows; pass one row of " *
+        "samples per actual value."))
+    isempty(y) && throw(ArgumentError(
+        "metric inputs are empty: pass at least one actual and its samples."))
+    size(S, 2) ≥ 1 || throw(ArgumentError(
+        "S has no samples (0 columns); pass at least one sample per actual."))
+    any(ismissing, y) && throw(ArgumentError(
+        "y contains missing values; drop or impute them before scoring."))
+    any(ismissing, S) && throw(ArgumentError(
+        "S contains missing values; check the model that produced the forecasts."))
+    any(isnan, y) && throw(ArgumentError(
+        "y contains NaN (first at index $(findfirst(isnan, y))); drop or impute it " *
+        "before scoring."))
+    any(isnan, S) && throw(ArgumentError(
+        "S contains NaN (first at $(Tuple(findfirst(isnan, S)))); a NaN sample has no " *
+        "rank. Check the model that produced the forecasts."))
+    any(isinf, y) && throw(ArgumentError(
+        "y contains Inf or -Inf (first at index $(findfirst(isinf, y))); drop or " *
+        "impute it before scoring."))
+    any(isinf, S) && throw(ArgumentError(
+        "S contains Inf or -Inf (first at $(Tuple(findfirst(isinf, S)))); an infinite " *
+        "sample makes every score infinite. Check the model that produced the " *
+        "forecasts."))
+    return nothing
+end
+
+function _check_level(level)
+    level isa Real && 1 < level < 100 || throw(ArgumentError(
+        "an interval level is a percentage in (1, 100), got $(repr(level)). Pass e.g. " *
+        "95 for a 95% interval, not 0.95."))
+    return Float64(level)
+end
+
+_level_label(L::Float64) = isinteger(L) ? string(Int(L)) : replace(string(L), "." => "_")
+
+# Hyndman-Fan type 6, the one quantile rule here.
+_sample_quantile(x::AbstractVector, p::Real) =
+    Statistics.quantile(x, p; sorted=true, alpha=0, beta=0)
+
+# One sort per row serves every level.
+function _interval_bounds(S::AbstractMatrix, levels::AbstractVector{Float64})
+    n = size(S, 1)
+    los = [Vector{Float64}(undef, n) for _ in levels]
+    his = [Vector{Float64}(undef, n) for _ in levels]
+    for i in 1:n
+        x = sort!(S[i, :])
+        for (l, L) in enumerate(levels)
+            los[l][i] = _sample_quantile(x, (100 - L) / 200)
+            his[l][i] = _sample_quantile(x, (100 + L) / 200)
+        end
+    end
+    return los, his
+end
+
+function _central(y::AbstractVector, S::AbstractMatrix, level::Float64)
+    _check_sample_args(y, S)
+    los, his = _interval_bounds(S, [level])
+    return only(los), only(his)
+end
+
+# `pairs` is the denominator of the spread term.
+function _crps(y::AbstractVector, S::AbstractMatrix, pairs::Real)
+    B = size(S, 2)
+    total = 0.0
+    for i in 1:length(y)
+        x = sort!(S[i, :])
+        for k in 1:B
+            total += abs(x[k] - y[i]) / B - (2k - B - 1) * x[k] / pairs
+        end
+    end
+    return total / length(y)
+end
+
+"""
+    crps(y, S) -> Float64
+
+Continuous ranked probability score of sampled forecasts, averaged over the rows: for the
+actual `y[i]` and the samples `x` in row `i` of `S`, the CRPS of their empirical
+distribution, `mean(|x - y|) - mean(|x - x'|) / 2` over all `B^2` pairs (Gneiting and
+Raftery 2007). This plug-in estimator scores the `B` samples as issued (our choice of
+default; Zamo and Naveau 2018 recommend it for verifying the issued forecast); to score
+the distribution they are drawn from, or to compare different `B`, use
+[`fair_crps`](@ref). In the units of `y`, lower is better; one
+sample gives the absolute error. The order of the samples does not matter.
+
+# Example
+```julia
+crps([1.0], [0.0 2.0])   # 0.5
+```
+"""
+function crps(y::AbstractVector, S::AbstractMatrix)
+    _check_sample_args(y, S)
+    return _crps(y, S, size(S, 2)^2)
+end
+
+"""
+    fair_crps(y, S) -> Float64
+
+The fair (ensemble-size adjusted) CRPS of sampled forecasts, averaged over the rows: like
+[`crps`](@ref) but with the spread term `mean(|x - x'|) / 2` taken over the `B (B - 1)`
+pairs of distinct samples (Ferro, Richardson and Weigel 2008, eq. 12 with `M = ∞`).
+For samples drawn independently from the forecast distribution it is unbiased for that
+distribution's CRPS, so it compares forecasts with different numbers of samples; `crps`
+is higher by about `E|X - X'| / (2B)`. It needs at least 2 samples per row.
+
+# Example
+```julia
+fair_crps([1.0], [0.0 2.0])   # 0.0; crps gives 0.5
+```
+"""
+function fair_crps(y::AbstractVector, S::AbstractMatrix)
+    _check_sample_args(y, S)
+    B = size(S, 2)
+    B ≥ 2 || throw(ArgumentError(
+        "fair_crps needs at least 2 samples per row, got $B column. Use crps, which " *
+        "accepts one sample, or pass more samples."))
+    return _crps(y, S, B * (B - 1))
+end
+
+"""
+    pinball_loss(y, S; quantiles=0.1:0.1:0.9) -> Float64
+
+Mean pinball (quantile) loss of sampled forecasts: for every row and every `τ` in
+`quantiles`, `u * (τ - (u < 0))` with `u = y[i] - q`, where `q` is the `τ`-quantile of
+row `i` of `S` (Hyndman and Fan type 6, our choice: a new draw falls below the `k`-th
+smallest sample with probability `k / (B + 1)`). It is the plain mean over rows and
+levels, not normalised (our choice). In the units of `y`, lower is better.
+
+# Example
+```julia
+pinball_loss([1.0], zeros(1, 10))   # 0.5
+```
+"""
+function pinball_loss(y::AbstractVector, S::AbstractMatrix; quantiles=0.1:0.1:0.9)
+    _check_sample_args(y, S)
+    τs = collect(Float64, quantiles)
+    (isempty(τs) || !all(τ -> 0 < τ < 1, τs)) && throw(ArgumentError(
+        "pinball_loss quantiles must be a non-empty collection of levels in (0, 1), got " *
+        "$(repr(quantiles)). Pass e.g. quantiles=(0.1, 0.5, 0.9)."))
+    total = 0.0
+    for i in 1:length(y)
+        x = sort!(S[i, :])
+        for τ in τs
+            u = y[i] - _sample_quantile(x, τ)
+            total += u * (τ - (u < 0))
+        end
+    end
+    return total / (length(y) * length(τs))
+end
+
+"""
+    Coverage(level=95)
+
+Metric: the share of actuals inside the central `level` % interval of their samples, the
+interval between the sample quantiles at `(100 - level) / 200` and `(100 + level) / 200`
+(Hyndman and Fan type 6; a level above `100 (B - 1) / (B + 1)` clamps to the sample range).
+Callable as `Coverage(95)(y, S)`; named `:coverage_95` in the `scores` table of a
+[`backtest`](@ref). A calibrated forecast scores close to `level / 100`; higher is not
+better, so it is not a score to minimise. `level` is a percentage in (1, 100), so
+`Coverage(0.95)` is an error.
+
+# Example
+```julia
+Coverage(95)([50.0], reshape(collect(1.0:100.0), 1, 100))   # 1.0
+```
+"""
+struct Coverage
+    level::Float64
+    Coverage(level=95) = new(_check_level(level))
+end
+
+function (c::Coverage)(y::AbstractVector, S::AbstractMatrix)
+    lo, hi = _central(y, S, c.level)
+    return Statistics.mean(lo[i] ≤ y[i] ≤ hi[i] for i in 1:length(y))
+end
+
+"""
+    IntervalWidth(level=95)
+
+Metric: the mean width of the central `level` % interval of the samples (the same
+interval as [`Coverage`](@ref)), a measure of sharpness. Callable as
+`IntervalWidth(95)(y, S)`; named `:interval_width_95`. Compare widths only between
+forecasts with similar `Coverage`: a narrow interval that misses is not sharp, it is
+wrong.
+
+# Example
+```julia
+IntervalWidth(80)([1.0], [0.0 1.0 2.0])   # 2.0
+```
+"""
+struct IntervalWidth
+    level::Float64
+    IntervalWidth(level=95) = new(_check_level(level))
+end
+
+function (w::IntervalWidth)(y::AbstractVector, S::AbstractMatrix)
+    lo, hi = _central(y, S, w.level)
+    return Statistics.mean(hi .- lo)
+end
+
+metric_inputs(::typeof(crps)) = Samples()
+metric_inputs(::typeof(fair_crps)) = Samples()
+metric_inputs(::typeof(pinball_loss)) = Samples()
+metric_inputs(::Coverage) = Samples()
+metric_inputs(::IntervalWidth) = Samples()
+metric_name(c::Coverage) = Symbol("coverage_", _level_label(c.level))
+metric_name(w::IntervalWidth) = Symbol("interval_width_", _level_label(w.level))

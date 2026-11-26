@@ -1,4 +1,6 @@
-import MachineLearningForecast: metric_inputs, metric_name, MetricInput, Point, Scaled
+import Statistics
+import MachineLearningForecast: metric_inputs, metric_name, MetricInput, Point,
+    Scaled, Samples
 
 @testset "metrics" begin
     y = [10.0, 20.0, 30.0]
@@ -244,5 +246,151 @@ end
         mkm(k) = (a, b) -> k * mae(a, b)
         @test_throws "2 metrics are named $(repr(Symbol(mkm(1))))" named(
             (mkm(1), mkm(2)))
+    end
+
+    @testset "probabilistic scores" begin
+        # The integral of (F(z) - 1{z >= y})^2.
+        function crps_integral(yi, x)
+            p = sort([x; yi])
+            total = 0.0
+            for k in 1:(length(p) - 1)
+                F = count(≤(p[k]), x) / length(x)
+                total += (F - (p[k] ≥ yi))^2 * (p[k + 1] - p[k])
+            end
+            return total
+        end
+        q6(x, p) = Statistics.quantile(sort(x), p; sorted=true, alpha=0, beta=0)
+        scores = (crps, fair_crps, pinball_loss, Coverage(95), IntervalWidth(95))
+
+        @test crps([1.0], reshape([3.0], 1, 1)) == 2.0   # one sample: |error|
+        @test crps([1.0], [0.0 2.0]) == 0.5
+        @test crps([1, 2], [0 2; 5 7]) == 2.0
+        S = randn(StableRNG(4), 5, 37)
+        yv = randn(StableRNG(5), 5)
+        S0, y0 = copy(S), copy(yv)
+        @test crps(yv, S) ≈ mean(crps_integral(yv[i], S[i, :]) for i in 1:5)
+        @test S == S0 && yv == y0                         # inputs are not mutated
+        @test crps(yv, S[:, end:-1:1]) == crps(yv, S)     # sample order is irrelevant
+        @test crps(yv .+ 3, S .+ 3) ≈ crps(yv, S)
+        @test crps(2 .* yv, 2 .* S) ≈ 2 * crps(yv, S)
+        @test (@inferred crps(yv, S)) isa Float64
+
+        # Fair: pairs i != j over B(B - 1), not B^2.
+        @test fair_crps([1.0], [0.0 2.0]) == 0.0
+        @test fair_crps([0.0], [1.0 3.0]) == 1.0 && crps([0.0], [1.0 3.0]) == 1.5
+        function fair_pairs(yi, x)
+            B = length(x)
+            pair_sum = sum(abs(x[j] - x[k]) for j in 1:B, k in 1:B)
+            return sum(abs.(x .- yi)) / B - pair_sum / (2B * (B - 1))
+        end
+        @test fair_crps(yv, S) ≈ mean(fair_pairs(yv[i], S[i, :]) for i in 1:5)
+        @test fair_crps(yv, S[:, end:-1:1]) == fair_crps(yv, S)
+        @test fair_crps(yv, S) < crps(yv, S)
+        @test S == S0 && yv == y0
+        @test (@inferred fair_crps(yv, S)) isa Float64
+        # True CRPS of N(0, 1) is 1/sqrt(pi); the plug-in runs high.
+        rng = StableRNG(6)
+        Sm, ym = randn(rng, 4000, 5), randn(rng, 4000)
+        @test isapprox(fair_crps(ym, Sm), 1 / sqrt(pi); atol=0.015)
+        @test crps(ym, Sm) > fair_crps(ym, Sm) + 0.08
+
+        @test pinball_loss([1.0], zeros(1, 10)) ≈ 0.5
+        @test pinball_loss([-1.0], zeros(1, 10)) ≈ 0.5
+        @test pinball_loss([0.0], zeros(1, 10); quantiles=(0.5,)) == 0.0
+        @test pinball_loss([2.0], [0.0 1.0 2.0 3.0 4.0]; quantiles=(0.5,)) == 0.0
+        # Under-forecast costs tau per unit, over-forecast 1 - tau.
+        @test pinball_loss([2.0], fill(1.0, 1, 10); quantiles=(0.9,)) ≈ 0.9
+        @test pinball_loss([0.0], fill(1.0, 1, 10); quantiles=(0.9,)) ≈ 0.1
+        # Type 6 puts the 0.25-quantile of 1:4 at 1.25, not 1.75.
+        @test pinball_loss([0.0], [1.0 2.0 3.0 4.0]; quantiles=(0.25,)) ≈ 0.75 * 1.25
+        @test pinball_loss(yv, S) ≈ mean(
+            (u = yv[i] - q6(S[i, :], τ); u * (τ - (u < 0)))
+            for i in 1:5, τ in 0.1:0.1:0.9)
+        @test pinball_loss(yv, S; quantiles=[0.2, 0.7]) ≈
+              pinball_loss(yv, S; quantiles=(0.2, 0.7))
+        @test (@inferred pinball_loss(yv, S)) isa Float64
+
+        # 95 % bounds of 1..100: 0.025 and 0.975 times 101.
+        S100 = permutedims(hcat(1.0:100.0, 1.0:100.0))
+        @test Coverage(95)([50.0, 99.0], S100) == 0.5
+        @test Coverage()([50.0, 99.0], S100) == 0.5
+        @test Coverage(50)([50.0, 99.0], S100) == 0.5
+        @test IntervalWidth(95)([50.0, 99.0], S100) ≈ 98.475 - 2.525
+        @test IntervalWidth()([50.0, 99.0], S100) == IntervalWidth(95)([50.0, 99.0], S100)
+        @test Coverage(95).level === 95.0 && IntervalWidth(99.5).level === 99.5
+        # The 50 % bounds of 0:2 are 0 and 2; closed.
+        S3 = [0.0 1.0 2.0; 0.0 1.0 2.0]
+        @test Coverage(50)([0.0, 2.0], S3) == 1.0
+        @test Coverage(50)([-0.1, 2.1], S3) == 0.0
+        @test IntervalWidth(50)([1.0, 1.0], S3) == 2.0
+        # Beyond k/(B+1) a bound clamps to the range.
+        @test IntervalWidth(80)([1.0], [0.0 1.0 2.0]) == 2.0
+        @test Coverage(95)([1.0], reshape([1.0], 1, 1)) == 1.0     # one sample
+        @test IntervalWidth(95)([1.0], reshape([1.0], 1, 1)) == 0.0
+        lo = [q6(S[i, :], 0.05) for i in 1:5]
+        hi = [q6(S[i, :], 0.95) for i in 1:5]
+        @test IntervalWidth(90)(yv, S) ≈ mean(hi .- lo)
+        @test Coverage(90)(yv, S) == mean(lo .≤ yv .≤ hi)
+        @test (@inferred Coverage(90)(yv, S)) isa Float64
+        @test (@inferred IntervalWidth(90)(yv, S)) isa Float64
+
+        @test metric_inputs(crps) === Samples() && metric_inputs(pinball_loss) === Samples()
+        @test metric_inputs(fair_crps) === Samples()
+        @test metric_inputs(Coverage(80)) === Samples()
+        @test metric_inputs(IntervalWidth(80)) === Samples()
+        @test Samples() isa MetricInput && !(Samples() isa Union{Point,Scaled})
+        @test metric_name(crps) == :crps && metric_name(pinball_loss) == :pinball_loss
+        @test metric_name(fair_crps) == :fair_crps
+        @test metric_name(Coverage(95)) == :coverage_95
+        @test metric_name(Coverage(2.5)) == :coverage_2_5
+        @test metric_name(IntervalWidth(99.5)) == :interval_width_99_5
+
+        pct(got) = "an interval level is a percentage in (1, 100), got $got. Pass e.g. " *
+                   "95 for a 95% interval, not 0.95."
+        @test_throws pct("0.95") Coverage(0.95)
+        @test_throws pct("100") IntervalWidth(100)
+        @test_throws pct("1") Coverage(1)
+        @test_throws pct("NaN") Coverage(NaN)
+        @test_throws pct("Inf") IntervalWidth(Inf)
+        @test_throws pct("-5") Coverage(-5)
+        @test_throws pct("true") Coverage(true)
+        @test_throws pct("\"95\"") Coverage("95")
+
+        @test_throws "y has 2 values but S has 1 rows; pass one row of samples per " *
+                     "actual value." crps([1.0, 2.0], [1.0 2.0])
+        @test_throws "metric inputs are empty: pass at least one actual and its " *
+                     "samples." crps(Float64[], zeros(0, 3))
+        @test_throws "S has no samples (0 columns); pass at least one sample per " *
+                     "actual." crps([1.0], zeros(1, 0))
+        @test_throws "y contains NaN" crps([NaN], [1.0 2.0])
+        @test_throws "S contains NaN" Coverage(95)([1.0], [NaN 2.0])
+        @test_throws "y contains missing values" crps([missing], [1.0 2.0])
+        @test_throws "S contains missing values" crps([1.0], [missing 2.0])
+        @test_throws "y contains Inf or -Inf (first at index 2)" crps(
+            [1.0, -Inf], [1.0 2.0; 1.0 2.0])
+        @test_throws "S contains Inf or -Inf (first at (1, 2))" Coverage(95)(
+            [1.0], [1.0 Inf])
+        for score in scores
+            @test_throws "y has 2 values but S has 1 rows" score([1.0, 2.0], [1.0 2.0])
+            @test_throws "metric inputs are empty" score(Float64[], zeros(0, 3))
+            @test_throws "S has no samples" score([1.0], zeros(1, 0))
+            @test_throws "y contains NaN" score([NaN], [1.0 2.0])
+            @test_throws "S contains NaN" score([1.0], [NaN 2.0])
+            @test_throws "y contains missing values" score([missing], [1.0 2.0])
+            @test_throws "S contains missing values" score([1.0], [missing 2.0])
+            @test_throws "y contains Inf" score([Inf], [1.0 2.0])
+            @test_throws "S contains Inf" score([1.0], [1.0 -Inf])
+        end
+        @test_throws "fair_crps needs at least 2 samples per row, got 1 column. Use " *
+                     "crps, which accepts one sample, or pass more samples." fair_crps(
+            [1.0], reshape([1.0], 1, 1))
+        qmsg(got) = "pinball_loss quantiles must be a non-empty collection of levels " *
+                    "in (0, 1), got $got. Pass e.g. quantiles=(0.1, 0.5, 0.9)."
+        @test_throws qmsg("(0.0, 0.5)") pinball_loss([1.0], [1.0 2.0]; quantiles=(0.0, 0.5))
+        @test_throws qmsg("(0.5, 1.0)") pinball_loss([1.0], [1.0 2.0]; quantiles=(0.5, 1.0))
+        @test_throws qmsg("(0.5, NaN)") pinball_loss([1.0], [1.0 2.0]; quantiles=(0.5, NaN))
+        @test_throws qmsg("(true,)") pinball_loss([1.0], [1.0 2.0]; quantiles=(true,))
+        @test_throws "pinball_loss quantiles must be" pinball_loss(
+            [1.0], [1.0 2.0]; quantiles=())
     end
 end

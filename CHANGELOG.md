@@ -8,6 +8,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Scores for sampled forecasts, all exported: `crps(y, S)` (the CRPS of each row's
+  empirical distribution, the plug-in estimator), `fair_crps(y, S)` (the same with the
+  spread term over the `B (B - 1)` pairs of distinct samples, for comparing different
+  numbers of samples; needs `B >= 2`), `pinball_loss(y, S; quantiles=0.1:0.1:0.9)`,
+  `Coverage(level)` and `IntervalWidth(level)`, where row `i` of the matrix `S` holds
+  the samples for `y[i]`. Sample quantiles are Hyndman and Fan type 6. Levels are
+  percentages in (1, 100). They declare the new metric input kind `Samples()`
+  (`metric_inputs`, public, not exported); `tune` refuses such a metric. `backtest`
+  does not score them yet.
 - `summarize(r)` (exported): one row per metric of a `BacktestResult`, with the
   `:mean`, the sample `:std` over folds (`NaN` with one fold) and `:nfolds`. Its mean
   is the number the `fold = 0` rows held.

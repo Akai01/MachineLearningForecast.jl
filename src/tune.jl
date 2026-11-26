@@ -269,7 +269,8 @@ NamedTuple of [`Forecaster`](@ref) field overrides (e.g. `model`, `features`,
 backtested with [`backtest`](@ref)`(spec, data; horizon, initial, step,
 metrics=(score=metric,))`, or with `windows` in place of `initial`, and scored by the
 mean of `metric` across folds (lower is better). `metric` is one point or scaled metric
-([`metric_inputs`](@ref)), e.g. `smape` or `Mase(7)`, checked before any fit. Pass
+([`metric_inputs`](@ref)), e.g. `smape` or `Mase(7)`, checked before any fit. A metric
+that scores samples ([`crps`](@ref), [`Coverage`](@ref)) is refused. Pass
 exactly one of `initial` and `windows`; `windows` counts each series' folds back from
 its own end (see [`backtest`](@ref) for the caveat when the series are not aligned in
 calendar time).
@@ -329,6 +330,11 @@ function tune(fc::Forecaster, data; grid=nothing, tuner::TuningStrategy=GridSear
     _iscallable(metric) || throw(ArgumentError(
         "tune metric must be one metric function, got $(repr(metric)). Pass e.g. " *
         "metric=smape; tune ranks candidates by a single metric."))
+    metric_inputs(metric) isa Samples && throw(ArgumentError(
+        "tune ranks candidates by a point-forecast metric, but $(repr(metric)) scores " *
+        "sampled forecasts, which tune does not produce. Pass a point metric such as " *
+        "smape or Mase(12), and compare interval settings with backtest(...; " *
+        "metrics=(crps, Coverage(95)))."))
     _check_metric("tune metric", metric)
     tbl = normalize_table(data)
     seq = _sequence(tuner, grid)
