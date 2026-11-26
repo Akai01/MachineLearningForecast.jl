@@ -320,25 +320,13 @@ summarize(backtest(naive, df; horizon = 7, windows = 3, metrics = (mae, smape)))
 
 Naive and seasonal naive forecasts are the standard benchmarks (Hyndman &
 Athanasopoulos 2021, §5.2). When the data are seasonal with period `m`, backtest
-a seasonal naive baseline: a model that returns `y_lag_m`, with `Lag(m)` as the
+[`SeasonalNaive`](@ref)`(m)`: a model that returns `y_lag_m`, with `Lag(m)` as the
 only feature, under `Recursive`. For a horizon above `m` the fed-back
 predictions equal the lagged values, so each step repeats the value one or more
 seasons earlier, which is the seasonal naive forecast. Under `Direct` it does
 not: `Lag(m)` is then `y[t0-m+1]` at every step, as explained above.
 
 ```julia
-using Tables
-import MLJModelInterface as MMI
-
-mutable struct SeasonalNaive <: MMI.Deterministic
-    m::Int
-end
-MMI.fit(::SeasonalNaive, verbosity, X, y) = (nothing, nothing, NamedTuple())
-MMI.predict(model::SeasonalNaive, fitresult, Xnew) =
-    collect(Float64, Tables.getcolumn(Xnew, Symbol(:y_lag_, model.m)))
-MMI.input_scitype(::Type{SeasonalNaive}) = MMI.Table(MMI.Continuous)
-MMI.target_scitype(::Type{SeasonalNaive}) = AbstractVector{MMI.Continuous}
-
 m = 7
 snaive = Forecaster(SeasonalNaive(m); features = FeatureSet(Lag(m)), freq = Day(1))
 summarize(backtest(snaive, df; horizon = 14, windows = 3, metrics = (mae, smape)))

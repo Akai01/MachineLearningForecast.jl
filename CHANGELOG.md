@@ -8,6 +8,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `SeasonalNaive(period)` (exported): an MLJ model that needs no training and predicts
+  its `y_lag_<period>` input. With `FeatureSet(Lag(period))` and `Recursive()` it is
+  the seasonal naive forecast at every horizon, a baseline for `backtest`. The recipe
+  in "Leakage and conventions" now uses it instead of a user-defined model.
 - Scores for sampled forecasts, all exported: `crps(y, S)` (the CRPS of each row's
   empirical distribution, the plug-in estimator), `fair_crps(y, S)` (the same with the
   spread term over the `B (B - 1)` pairs of distinct samples, for comparing different

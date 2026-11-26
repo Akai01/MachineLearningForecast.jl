@@ -3,7 +3,7 @@ using Logging
 using MachineLearningForecast
 using Dates
 using Tables
-using Statistics: mean, std
+using Statistics: mean, std, quantile
 using Random: shuffle
 using StableRNGs: StableRNG
 using EvoTrees: EvoTreeRegressor, EvoTreeGaussian
@@ -27,6 +27,7 @@ using .FeatureHelpers
     include("test_dropped_rows.jl")
     include("test_integration.jl")
     include("test_leakage.jl")
+    include("test_conformal.jl")
 
     @testset "Aqua quality checks" begin
         Aqua.test_all(MachineLearningForecast; ambiguities=false)

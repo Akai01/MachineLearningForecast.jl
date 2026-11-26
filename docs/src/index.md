@@ -126,6 +126,7 @@ mase
 rmsse
 Mase
 Rmsse
+SeasonalNaive
 MachineLearningForecast.metric_inputs
 MachineLearningForecast.metric_name
 MachineLearningForecast.MetricInput

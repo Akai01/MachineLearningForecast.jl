@@ -48,6 +48,7 @@ export Forecaster, FittedForecaster, fit, forecast, backtest, BacktestResult, su
        ForecastStrategy, Recursive, Direct,
        mae, rmse, mape, smape, mase, rmsse, Mase, Rmsse,
        crps, fair_crps, pinball_loss, Coverage, IntervalWidth,
+       SeasonalNaive,
        tune, TuneResult, TuningStrategy, GridSearch, RandomSearch,
        SeriesState, nseries,
        TargetTransform, NoTransform, MeanScale, LastScale,
@@ -59,6 +60,7 @@ include("featureset.jl")
 include("strategies.jl")
 include("transforms.jl")
 include("metrics.jl")
+include("seasonalnaive.jl")
 include("forecaster.jl")
 include("backtest.jl")
 include("panel.jl")

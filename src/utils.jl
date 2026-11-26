@@ -31,6 +31,13 @@ function _nobool(x, what::AbstractString, fix::AbstractString; noun="whole numbe
     return nothing
 end
 
+# Callers get an ArgumentError, not a MethodError.
+function _whole(x, what::AbstractString, fix::AbstractString)
+    x isa Integer || throw(ArgumentError(
+        "$what must be a whole number, got $(repr(x)). $fix"))
+    _nobool(x, what, fix)
+end
+
 "Number of rows of a columntable."
 nrows(tbl::NamedTuple) = isempty(tbl) ? 0 : length(first(tbl))
 
