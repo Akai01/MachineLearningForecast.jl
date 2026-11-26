@@ -2,7 +2,7 @@
 Column names used by `forecast`/`backtest` result tables; the time column may
 not shadow them.
 """
-const RESERVED_OUTPUT_NAMES = (:origin, :step, :y, :y_hat)
+const RESERVED_OUTPUT_NAMES = (:origin, :step, :y, :y_hat, :sample)
 
 """
     Forecaster(model; features, strategy=Recursive(), freq, target=:y, time=:ds, id=nothing,
@@ -551,7 +551,7 @@ function _fit_spec(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
 end
 
 """
-    forecast(f::FittedForecaster, h::Integer; future=nothing) -> NamedTuple
+    forecast(f::FittedForecaster, h::Integer; future=nothing, levels=nothing) -> NamedTuple
 
 Forecast `h` steps past the end of the training data. Returns a columntable
 (NamedTuple of vectors) with the spec's time column (the future timestamps
@@ -569,30 +569,60 @@ before the time column: `h` rows per series, each series forecast from its own
 last training timestamp. `future` must then carry the id column too and cover
 every series at each of its `h` future timestamps.
 
+With `levels`, percentages in (1, 100) such as `(80, 95)`, and a forecaster with an interval
+method ([`ConformalSeasonalPool`](@ref)), the table gains the columns `lo_<L>` and `hi_<L>`
+after `:y_hat`, in the order the levels are given (`lo_80`, `hi_80`, `lo_95`, `hi_95`; a
+level of 99.5 gives `lo_99_5`): the central `L` % interval of the predictive samples, with
+Hyndman and Fan type 6 sample quantiles (our choice); a level above `100 (samples - 1) /
+(samples + 1)`, about 98 for the default 100 samples, gives the sample minimum and maximum.
+`:y_hat` stays the point forecast, not a sample median. The intervals are empirical and have
+no coverage guarantee. They come from draws seeded by the method's `rng`: each series draws
+from its own copy of it, so series share the random stream (common random numbers), repeated
+calls agree on the same Julia version (use `StableRNGs.StableRNG` for draws that also
+reproduce across versions), and a series' draws do not depend on which other series are
+fitted or on their order. Draws of different series are therefore dependent: do not combine
+them by sample number (e.g. to sum a panel). See [`forecast_samples`](@ref) for the draws.
+
 # Example
 ```julia
 fcast = forecast(fitted, 28)
 fcast = forecast(fitted, 28; future=future_exog)   # with Exogenous features
+fcast = forecast(fitted, 28; levels=(80, 95))      # with an interval method
 fcast.y_hat                                        # the point forecasts
 ```
 """
-function forecast(f::FittedForecaster, h::Integer; future=nothing)
+function forecast(f::FittedForecaster, h::Integer; future=nothing, levels=nothing)
+    _check_h(h)
+    hs = fill(Int(h), nseries(f))
+    levels === nothing && return _forecast(f, hs, future)
+    lv = _check_levels(levels)
+    _require_intervals(f.spec, "forecast with levels")
+    out, draws = _forecast_samples(f, hs, future)
+    cols = _interval_columns(reduce(vcat, draws), lv)
+    return merge(out, _level_table(keys(out), lv, cols))
+end
+
+function _check_h(h)
     _nobool(h, "forecast horizon h", "Pass the number of steps to forecast, e.g. " *
             "forecast(fitted, 28).")
     h ≥ 1 || throw(ArgumentError(
         "forecast horizon h must be ≥ 1, got $h. Pass the number of steps to " *
         "forecast, e.g. forecast(fitted, 28)."))
-    return _forecast(f, fill(Int(h), nseries(f)), future)
+    return nothing
 end
 
 # hs[k] is series k's horizon, which backtest may shorten.
-function _forecast(f::FittedForecaster, hs::Vector{Int}, future)
+function _forecast_core(f::FittedForecaster, hs::Vector{Int}, future)
     spec = f.spec
     states = getfield(f, :series)
     grids = _grids(states, spec.freq, hs)
     exog_rows = _exogenous_rows(spec, states, grids, future, hs)
-    preds = _forecast_states(f, states, hs, grids, exog_rows)
-    return _output_table(spec, states, grids, preds)
+    return states, grids, _forecast_states(f, states, hs, grids, exog_rows)
+end
+
+function _forecast(f::FittedForecaster, hs::Vector{Int}, future)
+    states, grids, preds = _forecast_core(f, hs, future)
+    return _output_table(f.spec, states, grids, preds)
 end
 
 # Apart so the closure does not carry the model type.

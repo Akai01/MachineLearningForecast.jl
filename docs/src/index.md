@@ -138,6 +138,7 @@ MachineLearningForecast.Scaled
 
 ```@docs
 ConformalSeasonalPool
+forecast_samples
 MachineLearningForecast.PoolIntervals
 MachineLearningForecast.AdaptiveWeight
 MachineLearningForecast.FixedWeight

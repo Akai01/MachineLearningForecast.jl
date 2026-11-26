@@ -389,4 +389,213 @@
             @test !occursin(r"\bvalid\b|\bguaranteed\b", doc)
         end
     end
+
+    q6(x, p) = quantile(x, p; alpha=0, beta=0)
+
+    @testset "forecast gives intervals from the paper's sampler" begin
+        spec = csp()
+        f = fit(spec, (ds=monthly, y=yseas))
+        out = forecast(f, 18; levels=(80, 95))
+        @test keys(out) == (:ds, :y_hat, :lo_80, :hi_80, :lo_95, :hi_95)
+        @test out.y_hat == forecast(f, 18).y_hat
+        @test out.y_hat == [yseas[60 + j - 12 * cld(j, 12)] for j in 1:18]
+        @test all(out.lo_95 .≤ out.lo_80 .≤ out.hi_80 .≤ out.hi_95)
+        S = C._pool_samples(copy(spec.intervals.rng), yseas, out.y_hat,
+                            C._seasonal_differences(yseas, 12, 0.5), spec.intervals)
+        @test out.lo_95 == [q6(S[j, :], 0.025) for j in 1:18]
+        @test out.hi_95 == [q6(S[j, :], 0.975) for j in 1:18]
+        @test out.lo_80 == [q6(S[j, :], 0.1) for j in 1:18]
+        @test out.hi_80 == [q6(S[j, :], 0.9) for j in 1:18]
+        # Type 6 bounds, not type 7.
+        @test out.lo_95 != [quantile(S[j, :], 0.025) for j in 1:18]
+        # Levels keep their given order.
+        rev = forecast(f, 18; levels=(95, 80))
+        @test keys(rev) == (:ds, :y_hat, :lo_95, :hi_95, :lo_80, :hi_80)
+        @test rev.lo_80 == out.lo_80 && rev.hi_95 == out.hi_95
+
+        smp = forecast_samples(f, 18)
+        @test keys(smp) == (:ds, :sample, :y_hat)
+        @test length(smp.y_hat) == 18 * 100 && smp.sample[1:3] == 1:3
+        @test smp.ds[1:100] == fill(out.ds[1], 100)
+        @test smp.y_hat[smp.ds .== out.ds[3]] == S[3, :]
+        @test smp.sample[smp.ds .== out.ds[3]] == 1:100
+
+        # The spec's rng is never advanced.
+        @test forecast(f, 18; levels=(95,)) == forecast(f, 18; levels=(95,))
+        @test forecast_samples(f, 4) == forecast_samples(f, 4)
+        r0 = rand(copy(spec.intervals.rng))
+        forecast(f, 6; levels=(95,)); forecast_samples(f, 6)
+        @test rand(copy(spec.intervals.rng)) == r0
+        # The method copies the rng it is given.
+        r = Random.Xoshiro(7)
+        fr = fit(csp(rng=r), (ds=monthly, y=yseas))
+        a = forecast(fr, 6; levels=(95,))
+        rand(r)
+        @test forecast(fr, 6; levels=(95,)) == a
+        fd = fit(csp(rng=Random.default_rng()), (ds=monthly, y=yseas))
+        @test forecast_samples(fd, 3) == forecast_samples(fd, 3)
+        @test forecast(f, 6; levels=95) == forecast(f, 6; levels=(95,))
+        @test forecast(f, 6; levels=[95.0]) == forecast(f, 6; levels=(95,))
+        # Horizon 1 and a fractional level.
+        one = forecast(f, 1; levels=(99.5,))
+        @test keys(one) == (:ds, :y_hat, :lo_99_5, :hi_99_5) && length(one.y_hat) == 1
+        @test C._check_levels(nothing) == Float64[]
+    end
+
+    @testset "forecast without levels does not sample" begin
+        # An empty pool matters only when drawing.
+        short = (unique_id=[fill("a", 60); fill("z", 13)], ds=[monthly; monthly[1:13]],
+                 y=[yseas; yseas[1:13]])
+        z = fit(csp(id=:unique_id, calibration=0.05), short)
+        @test length(forecast(z, 3).y_hat) == 6
+        @test_throws("series unique_id=\"z\": the residual pool for step 1 is empty",
+                     forecast(z, 3; levels=(95,)))
+        plain = Forecaster(SeasonalNaive(12); features=FeatureSet(Lag(12)), freq=Month(1))
+        fp = fit(plain, (ds=monthly, y=yseas))
+        @test forecast(fp, 3) == forecast(fp, 3; levels=nothing)
+        @test keys(forecast(fp, 3)) == (:ds, :y_hat)
+    end
+
+    @testset "panel intervals: one rng copy per series" begin
+        ids = [fill("b", 60); fill("a", 48)]
+        panel = (unique_id=ids, ds=[monthly; monthly[13:60]],
+                 y=[yseas; 3 .* yseas[13:60]])
+        spec = csp(id=:unique_id)
+        out = forecast(fit(spec, panel), 4; levels=(95,))
+        @test keys(out) == (:unique_id, :ds, :y_hat, :lo_95, :hi_95)
+        @test out.unique_id == [fill("b", 4); fill("a", 4)]
+        ya, yb = 3 .* yseas[13:60], yseas
+        # Each series gets its own copy of the rng.
+        Sa = C._pool_samples(copy(spec.intervals.rng), ya, out.y_hat[5:8],
+                             C._seasonal_differences(ya, 12, 0.5), spec.intervals)
+        Sb = C._pool_samples(copy(spec.intervals.rng), yb, out.y_hat[1:4],
+                             C._seasonal_differences(yb, 12, 0.5), spec.intervals)
+        @test out.lo_95 == [[q6(Sb[j, :], 0.025) for j in 1:4];
+                            [q6(Sa[j, :], 0.025) for j in 1:4]]
+        @test out.hi_95 == [[q6(Sb[j, :], 0.975) for j in 1:4];
+                            [q6(Sa[j, :], 0.975) for j in 1:4]]
+        # Draws do not depend on the other series.
+        isa_ = ids .== "a"
+        only_a = forecast(fit(spec, map(c -> c[isa_], panel)), 4; levels=(95,))
+        @test only_a.lo_95 == out.lo_95[5:8] && only_a.hi_95 == out.hi_95[5:8]
+        p = shuffle(StableRNG(2), 1:length(ids))
+        shuffled = forecast(fit(spec, map(c -> c[p], panel)), 4; levels=(95,))
+        key(o) = Dict((o.unique_id[i], o.ds[i]) => (o.y_hat[i], o.lo_95[i], o.hi_95[i])
+                      for i in eachindex(o.ds))
+        @test key(shuffled) == key(out)
+        smp = forecast_samples(fit(spec, panel), 4)
+        @test keys(smp) == (:unique_id, :ds, :sample, :y_hat)
+        @test length(smp.y_hat) == 2 * 4 * 100
+        @test smp.unique_id == repeat(out.unique_id; inner=100)
+        @test smp.y_hat[1:100] == Sb[1, :] && smp.y_hat[401:500] == Sa[1, :]
+        # Backtest shortens each series' horizon on its own.
+        tbl, draws = C._forecast_samples(fit(spec, panel), [2, 5], nothing)
+        @test size.(draws) == [(2, 100), (5, 100)] && length(tbl.y_hat) == 7
+        @test tbl.unique_id == [fill("b", 2); fill("a", 5)]
+        # Past one season too.
+        long = forecast(fit(spec, panel), 14; levels=(95,))
+        @test long.lo_95[15:28] ==
+              forecast(fit(spec, map(c -> c[isa_], panel)), 14; levels=(95,)).lo_95
+
+        # A one-series panel equals one series.
+        one = (unique_id=fill("s", 60), ds=monthly, y=yseas)
+        po = forecast(fit(csp(id=:unique_id), one), 6; levels=(80, 95))
+        so = forecast(fit(csp(), (ds=monthly, y=yseas)), 6; levels=(80, 95))
+        @test po.y_hat == so.y_hat && po.lo_80 == so.lo_80 && po.hi_80 == so.hi_80
+        @test po.lo_95 == so.lo_95 && po.hi_95 == so.hi_95
+        ps = forecast_samples(fit(csp(id=:unique_id), one), 6)
+        @test ps.y_hat == forecast_samples(fit(csp(), (ds=monthly, y=yseas)), 6).y_hat
+    end
+
+    @testset "adaptive weight end to end: 0.3 with two same-season values" begin
+        T = 30
+        ya = [50 + 10 * sin(2π * i / 12) + noise[i] for i in 1:T]
+        fa = fit(ConformalSeasonalPool(12; freq=Month(1), samples=2000,
+                                       rng=StableRNG(5)), (ds=monthly[1:T], y=ya))
+        smp = forecast_samples(fa, 12)
+        share(j) = begin
+            vals = ya[mod1(T + j, 12):12:T]
+            mean(in(vals), smp.y_hat[(1:2000) .+ 2000 * (j - 1)])
+        end
+        # Steps 1-6 see two values, steps 7-12 three.
+        @test length(ya[mod1(T + 1, 12):12:T]) == 2 && length(ya[mod1(T + 7, 12):12:T]) == 3
+        @test abs(mean(share.(1:6)) - 0.3) < 0.02
+        @test abs(mean(share.(7:12)) - 0.5) < 0.02
+    end
+
+    @testset "ConformalSeasonalPool(1) end to end" begin
+        f1 = fit(ConformalSeasonalPool(1; freq=Month(1), rng=StableRNG(3)),
+                 (ds=monthly, y=yseas))
+        out = forecast(f1, 5; levels=(90,))
+        @test out.y_hat == fill(yseas[end], 5)
+        R = C._seasonal_differences(yseas, 1, 0.5)
+        @test R == diff(yseas)[end - 29:end]
+        smp = forecast_samples(f1, 5)
+        # No season: last value plus a difference.
+        @test all(in(Set(yseas[end] .+ R)), smp.y_hat)
+        @test all(out.lo_90 .< yseas[end] .+ maximum(R))
+    end
+
+    @testset "future is ignored by forecast_samples without Exogenous features" begin
+        f = fit(csp(), (ds=monthly, y=yseas))
+        tf = collect(Date(2020, 1, 1):Month(1):Date(2020, 4, 1))
+        base = forecast_samples(f, 4)
+        with = @test_logs (:warn, r"`future` was passed") forecast_samples(
+            f, 4; future=(ds=tf, promo=[1.0, 2.0, 3.0, 4.0]))
+        @test with == base
+        lv = forecast(f, 4; levels=(95,))
+        @test lv.lo_95 == [q6(with.y_hat[with.ds .== tf[j]], 0.025) for j in 1:4]
+        @test (@test_logs (:warn, r"`future` was passed") forecast(
+            f, 4; levels=(95,), future=(ds=tf,))) == lv
+    end
+
+    @testset "interval errors are actionable" begin
+        plain = Forecaster(SeasonalNaive(12); features=FeatureSet(Lag(12)), freq=Month(1))
+        fp = fit(plain, (ds=monthly, y=yseas))
+        no(who) = "$who needs an interval method, but this forecaster has none. Build " *
+                  "it with ConformalSeasonalPool(period; freq=...), or pass " *
+                  "intervals=PoolIntervals(period) with a SeasonalNaive(period) model."
+        @test_throws no("forecast with levels") forecast(fp, 3; levels=(95,))
+        @test_throws no("forecast_samples") forecast_samples(fp, 3)
+
+        f = fit(csp(), (ds=monthly, y=yseas))
+        @test_throws "an interval level is a percentage in (1, 100), got 0.95. Pass e.g. " *
+                     "95 for a 95% interval, not 0.95." forecast(f, 3; levels=(0.95,))
+        @test_throws("levels is empty; pass at least one level, e.g. levels=(95,).",
+                     forecast(f, 3; levels=()))
+        @test_throws "levels repeats a level, got (95, 95); pass each level once, e.g. " *
+                     "levels=(80, 95)." forecast(f, 3; levels=(95, 95))
+        @test_throws "levels repeats a level" forecast(f, 3; levels=(95, 95.0))
+        @test_throws "levels must be percentages, got (\"95\",). Pass e.g. " *
+                     "levels=(80, 95)." forecast(f, 3; levels=("95",))
+        @test_throws "levels must be percentages, got :a." forecast(f, 3; levels=:a)
+        @test_throws "forecast horizon h must be ≥ 1, got 0" forecast_samples(f, 0)
+        @test_throws("forecast horizon h must be a whole number, not the Bool true",
+                     forecast_samples(f, true))
+
+        # Calibration below one value: empty pool.
+        short = (unique_id=[fill("a", 60); fill("z", 13)], ds=[monthly; monthly[1:13]],
+                 y=[yseas; yseas[1:13]])
+        z = fit(csp(id=:unique_id, calibration=0.05), short)
+        @test_throws("series unique_id=\"z\": the residual pool for step 1",
+                     forecast_samples(z, 3))
+
+        # Fit rejects gaps, NaN, Inf and missing.
+        gap = [monthly[1:20]; monthly[22:60]]
+        @test_throws "has 1 gap" fit(csp(), (ds=gap, y=yseas[1:59]))
+        @test_throws "non-finite value NaN" fit(csp(), (ds=monthly, y=[yseas[1:59]; NaN]))
+        @test_throws "non-finite value Inf" fit(csp(), (ds=monthly, y=[yseas[1:59]; Inf]))
+        @test_throws "contains missing values" fit(
+            csp(), (ds=monthly, y=Union{Missing,Float64}[yseas[1:59]; missing]))
+
+        # :sample is reserved; intervals may not clash.
+        @test_throws "time=:sample collides with a column name reserved by forecast()/" *
+                     "backtest() results (:origin, :step, :y, :y_hat, :sample). Rename " *
+                     "the time column in your data." csp(time=:sample)
+        @test_throws "id=:sample collides" csp(id=:sample)
+        clash = fit(csp(time=:lo_95), (lo_95=monthly, y=yseas))
+        @test_throws "the interval column :lo_95 would overwrite a column of the " *
+                     "result. Rename your time or id column." forecast(
+            clash, 3; levels=(95,))
+    end
 end

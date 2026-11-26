@@ -19,6 +19,11 @@ interface: any MLJ `Deterministic` regressor is a valid base model, and a
   `import MachineLearningForecast: fit_transform, untransform, dropped_rows`).
 - Panel (multi-series) forecasting: set `id` on [`Forecaster`](@ref) to fit
   one global model across many series ([`nseries`](@ref), [`SeriesState`](@ref)).
+- Probabilistic forecasts: [`ConformalSeasonalPool`](@ref) builds the training-free
+  forecaster of Conformal Seasonal Pools around [`SeasonalNaive`](@ref);
+  `forecast(f, h; levels=(80, 95))` adds interval columns and
+  [`forecast_samples`](@ref) returns the draws; [`crps`](@ref), [`Coverage`](@ref) and
+  the other scores measure them.
 - [`fit`](@ref) / [`forecast`](@ref) as a functional pair; [`backtest`](@ref)
   for expanding-window cross-validation, [`summarize`](@ref) for its scores;
   [`tune`](@ref) for pipeline tuning with an extensible ask!/tell!
@@ -41,7 +46,8 @@ import Random
 import Statistics
 import Tables
 
-export Forecaster, FittedForecaster, fit, forecast, backtest, BacktestResult, summarize,
+export Forecaster, FittedForecaster, fit, forecast, forecast_samples, backtest,
+       BacktestResult, summarize,
        FeatureSet, Lag, RollingMean, RollingStd, RollingMin, RollingMax,
        Diff, Calendar, Fourier, Exogenous, CustomFeature,
        TargetFeature, TimeFeature, ExogenousFeature,

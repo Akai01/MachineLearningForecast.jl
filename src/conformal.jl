@@ -76,9 +76,10 @@ ambiguous; per step is our reading. `recency=0` weighs the pool equally. When a 
 season has no history, `w_h` is 0 and only residuals are drawn (our choice; the paper does
 not define it).
 
-`rng` is copied once per series at every call, so repeated calls give the same draws on
-the same Julia version (use `StableRNGs.StableRNG` for draws that also reproduce across
-versions) and the method's own `rng` is never advanced.
+`rng` is copied when the method is built and once per series at every call, so repeated
+calls give the same draws on the same Julia version (use `StableRNGs.StableRNG` for draws
+that also reproduce across versions), and neither the method's `rng` nor the one passed in
+is advanced.
 
 The method has no coverage guarantee: its residual pool is motivated by split-conformal
 calibration (Papadopoulos et al. 2002), whose finite-sample guarantee needs exchangeable
@@ -129,8 +130,9 @@ struct PoolIntervals{W<:MixtureWeight,G<:Random.AbstractRNG}
                "samples=100.")
         samples ≥ 1 || throw(ArgumentError(
             "samples must be a whole number ≥ 1, got $samples. Pass e.g. samples=100."))
-        return new{typeof(weight),typeof(rng)}(Int(period), weight, Float64(calibration),
-                                               Float64(recency), Int(samples), rng)
+        r = copy(rng)
+        return new{typeof(weight),typeof(r)}(Int(period), weight, Float64(calibration),
+                                             Float64(recency), Int(samples), r)
     end
 end
 
@@ -264,4 +266,95 @@ function ConformalSeasonalPool(period; freq, weight=AdaptiveWeight(), calibratio
     iv = PoolIntervals(period; weight, calibration, recency, samples, rng)
     return Forecaster(SeasonalNaive(iv.period); features=FeatureSet(Lag(iv.period)),
                       freq, target, time, id, intervals=iv)
+end
+
+_no_intervals(who) = throw(ArgumentError(
+    "$who needs an interval method, but this forecaster has none. Build it with " *
+    "ConformalSeasonalPool(period; freq=...), or pass " *
+    "intervals=PoolIntervals(period) with a SeasonalNaive(period) model."))
+
+_require_intervals(fc::Forecaster, who) = _require_intervals(fc.intervals, who)
+_require_intervals(::Nothing, who) = _no_intervals(who)
+_require_intervals(::PoolIntervals, who) = nothing
+
+_check_levels(::Nothing) = Float64[]
+function _check_levels(levels)
+    ok = levels isa Real || applicable(iterate, levels)
+    ls = ok ? collect(levels isa Real ? (levels,) : levels) : Any[]
+    (ok && all(L -> L isa Real, ls)) || throw(ArgumentError(
+        "levels must be percentages, got $(repr(levels)). Pass e.g. levels=(80, 95)."))
+    out = Float64[_check_level(L) for L in ls]
+    isempty(out) && throw(ArgumentError(
+        "levels is empty; pass at least one level, e.g. levels=(95,)."))
+    allunique(out) || throw(ArgumentError(
+        "levels repeats a level, got $(repr(levels)); pass each level once, e.g. " *
+        "levels=(80, 95)."))
+    return out
+end
+
+# One matrix per series, each from its own rng copy.
+function _sample_matrices(iv::PoolIntervals, f::FittedForecaster, preds)
+    states = getfield(f, :series)
+    out = Vector{Matrix{Float64}}(undef, length(states))
+    for k in eachindex(states)
+        st = states[k]
+        out[k] = _in_series(f.spec, st.id) do
+            R = _seasonal_differences(st.y_history, iv.period, iv.calibration)
+            _pool_samples(copy(iv.rng), st.y_history, preds[k], R, iv)
+        end
+    end
+    return out
+end
+
+function _forecast_samples(f::FittedForecaster, hs::Vector{Int}, future)
+    states, grids, preds = _forecast_core(f, hs, future)
+    out = _output_table(f.spec, states, grids, preds)
+    return out, _sample_matrices(f.spec.intervals, f, preds)
+end
+
+# Columns lo_1, hi_1, lo_2, ... in the levels' order.
+function _interval_columns(S::AbstractMatrix, levels::Vector{Float64})
+    los, his = _interval_bounds(S, levels)
+    return [c for l in eachindex(levels) for c in (los[l], his[l])]
+end
+
+function _level_table(taken, levels, cols)
+    names = Tuple(Symbol(p, _level_label(L)) for L in levels for p in ("lo_", "hi_"))
+    clash = [n for n in names if n in taken]
+    isempty(clash) || throw(ArgumentError(
+        "the interval column$(length(clash) == 1 ? "" : "s") " *
+        "$(join(":" .* string.(clash), ", ")) would overwrite a column of the " *
+        "result. Rename your time or id column."))
+    return NamedTuple{names}(Tuple(cols))
+end
+
+"""
+    forecast_samples(f::FittedForecaster, h::Integer; future=nothing) -> NamedTuple
+
+The predictive samples behind `forecast(f, h; levels=...)`, as a long columntable: the id
+column (for a panel), the time column, `:sample` (1 to the method's `samples`) and
+`:y_hat`, one row per sample, `h * samples` rows per series. Needs a forecaster with an
+interval method ([`ConformalSeasonalPool`](@ref)). The draws are the ones the intervals
+are read from, and repeated calls give the same ones on the same Julia version. Each
+series draws from its own copy of the method's `rng`, so series share the random stream:
+draws of different series are dependent, so do not combine them by sample number (e.g. to
+sum a panel). Horizons are drawn independently, so a sample number does not trace a path
+across steps.
+
+# Example
+```julia
+draws = forecast_samples(fitted, 18)
+draws.y_hat[draws.sample .== 1]   # the first draw at each step
+```
+"""
+function forecast_samples(f::FittedForecaster, h::Integer; future=nothing)
+    _check_h(h)
+    _require_intervals(f.spec, "forecast_samples")
+    out, draws = _forecast_samples(f, fill(Int(h), nseries(f)), future)
+    S = reduce(vcat, draws)
+    n, B = size(S)
+    rows = repeat(1:n; inner=B)
+    lead = Base.front(keys(out))
+    base = NamedTuple{lead}(map(c -> out[c][rows], lead))
+    return merge(base, (sample=repeat(1:B; outer=n), y_hat=vec(permutedims(S))))
 end

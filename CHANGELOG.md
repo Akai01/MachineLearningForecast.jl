@@ -15,6 +15,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   interval method `PoolIntervals`; `AdaptiveWeight()` (CSP-Adaptive, the default) and
   `FixedWeight(w)` (CSP-Fixed at 0.5) set the mixture (all three public, not exported).
   The method has no coverage guarantee: measure it with `Coverage` in a `backtest`.
+- `forecast(f, h; levels=(80, 95))` adds `lo_<L>`/`hi_<L>` columns after `:y_hat`, in the
+  order the levels are given, for a forecaster with an interval method: the central `L` %
+  interval of the predictive samples, from Hyndman and Fan type 6 sample quantiles (levels
+  are percentages in (1, 100); `0.95` is an error). `y_hat` stays the point forecast.
+  `forecast_samples(f, h)` (exported) returns the draws as a long columntable `([id,] time,
+  :sample, :y_hat)`. Each series draws from its own copy of the method's `rng`, so series
+  share the random stream (common random numbers); draws are reproducible on the same Julia
+  version (use `StableRNG` for draws that also reproduce across versions), and a series'
+  draws do not depend on which other series are fitted or on their order. Shared draws
+  make series dependent: do not combine them by sample number (e.g. to sum a panel). The method copies its
+  `rng` when built, so advancing the generator passed in does not change later forecasts.
 - `SeasonalNaive(period)` (exported): an MLJ model that needs no training and predicts
   its `y_lag_<period>` input. With `FeatureSet(Lag(period))` and `Recursive()` it is
   the seasonal naive forecast at every horizon, a baseline for `backtest`. The recipe
@@ -144,6 +155,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `:sample` joins the column names a time or id column may not use (`forecast_samples`
+  has a `:sample` column).
 - `Forecaster` has a field and keyword `intervals` (default `nothing`) and a fifth type
   parameter for it. `PoolIntervals` is accepted only with the setup the paper defines
   (`SeasonalNaive(m)`, exactly `FeatureSet(Lag(m))`, `Recursive()`, no transform); other

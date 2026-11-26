@@ -96,8 +96,8 @@ end
         end
         @test_throws ArgumentError mk(target=:v, time=:y)   # collides with folds.y
         @test_throws "time=:y collides with a column name reserved by forecast()/" *
-                     "backtest() results (:origin, :step, :y, :y_hat). Rename the time " *
-                     "column" mk(target=:v, time=:y)
+                     "backtest() results (:origin, :step, :y, :y_hat, :sample). Rename " *
+                     "the time column" mk(target=:v, time=:y)
     end
 
     @testset "ragged tables are rejected by name and length" begin
@@ -283,14 +283,14 @@ end
     @testset "export surface is pinned" begin
         # The README quotes these counts; keep them honest.
         exports = setdiff(names(MachineLearningForecast), [:MachineLearningForecast])
-        @test length(exports) == 54
+        @test length(exports) == 55
         @test :summarize in exports && summarize isa Function
         @test :Forecaster in exports && :tune in exports && :mase in exports
         @test :rmsse in exports
         @test :Mase in exports && :Rmsse in exports
         @test all(n -> n in exports,
                   (:crps, :fair_crps, :pinball_loss, :Coverage, :IntervalWidth,
-                   :SeasonalNaive, :ConformalSeasonalPool))
+                   :SeasonalNaive, :ConformalSeasonalPool, :forecast_samples))
         for name in (:Point, :Scaled, :Samples, :MetricInput, :metric_inputs, :metric_name,
                      :needs_ytrain, :PoolIntervals, :MixtureWeight, :AdaptiveWeight,
                      :FixedWeight)
