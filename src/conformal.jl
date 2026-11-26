@@ -271,13 +271,11 @@ function ConformalSeasonalPool(period; freq, weight=AdaptiveWeight(), calibratio
                       freq, target, time, id, intervals=iv)
 end
 
-_no_intervals(who) = throw(ArgumentError(
+_require_intervals(fc::Forecaster, who) = _require_intervals(fc.intervals, who)
+_require_intervals(::Nothing, who) = throw(ArgumentError(
     "$who needs an interval method, but this forecaster has none. Build it with " *
     "ConformalSeasonalPool(period; freq=...), or pass " *
     "intervals=PoolIntervals(period) with a SeasonalNaive(period) model."))
-
-_require_intervals(fc::Forecaster, who) = _require_intervals(fc.intervals, who)
-_require_intervals(::Nothing, who) = _no_intervals(who)
 _require_intervals(::PoolIntervals, who) = nothing
 
 _check_levels(::Nothing) = Float64[]
@@ -339,10 +337,11 @@ column (for a panel), the time column, `:sample` (1 to the method's `samples`) a
 `:y_hat`, one row per sample, `h * samples` rows per series. Needs a forecaster with an
 interval method ([`ConformalSeasonalPool`](@ref)). The draws are the ones the intervals
 are read from, and repeated calls give the same ones on the same Julia version. Each
-series draws from its own copy of the method's `rng`, so series share the random stream:
-draws of different series are dependent, so do not combine them by sample number (e.g. to
-sum a panel). Horizons are drawn independently, so a sample number does not trace a path
-across steps.
+series draws from its own copy of the method's `rng`, so every series starts from the same
+random numbers: draws of different series are dependent (and with the default `Xoshiro`
+they almost always stay aligned), so do not combine them by sample number (e.g. to sum a
+panel). Horizons are drawn independently, so a sample number does not trace a path across
+steps.
 
 # Example
 ```julia

@@ -285,9 +285,8 @@ What `metric` is called with, so [`backtest`](@ref) and [`tune`](@ref) know how 
 it: [`Point`](@ref) (the default) for `metric(y, ŷ)`, [`Scaled`](@ref) for
 `metric(y, ŷ; y_train)`, which also needs the fold's training target, and
 [`Samples`](@ref) for `metric(y, S)`, which scores sampled forecasts (`tune` refuses
-it). `Scaled` for
-[`mase`](@ref), [`rmsse`](@ref), [`Mase`](@ref) and [`Rmsse`](@ref). Define it for
-your own scaled metrics. Public, not exported.
+it). [`mase`](@ref), [`rmsse`](@ref), [`Mase`](@ref) and [`Rmsse`](@ref) are `Scaled`.
+Define it for your own scaled metrics. Public, not exported.
 
 # Example
 ```julia
@@ -406,6 +405,12 @@ function _check_sample_args(y::AbstractVector, S::AbstractMatrix)
         "y contains missing values; drop or impute them before scoring."))
     any(ismissing, S) && throw(ArgumentError(
         "S contains missing values; check the model that produced the forecasts."))
+    all(x -> x isa Real, y) || throw(ArgumentError(
+        "y must hold real numbers, got eltype $(eltype(y)); pass the actual values " *
+        "as a numeric vector."))
+    all(x -> x isa Real, S) || throw(ArgumentError(
+        "S must hold real numbers, got eltype $(eltype(S)); pass the samples as a " *
+        "numeric matrix."))
     any(isnan, y) && throw(ArgumentError(
         "y contains NaN (first at index $(findfirst(isnan, y))); drop or impute it " *
         "before scoring."))
@@ -456,14 +461,13 @@ function _central(y::AbstractVector, S::AbstractMatrix, level::Float64)
     return only(los), only(his)
 end
 
-# `pairs` is the denominator of the spread term.
-function _crps(y::AbstractVector, S::AbstractMatrix, pairs::Real)
+function _crps(y::AbstractVector, S::AbstractMatrix, npairs::Real)
     B = size(S, 2)
     total = 0.0
     for i in 1:length(y)
         x = sort!(S[i, :])
         for k in 1:B
-            total += abs(x[k] - y[i]) / B - (2k - B - 1) * x[k] / pairs
+            total += abs(x[k] - y[i]) / B - (2k - B - 1) * x[k] / npairs
         end
     end
     return total / length(y)
@@ -519,10 +523,15 @@ end
     pinball_loss(y, S; quantiles=0.1:0.1:0.9) -> Float64
 
 Mean pinball (quantile) loss of sampled forecasts: for every row and every `τ` in
-`quantiles`, `u * (τ - (u < 0))` with `u = y[i] - q`, where `q` is the `τ`-quantile of
-row `i` of `S` (Hyndman and Fan type 6, our choice: a new draw falls below the `k`-th
-smallest sample with probability `k / (B + 1)`). It is the plain mean over rows and
-levels, not normalised (our choice). In the units of `y`, lower is better.
+`quantiles`, `u * (τ - (u < 0))` with `u = y[i] - q`, where `q` is the `τ`-quantile of row
+`i` of `S` (Hyndman and Fan type 6, our choice: a new draw falls below the `k`-th smallest
+sample with probability `k / (B + 1)`). It is the plain mean over rows and levels, not
+normalised (our choice). In the units of `y`, lower is better. To score other quantiles in a
+[`backtest`](@ref), do not pass a closure (an anonymous function is a point metric): define
+a named function `f(y, S)` or a callable struct, and set `metric_inputs(::typeof(f)) =
+Samples()` (for a struct, `metric_inputs(::MyType)`) after `import MachineLearningForecast:
+metric_inputs, Samples`; name a struct's column with [`metric_name`](@ref) or a NamedTuple
+key.
 
 # Example
 ```julia

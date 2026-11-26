@@ -126,12 +126,12 @@ underscore: `99.5` gives `lo_99_5` and `hi_99_5`. A level that would give the na
 existing column (for example a time column called `lo_95`) is an error.
 
 The interval is the central one: the sample quantiles of the step's `B` draws at
-`(100 - L) / 200` and `(100 + L) / 200`. The quantile is Hyndman & Fan (1996) type 6, which is our
-choice (the paper names none). Type 6 puts the `k`-th smallest of `B` draws at probability
-`k / (B + 1)`, so, for draws without ties, a new draw from the same distribution falls below
-it with that probability on average. For 100 draws and `L = 95` the bounds are at positions
-2.525 and 98.475 of the sorted draws. A level above `100 (B - 1) / (B + 1)`, about 98 for
-100 draws, gives the smallest and largest draw:
+`(100 - L) / 200` and `(100 + L) / 200`. The quantile is Hyndman & Fan (1996) type 6, which
+is our choice (the paper names none). Type 6 puts the `k`-th smallest of `B` draws at
+probability `k / (B + 1)`, so, for draws without ties, a new draw from the same
+distribution falls below it with that probability on average. For 100 draws and `L = 95`
+the bounds are at positions 2.525 and 98.475 of the sorted draws. A level above
+`100 (B - 1) / (B + 1)`, about 98 for 100 draws, gives the smallest and largest draw:
 
 ```julia
 f84 = fit(csp, (ds = t[1:84], y = y[1:84]))
@@ -159,15 +159,17 @@ forecast_samples(f84, 12).y_hat == forecast_samples(f84, 12).y_hat   # true
 ```
 
 Because every series (and every backtest fold) starts from its own copy of the same
-generator, they use the same stream of random numbers on different histories. This is
-common random numbers. It has two consequences:
+generator, they start from the same random numbers on different histories. With the default
+`Xoshiro` the numbers almost always stay aligned; with a `StableRNG` they do not, because a
+draw from the residual pool can use more than one number, how many depending on the pool's
+size. Sharing a generator has two consequences:
 
 - the draws of different series are dependent. Never combine them by sample number, for
   example to sum a panel: the sum of the first draw of each series is not a draw of the
   sum, and its spread is wrong;
-- the Monte Carlo errors of the folds are correlated, so they do not average out over
-  folds as they would with independent draws. To see their size, run the backtest with
-  several seeds:
+- with the default `Xoshiro`, the Monte Carlo errors of the folds are correlated, so they
+  do not average out over folds as they would with independent draws. To see their size,
+  run the backtest with several seeds:
 
 ```julia
 using Random
@@ -314,7 +316,7 @@ daily cycle, 52 for weekly data with a yearly cycle. `period = 1` means no seaso
 centre is the last value, the residual pool holds first differences, and the seasonal pool
 is not used (`w = 0` with the default weight). A series needs at least `period + 1`
 rows; with fewer, `fit` throws an `ArgumentError` that asks for at least `period + 1`
-rows.
+rows. A panel skips such a series with a warning, so it gets no forecast and no intervals.
 
 A series also needs enough values for the residual pool: with the default share, the pool
 holds `min(floor(T / 2), T - m)` differences (1 for `T = m + 1`, 8 for `T = 20` and

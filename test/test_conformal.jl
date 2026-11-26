@@ -381,6 +381,15 @@
         r = tune(fc, (ds=monthly, y=yseas); grid=(model=[SeasonalNaive(12)],),
                  horizon=6, windows=2, metric=smape)
         @test r.best.intervals === fc.intervals && isfinite(only(r.table.mean_score))
+        # A grid that breaks the pairing fails every candidate, naming the model.
+        @test_throws ["all 1 tuning candidates failed to evaluate",
+                      "candidate 1 (model=EvoTreeRegressor(",
+                      "ArgumentError: intervals=PoolIntervals(12) is the paper's " *
+                      "Conformal Seasonal Pools, defined around the seasonal naive " *
+                      "forecast, but the model is EvoTreeRegressor. Intervals around " *
+                      "other models are not available."] tune(
+            fc, (ds=monthly, y=yseas); grid=(model=[EvoTreeRegressor(nrounds=5)],),
+            horizon=6, windows=2, metric=smape)
     end
 
     @testset "the docs state that there is no coverage guarantee" begin
@@ -715,6 +724,53 @@
         end
         @test many.forecasts.unique_id == fill("a", 18)
         @test one.scores == many.scores
+    end
+
+    @testset "a ragged panel with windows: columns, scores and draws agree" begin
+        t96 = collect(Date(2012, 1, 1):Month(1):Date(2019, 12, 1))
+        noise96 = randn(StableRNG(2), 96)
+        ya = [30 + 8 * sin(2π * i / 12) + 0.1i + noise96[i] for i in 1:96]
+        # C ends 6 months before A, so the fold origins differ.
+        panel = (unique_id=[fill("A", 96); fill("C", 54)], ds=[t96; monthly[1:54]],
+                 y=[ya; yseas[1:54]])
+        spec = csp(id=:unique_id)
+        ms = (mae, Mase(12), crps, fair_crps, pinball_loss, Coverage(95),
+              IntervalWidth(80))
+        r = backtest(spec, panel; horizon=6, windows=3, levels=(80, 95), metrics=ms)
+        @test all(ismissing, r.scores.origin)
+        @test keys(r.forecasts) == (:fold, :origin, :step, :unique_id, :ds, :y, :y_hat,
+                                    :lo_80, :hi_80, :lo_95, :hi_95)
+        @test length(r.forecasts.y) == 3 * 2 * 6
+        @test summarize(r).metric == [:mae, :mase_12, :crps, :fair_crps, :pinball_loss,
+                                      :coverage_95, :interval_width_80]
+        val(k, name) = only(r.scores.value[(r.scores.fold .== k) .&
+                                           (r.scores.metric .== name)])
+        for k in 1:3
+            cutA, cutC = 90 - 6 * (3 - k), 48 - 6 * (3 - k)
+            sel = r.forecasts.fold .== k
+            @test r.forecasts.unique_id[sel] == [fill("A", 6); fill("C", 6)]
+            @test r.forecasts.y[sel] == [ya[cutA .+ (1:6)]; yseas[cutC .+ (1:6)]]
+            @test r.forecasts.ds[sel] == [t96[cutA .+ (1:6)]; monthly[cutC .+ (1:6)]]
+            train = [i ≤ 96 ? i ≤ cutA : i - 96 ≤ cutC for i in eachindex(panel.y)]
+            fk = fit(spec, map(c -> c[train], panel))
+            _, d = C._forecast_samples(fk, [6, 6], nothing)
+            S = reduce(vcat, d)
+            truth = r.forecasts.y[sel]
+            los, his = C._interval_bounds(S, [80.0, 95.0])
+            @test r.forecasts.lo_80[sel] == los[1] && r.forecasts.hi_80[sel] == his[1]
+            @test r.forecasts.lo_95[sel] == los[2] && r.forecasts.hi_95[sel] == his[2]
+            @test val(k, :crps) == crps(truth, S)
+            @test val(k, :fair_crps) == fair_crps(truth, S)
+            @test val(k, :pinball_loss) == pinball_loss(truth, S)
+            @test val(k, :interval_width_80) == IntervalWidth(80)(truth, S)
+            # The score and the columns come from the same draws.
+            share = mean(r.forecasts.lo_95[sel] .≤ truth .≤ r.forecasts.hi_95[sel])
+            @test val(k, :coverage_95) == share == Coverage(95)(truth, S)
+        end
+        sm = summarize(r)
+        for (i, name) in enumerate(sm.metric)
+            @test sm.mean[i] ≈ mean(r.scores.value[r.scores.metric .== name])
+        end
     end
 
     @testset "intervals use only the fold's training window" begin

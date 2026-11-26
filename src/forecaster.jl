@@ -577,11 +577,12 @@ Hyndman and Fan type 6 sample quantiles (our choice); a level above `100 (sample
 (samples + 1)`, about 98 for the default 100 samples, gives the sample minimum and maximum.
 `:y_hat` stays the point forecast, not a sample median. The intervals are empirical and have
 no coverage guarantee. They come from draws seeded by the method's `rng`: each series draws
-from its own copy of it, so series share the random stream (common random numbers), repeated
-calls agree on the same Julia version (use `StableRNGs.StableRNG` for draws that also
-reproduce across versions), and a series' draws do not depend on which other series are
-fitted or on their order. Draws of different series are therefore dependent: do not combine
-them by sample number (e.g. to sum a panel). See [`forecast_samples`](@ref) for the draws.
+from its own copy of it, so every series starts from the same random numbers (with the
+default `Xoshiro` they almost always stay aligned), repeated calls agree on the same Julia
+version (use `StableRNGs.StableRNG` for draws that also reproduce across versions), and a
+series' draws do not depend on which other series are fitted or on their order. Draws of
+different series are therefore dependent: do not combine them by sample number (e.g. to
+sum a panel). See [`forecast_samples`](@ref) for the draws.
 
 # Example
 ```julia

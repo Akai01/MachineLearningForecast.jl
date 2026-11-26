@@ -214,11 +214,10 @@ by the large-scale series; use a scaled metric to compare series of different sc
 ([`crps`](@ref), [`fair_crps`](@ref), [`pinball_loss`](@ref), [`Coverage`](@ref),
 [`IntervalWidth`](@ref), or your own declared with [`metric_inputs`](@ref)) is called as
 `metric(y, S)` with the fold's samples and pools the rows of all series, like an unscaled
-point metric. Both need
-a forecaster with an interval method ([`ConformalSeasonalPool`](@ref)). The samples of a
-fold are drawn from that fold's training window only. Every fold draws from its own copy
-of the method's `rng`, so folds share the random stream: they repeat the same uniform
-numbers on different histories.
+point metric. Both need a forecaster with an interval method
+([`ConformalSeasonalPool`](@ref)). The samples of a fold are drawn from that fold's
+training window only. Every fold draws from its own copy of the method's `rng`, so the
+folds start from the same random numbers on different histories.
 
 When the feature set includes [`Exogenous`](@ref) columns, they are sliced from
 the held-out data automatically (they are "known" in a backtest).

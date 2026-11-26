@@ -372,7 +372,13 @@ end
             [1.0, -Inf], [1.0 2.0; 1.0 2.0])
         @test_throws "S contains Inf or -Inf (first at (1, 2))" Coverage(95)(
             [1.0], [1.0 Inf])
+        @test_throws "y must hold real numbers, got eltype String; pass the actual " *
+                     "values as a numeric vector." crps(["a"], [1.0 2.0])
+        @test_throws "S must hold real numbers, got eltype String; pass the samples " *
+                     "as a numeric matrix." crps([1.0], ["b" "c"])
         for score in scores
+            @test_throws "y must hold real numbers" score(["a"], [1.0 2.0])
+            @test_throws "S must hold real numbers" score([1.0], ["b" "c"])
             @test_throws "y has 2 values but S has 1 rows" score([1.0, 2.0], [1.0 2.0])
             @test_throws "metric inputs are empty" score(Float64[], zeros(0, 3))
             @test_throws "S has no samples" score([1.0], zeros(1, 0))

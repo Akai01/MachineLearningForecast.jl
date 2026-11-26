@@ -24,12 +24,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   interval of the predictive samples, from Hyndman and Fan type 6 sample quantiles (levels
   are percentages in (1, 100); `0.95` is an error). `y_hat` stays the point forecast.
   `forecast_samples(f, h)` (exported) returns the draws as a long columntable `([id,] time,
-  :sample, :y_hat)`. Each series draws from its own copy of the method's `rng`, so series
-  share the random stream (common random numbers); draws are reproducible on the same Julia
-  version (use `StableRNG` for draws that also reproduce across versions), and a series'
-  draws do not depend on which other series are fitted or on their order. Shared draws
-  make series dependent: do not combine them by sample number (e.g. to sum a panel). The method copies its
-  `rng` when built, so advancing the generator passed in does not change later forecasts.
+  :sample, :y_hat)`. Each series draws from its own copy of the method's `rng`, so every
+  series starts from the same random numbers (they almost always stay aligned with the
+  default `Xoshiro`, not with a `StableRNG` once pool sizes differ); draws are reproducible
+  on the same Julia version (use `StableRNG` for draws that also reproduce across versions),
+  and a series' draws do not depend on which other series are fitted or on their order.
+  Series are therefore dependent: do not combine their draws by sample number (e.g. to sum a
+  panel). The method copies its `rng` when built, so advancing the generator passed in does
+  not change later forecasts.
 - `SeasonalNaive(period)` (exported): an MLJ model that needs no training and predicts
   its `y_lag_<period>` input. With `FeatureSet(Lag(period))` and `Recursive()` it is
   the seasonal naive forecast at every horizon, a baseline for `backtest`. The recipe
@@ -40,16 +42,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   numbers of samples; needs `B >= 2`), `pinball_loss(y, S; quantiles=0.1:0.1:0.9)`,
   `Coverage(level)` and `IntervalWidth(level)`, where row `i` of the matrix `S` holds
   the samples for `y[i]`. Sample quantiles are Hyndman and Fan type 6. Levels are
-  percentages in (1, 100). They declare the new metric input kind `Samples()`
-  (`metric_inputs`, public, not exported); `tune` refuses such a metric, `backtest`
-  scores it.
+  percentages in (1, 100). Non-numeric `y` or `S` is an `ArgumentError`. They declare
+  the new metric input kind `Samples()` (`metric_inputs`, public, not exported); `tune`
+  refuses such a metric, `backtest` scores it.
 - `backtest` takes `levels=(80, 95)` and adds `lo_<L>`/`hi_<L>` columns to `forecasts`
   (after `:y_hat`) for a forecaster with an interval method. It also scores metrics whose
   `metric_inputs` is `Samples()`: `crps`, `fair_crps`, `pinball_loss`, `Coverage(level)`,
   `IntervalWidth(level)` and your own `metric(y, S)`, with the fold's samples, pooled over
   its rows. A fold's samples come from its training window only, drawn from a fresh copy
-  of the method's `rng`, so folds share the random stream. Without levels or such a
-  metric nothing is sampled and the results are unchanged. `summarize` works unchanged.
+  of the method's `rng`, so every fold starts from the same random numbers. Without levels
+  or such a metric nothing is sampled and the results are unchanged. `summarize` works
+  unchanged.
   An empty residual pool in a fold is an error that names the fold (and the series).
 - `summarize(r)` (exported): one row per metric of a `BacktestResult`, with the
   `:mean`, the sample `:std` over folds (`NaN` with one fold) and `:nfolds`. Its mean
@@ -174,8 +177,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Forecaster` has a field and keyword `intervals` (default `nothing`) and a fifth type
   parameter for it. `PoolIntervals` is accepted only with the setup the paper defines
   (`SeasonalNaive(m)`, exactly `FeatureSet(Lag(m))`, `Recursive()`, no transform); other
-  combinations throw an `ArgumentError` naming the fix. `intervals` is not tunable: `tune` and
-  `reconstruct` refuse it with a message of its own.
+  combinations throw an `ArgumentError` naming the fix. `intervals` is not tunable:
+  `tune` and `reconstruct` refuse it with a message of its own.
 - Breaking: `BacktestResult` has the fields `forecasts` and `scores` (were `folds` and
   `metrics`) and is parametric in their types. The `scores` table no longer has the
   `fold = 0` summary rows: use `summarize(r)`, which adds `std` and `nfolds`. `tune`

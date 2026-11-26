@@ -120,8 +120,8 @@ least as accurate on stationary data (Marcellino, Stock & Watson 2006). Compare 
 [`ConformalSeasonalPool`](@ref) and the `levels` keyword of [`forecast`](@ref) and
 [`backtest`](@ref) give intervals and predictive samples. Levels are percentages in (1,
 100), never fractions; `y_hat` stays the point forecast; the draws are reproducible on the
-same Julia version and drawn from one random stream shared by all series (common random
-numbers); sample scores pool the rows of a fold; the method has no coverage guarantee.
+same Julia version, and every series (and fold) starts from a copy of the same generator;
+sample scores pool the rows of a fold; the method has no coverage guarantee.
 [Probabilistic forecasts](probabilistic.md) gives the details, a worked example and the
 choices that are ours.
 
