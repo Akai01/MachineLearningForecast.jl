@@ -167,6 +167,36 @@ iterated (`Recursive`) forecasts are often at least as accurate on stationary da
 the rules each feature, backtest and metric follows, with recipes for custom features.
 Its "References" section lists the sources cited in this README.
 
+## Probabilistic forecasts
+
+`ConformalSeasonalPool(period; freq)` is the training-free forecaster of Conformal
+Seasonal Pools (Manokhin 2026, [arXiv:2605.03789](https://arxiv.org/abs/2605.03789)). For
+each series and step it draws 100 values from a mixture: past values from the same point
+in the season (recent ones more likely), and the seasonal naive forecast plus a signed
+seasonal difference taken from the most recent half of the series.
+
+```julia
+using MachineLearningForecast, Dates
+
+t = collect(Date(2012, 1, 1):Month(1):Date(2019, 12, 1))
+df = (ds = t, y = [50 + 10 * sin(2π * i / 12) + 0.2i + sin(i^2) for i in 1:96])
+
+csp = ConformalSeasonalPool(12; freq = Month(1))   # add id=:unique_id for a panel
+fitted = fit(csp, df)
+forecast(fitted, 12; levels = (80, 95))            # adds lo_80, hi_80, lo_95, hi_95
+forecast_samples(fitted, 12)                       # the draws, long format
+r = backtest(csp, df; horizon = 12, windows = 3, levels = (95,),
+             metrics = (mae, crps, Coverage(95), IntervalWidth(95)))
+summarize(r)
+```
+
+The method has no coverage guarantee: the paper reports coverage as an empirical property
+(a mean of 0.89 at the nominal 0.95 on its benchmark), so check it on your data with
+`Coverage(95)` in a `backtest`. The draws of different steps are independent, so they are
+not paths. [Probabilistic forecasts](docs/src/probabilistic.md) explains the method, the
+levels, the random draws, the scores and our choices. Intervals around other models are
+not available yet.
+
 ## Hyperparameter tuning
 
 ### Level 1 — tune the base model with MLJ (no MachineLearningForecast code involved)
@@ -338,6 +368,12 @@ MASE, can favour forecasts close to zero; the M5 competition used a squared-erro
 scaled measure (RMSSE) for this reason (Makridakis, Spiliotis & Assimakopoulos 2022);
 use `rmsse` for such series.
 
+`crps(y, S)`, `fair_crps(y, S)`, `pinball_loss(y, S)`, `Coverage(level)` and
+`IntervalWidth(level)` score sampled forecasts: row `i` of the matrix `S` holds the
+samples for `y[i]`, and a level is a percentage in (1, 100). `backtest` calls them with
+the fold's samples, pooled over its rows, for a forecaster with an interval method;
+`tune` refuses them.
+
 ## Error messages
 
 Validation failures throw `ArgumentError` with what was wrong, the offending
@@ -399,7 +435,8 @@ MIT — see [LICENSE](LICENSE).
   `future`, and per-series encodings (a series-id feature).
 - **More history features**: expanding mean, exponentially weighted mean,
   seasonal rolling statistics, rolling quantiles, and lags of exogenous columns.
-- **Prediction intervals** around the point forecasts.
+- **Prediction intervals around any model** (split conformal). Today only Conformal
+  Seasonal Pools, around the seasonal naive forecast.
 - **Model reuse**: forecast series not seen in training, update a fitted model
   with new observations without refitting, access the feature matrix, fit
   several models in one call, and tested save/load.

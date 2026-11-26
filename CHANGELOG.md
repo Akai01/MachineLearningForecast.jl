@@ -8,6 +8,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Documentation of probabilistic forecasts: a page "Probabilistic forecasts" (a worked
+  example, how Conformal Seasonal Pools work, levels and columns, the draws and the random
+  generator, the scores, panels, the settings and what is not promised), a README section,
+  a paragraph in "Leakage and conventions", and seven references.
 - `ConformalSeasonalPool(period; freq, ...)` (exported): the training-free probabilistic
   forecaster of Manokhin (2026), "Training-Free Probabilistic Time-Series Forecasting
   with Conformal Seasonal Pools", arXiv:2605.03789. It returns a `Forecaster` with a

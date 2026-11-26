@@ -31,6 +31,7 @@ makedocs(;
     authors = "Resul Akay and contributors",
     format,
     pages = ["Home" => "index.md", "Leakage and conventions" => "conventions.md",
+             "Probabilistic forecasts" => "probabilistic.md",
              "Using different models" => "models.md", "Tuning the models" => "tuning.md"],
     checkdocs = :exports,
     repo_kwargs...,

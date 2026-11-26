@@ -15,7 +15,10 @@ differences require `lag ≥ 1` and [`Lag`](@ref) requires `k ≥ 1`. A test
 compares every built-in feature's training columns with its forecast-time
 values and rewrites the target from a row onward to check that earlier rows do
 not change. `backtest` fits each fold, including its target transform, on the
-rows up to the fold's origin only.
+rows up to the fold's origin only. The pools and samples of
+[`ConformalSeasonalPool`](@ref) are built from the fitted training window only, so a
+`backtest` fold's intervals and sample scores never see its actuals; a test changes the
+values after fold 1's test window and checks that nothing in fold 1 moves.
 
 One case is yours to keep: a [`CustomFeature`](@ref) function must read only
 the history it is given. A function that reads a captured series or
@@ -111,6 +114,16 @@ steps need not be coherent (Marcellino, Stock & Watson 2006; Chevillon 2007; Ben
 Taieb et al. 2012). Empirically, iterated (`Recursive`) forecasts are often at
 least as accurate on stationary data (Marcellino, Stock & Watson 2006). Compare both with
 [`backtest`](@ref), or let [`tune`](@ref) search over `strategy`.
+
+## Probabilistic forecasts
+
+[`ConformalSeasonalPool`](@ref) and the `levels` keyword of [`forecast`](@ref) and
+[`backtest`](@ref) give intervals and predictive samples. Levels are percentages in (1,
+100), never fractions; `y_hat` stays the point forecast; the draws are reproducible on the
+same Julia version and drawn from one random stream shared by all series (common random
+numbers); sample scores pool the rows of a fold; the method has no coverage guarantee.
+[Probabilistic forecasts](probabilistic.md) gives the details, a worked example and the
+choices that are ours.
 
 ## Recipes
 
@@ -349,12 +362,24 @@ summarize(backtest(snaive, df; horizon = 14, windows = 3, metrics = (mae, smape)
 - Chevillon, G. (2007). Direct multi-step estimation and forecasting. *Journal of
   Economic Surveys*, 21(4), 746–785.
   <https://doi.org/10.1111/j.1467-6419.2007.00518.x>
+- Ferro, C. A. T., Richardson, D. S., & Weigel, A. P. (2008). On the effect of ensemble
+  size on the discrete and continuous ranked probability scores. *Meteorological
+  Applications*, 15(1), 19–24. <https://doi.org/10.1002/met.45>
+- Gneiting, T., & Katzfuss, M. (2014). Probabilistic forecasting. *Annual Review of
+  Statistics and Its Application*, 1, 125–151.
+  <https://doi.org/10.1146/annurev-statistics-062713-085831>
+- Gneiting, T., & Raftery, A. E. (2007). Strictly proper scoring rules, prediction, and
+  estimation. *Journal of the American Statistical Association*, 102(477), 359–378.
+  <https://doi.org/10.1198/016214506000001437>
 - Hewamalage, H., Ackermann, K., & Bergmeir, C. (2023). Forecast evaluation for
   data scientists: common pitfalls and best practices. *Data Mining and
   Knowledge Discovery*, 37(2), 788–832.
   <https://doi.org/10.1007/s10618-022-00894-5>
 - Hyndman, R. J., & Athanasopoulos, G. (2021). *Forecasting: principles and
   practice* (3rd ed.). OTexts. <https://otexts.com/fpp3/>
+- Hyndman, R. J., & Fan, Y. (1996). Sample quantiles in statistical packages. *The
+  American Statistician*, 50(4), 361–365.
+  <https://doi.org/10.1080/00031305.1996.10473566>
 - Hyndman, R. J., & Koehler, A. B. (2006). Another look at measures of forecast
   accuracy. *International Journal of Forecasting*, 22(4), 679–688.
   <https://doi.org/10.1016/j.ijforecast.2006.03.001>
@@ -365,7 +390,15 @@ summarize(backtest(snaive, df; horizon = 14, windows = 3, metrics = (mae, smape)
   competition: results, findings, and conclusions. *International Journal of
   Forecasting*, 38(4), 1346–1364.
   <https://doi.org/10.1016/j.ijforecast.2021.11.013>
+- Manokhin, V. (2026). Training-free probabilistic time-series forecasting with conformal
+  seasonal pools. arXiv:2605.03789. <https://arxiv.org/abs/2605.03789>
 - Marcellino, M., Stock, J. H., & Watson, M. W. (2006). A comparison of direct and
   iterated multistep AR methods for forecasting macroeconomic time series.
   *Journal of Econometrics*, 135(1–2), 499–526.
   <https://doi.org/10.1016/j.jeconom.2005.07.020>
+- Papadopoulos, H., Proedrou, K., Vovk, V., & Gammerman, A. (2002). Inductive confidence
+  machines for regression. In *Machine Learning: ECML 2002*, LNCS 2430, 345–356.
+  Springer. <https://doi.org/10.1007/3-540-36755-1_29>
+- Zamo, M., & Naveau, P. (2018). Estimation of the continuous ranked probability score
+  with limited information and applications to ensemble weather forecasts. *Mathematical
+  Geosciences*, 50(2), 209–234. <https://doi.org/10.1007/s11004-017-9709-7>
