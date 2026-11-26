@@ -149,7 +149,7 @@
         @test all(abs(mean(S[j, :] .> 0) - 0.5) < 0.02 for j in 1:3)
         @test all(v -> v == -1e6 || v in y, S)
 
-        # Two same-season values (T = 30): the Adaptive weight is 0.3.
+        # Two same-season values (T = 30): weight 0.3.
         S3 = C._pool_samples(StableRNG(5), y[1:30], fill(-1e6, 1), [0.0], cp)
         @test abs(mean(S3[1, :] .> 0) - 0.3) < 0.02
         # Exactly three same-season values (T = 36): back to 0.5.
@@ -272,5 +272,121 @@
         end
         # No guarantee; this only catches a broken sampler.
         @test mean(hits) > 0.9
+    end
+
+    csp(; kw...) = ConformalSeasonalPool(12; freq=Month(1), rng=StableRNG(9), kw...)
+
+    @testset "ConformalSeasonalPool builds the paired forecaster" begin
+        fc = csp()
+        @test fc isa Forecaster && fc.model isa SeasonalNaive && fc.model.period == 12
+        @test fc.strategy isa Recursive && fc.transform isa NoTransform
+        @test C.outputnames(fc.features) == [:y_lag_12]
+        @test fc.intervals isa C.PoolIntervals && fc.intervals.period == 12
+        @test fc.intervals.weight isa C.AdaptiveWeight && fc.intervals.samples == 100
+        @test !C.ispanel(fc) && C.ispanel(csp(id=:unique_id))
+        @test ConformalSeasonalPool(12; freq=Month(1), target=:v, time=:t).time === :t
+        tuned = ConformalSeasonalPool(12; freq=Month(1), weight=C.FixedWeight(0.5),
+                                      calibration=0.4, recency=0.1, samples=7)
+        @test tuned.intervals.weight isa C.FixedWeight && tuned.intervals.weight.w == 0.5
+        @test tuned.intervals.samples == 7
+        @test tuned.intervals.calibration == 0.4 && tuned.intervals.recency == 0.1
+        @test occursin(", intervals=PoolIntervals(12, AdaptiveWeight())", sprint(show, fc))
+        plain = Forecaster(SeasonalNaive(12); features=FeatureSet(Lag(12)), freq=Month(1))
+        @test plain.intervals === nothing && !occursin("intervals", sprint(show, plain))
+        # Training-free: fit keeps the series, trains nothing.
+        f = fit(fc, (ds=monthly, y=yseas))
+        @test only(f.models) isa C.TrainedModel && f.n_train == 60
+        @test_throws UndefKeywordError ConformalSeasonalPool(12)
+        @test_throws "calibration must be in (0, 1]" csp(calibration=2)
+        # The period is checked under this function's own name.
+        pfix = "Pass the season length in steps, e.g. 12 for monthly data, or 1 for " *
+               "no seasonality."
+        @test_throws("ConformalSeasonalPool needs a seasonal period ≥ 1 in steps of " *
+                     "freq, got 0. $pfix", ConformalSeasonalPool(0; freq=Month(1)))
+        @test_throws("ConformalSeasonalPool period must be a whole number, got 12.0. " *
+                     pfix, ConformalSeasonalPool(12.0; freq=Month(1)))
+        @test_throws("ConformalSeasonalPool period must be a whole number, not the " *
+                     "Bool true. $pfix", ConformalSeasonalPool(true; freq=Month(1)))
+        @test_throws "weight must be an AdaptiveWeight() or a FixedWeight(w)" csp(
+            weight="half")
+        rmsg = "rng must be a random number generator, got 1. Pass e.g. " *
+               "rng=StableRNG(42) or rng=Random.Xoshiro(42)."
+        @test_throws rmsg ConformalSeasonalPool(12; freq=Month(1), rng=1)
+        @test_throws rmsg C.PoolIntervals(12; rng=1)
+    end
+
+    @testset "a hand-built Forecaster is checked against the pairing" begin
+        iv = C.PoolIntervals(12)
+        hand(; kw...) = Forecaster(SeasonalNaive(12); features=FeatureSet(Lag(12)),
+                                   freq=Month(1), intervals=iv, kw...)
+        @test hand().intervals === iv
+        @test hand(id=:u).id === :u
+        fix = "Use ConformalSeasonalPool(12; freq=...) to build the paired forecaster, " *
+              "or Forecaster(SeasonalNaive(12); features=FeatureSet(Lag(12)), " *
+              "strategy=Recursive(), freq=..., intervals=PoolIntervals(12))."
+        # The pairing refuses every other model.
+        for model in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=2),
+                      TestModels.LinAR(1.0, 0.0))
+            @test_throws "intervals=PoolIntervals(12) is the paper's Conformal Seasonal " *
+                         "Pools, defined around the seasonal naive forecast, but the " *
+                         "model is $(nameof(typeof(model))). Intervals around other " *
+                         "models are not available. $fix" Forecaster(
+                model; features=FeatureSet(Lag(12)), freq=Month(1), intervals=iv)
+        end
+        @test_throws "intervals=PoolIntervals(12) needs SeasonalNaive(12), got " *
+                     "SeasonalNaive(7): the pools are built around the seasonal naive " *
+                     "forecast of that period. $fix" Forecaster(
+            SeasonalNaive(7); features=FeatureSet(Lag(7)), freq=Month(1), intervals=iv)
+        for (feats, got) in ((FeatureSet(Lag(1)), "[:y_lag_1]"),
+                             (FeatureSet(Lag(12), Lag(1)), "[:y_lag_12, :y_lag_1]"),
+                             (FeatureSet(Lag(12), Exogenous(:x)), "[:y_lag_12, :x]"))
+            @test_throws "intervals=PoolIntervals(12) needs the feature set to be " *
+                         "exactly FeatureSet(Lag(12)), which feeds SeasonalNaive(12), " *
+                         "but the feature set produces $got. $fix" Forecaster(
+                SeasonalNaive(12); features=feats, freq=Month(1), intervals=iv)
+        end
+        @test_throws "intervals=PoolIntervals(12) needs strategy=Recursive(), got " *
+                     "$(Direct(3)): under Direct, Lag(12) is not in phase with the " *
+                     "target at every step, so the centre is not the seasonal naive " *
+                     "forecast. $fix" hand(strategy=Direct(3))
+        @test_throws "intervals=PoolIntervals(12) needs no target transform, got " *
+                     "$(LastScale(12)): the paper's pools and centre are on the " *
+                     "original scale. $fix" hand(transform=LastScale(12))
+        # reconstruct runs the constructor, so it is checked.
+        @test_throws "needs SeasonalNaive(12)" C.reconstruct(csp(); model=SeasonalNaive(7))
+        # Anything but nothing or a PoolIntervals is refused.
+        for bad in (:csp, 0.95, csp())
+            @test_throws "intervals must be nothing or a PoolIntervals(m), got " *
+                         "$(repr(bad)). Pass intervals=PoolIntervals(m) here; " *
+                         "ConformalSeasonalPool(m; freq) builds a whole Forecaster." hand(
+                intervals=bad)
+        end
+    end
+
+    @testset "intervals are not tunable and reconstruct keeps them" begin
+        fc = csp()
+        @test C.reconstruct(fc).intervals === fc.intervals
+        @test C.reconstruct(fc; model=SeasonalNaive(12)).intervals === fc.intervals
+        @test !(:intervals in C.TUNABLE_FIELDS) && :intervals in fieldnames(Forecaster)
+        msg(lead, noun) = "$lead the $noun :intervals, which cannot be tuned: tune " *
+                          "ranks candidates by point-forecast metrics and interval " *
+                          "settings leave y_hat unchanged. Compare them with " *
+                          "backtest(...; metrics=(crps, Coverage(95)))."
+        @test_throws msg("cannot reconstruct Forecaster with", "field") C.reconstruct(
+            fc; intervals=nothing)
+        @test_throws msg("grid has", "key") tune(
+            fc, (ds=monthly, y=yseas); grid=(intervals=[fc.intervals],), horizon=6,
+            initial=36)
+        # A point metric tunes a CSP spec and keeps its intervals.
+        r = tune(fc, (ds=monthly, y=yseas); grid=(model=[SeasonalNaive(12)],),
+                 horizon=6, windows=2, metric=smape)
+        @test r.best.intervals === fc.intervals && isfinite(only(r.table.mean_score))
+    end
+
+    @testset "the docs state that there is no coverage guarantee" begin
+        for doc in (string(@doc(C.PoolIntervals)), string(@doc(ConformalSeasonalPool)))
+            @test occursin("no coverage guarantee", doc)
+            @test !occursin(r"\bvalid\b|\bguaranteed\b", doc)
+        end
     end
 end

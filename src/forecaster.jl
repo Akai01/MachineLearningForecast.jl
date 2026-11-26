@@ -6,7 +6,7 @@ const RESERVED_OUTPUT_NAMES = (:origin, :step, :y, :y_hat)
 
 """
     Forecaster(model; features, strategy=Recursive(), freq, target=:y, time=:ds, id=nothing,
-               transform=NoTransform())
+               transform=NoTransform(), intervals=nothing)
 
 Immutable forecasting specification.
 
@@ -36,6 +36,11 @@ Immutable forecasting specification.
   fitted per series on the training history only, and forecasts are mapped
   back to the original scale. The default [`NoTransform`](@ref) leaves the
   target as given.
+- `intervals`: `nothing` (the default), or a `PoolIntervals` interval method (public,
+  not exported: `using MachineLearningForecast: PoolIntervals`): Conformal Seasonal
+  Pools around the seasonal naive forecast. It is accepted only with a
+  [`SeasonalNaive`](@ref) model of the same period, exactly `FeatureSet(Lag(period))`,
+  `Recursive()` and no transform; [`ConformalSeasonalPool`](@ref) builds that setup.
 
 Fit with [`fit`](@ref), which returns a [`FittedForecaster`](@ref); the spec
 itself is never mutated.
@@ -54,7 +59,7 @@ panel = Forecaster(model;
                    target=:y, time=:ds, id=:unique_id)
 ```
 """
-struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol},X<:TargetTransform}
+struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol},X<:TargetTransform,U}
     model::M
     features::FeatureSet
     strategy::S
@@ -63,10 +68,11 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol},X<:TargetTransf
     time::Symbol
     id::I
     transform::X
+    intervals::U
     function Forecaster(model; features, strategy::ForecastStrategy=Recursive(), freq,
                         target::Symbol=:y, time::Symbol=:ds,
                         id::Union{Nothing,Symbol}=nothing,
-                        transform::TargetTransform=NoTransform())
+                        transform::TargetTransform=NoTransform(), intervals=nothing)
         features isa FeatureSet || throw(ArgumentError(
             "features must be a FeatureSet such as FeatureSet(Lag(1), Lag(7)), got " *
             "$(repr(features)). Wrap the features in FeatureSet(...)."))
@@ -141,8 +147,10 @@ struct Forecaster{M,S<:ForecastStrategy,I<:Union{Nothing,Symbol},X<:TargetTransf
                 "results ($(join(":" .* string.(RESERVED_OUTPUT_NAMES), ", "))). " *
                 "Rename the id column in your data."))
         end
-        return new{typeof(model),typeof(strategy),typeof(id),typeof(transform)}(
-            model, features, strategy, freq, target, time, id, transform)
+        _check_pairing(model, features, strategy, transform, intervals)
+        return new{typeof(model),typeof(strategy),typeof(id),typeof(transform),
+                   typeof(intervals)}(model, features, strategy, freq, target, time, id,
+                                      transform, intervals)
     end
 end
 
@@ -194,7 +202,8 @@ _history_who(fc::Forecaster) = iszero(dropped_rows(fc.transform)) ?
 """
 Fields `reconstruct` (and so `tune`) may override. The data-shape fields
 (`freq`, `target`, `time`, `id`) stay fixed: they describe the data, not the
-model.
+model. `intervals` stays fixed too: `tune` scores point forecasts, and interval
+settings leave `y_hat` unchanged.
 """
 const TUNABLE_FIELDS = (:model, :features, :strategy, :transform)
 
@@ -208,6 +217,10 @@ function _check_tunable(ks, lead, noun, subject)
     isempty(unknown) || throw(ArgumentError(
         "$lead unknown $noun$(length(unknown) == 1 ? "" : "s") $(list(unknown)); " *
         "valid $(noun)s are $(list(TUNABLE_FIELDS))."))
+    :intervals in ks && throw(ArgumentError(
+        "$lead the $noun :intervals, which cannot be tuned: tune ranks candidates by " *
+        "point-forecast metrics and interval settings leave y_hat unchanged. Compare " *
+        "them with backtest(...; metrics=(crps, Coverage(95)))."))
     data = setdiff(ks, TUNABLE_FIELDS)
     isempty(data) || throw(ArgumentError(
         "$subject$(length(data) == 1 ? "" : "s") $(list(data)) " *
@@ -814,7 +827,8 @@ function Base.show(io::IO, fc::Forecaster)
           length(fc.features), " features, ", fc.strategy, ", freq=", fc.freq,
           ", target=:", fc.target, ", time=:", fc.time,
           ispanel(fc) ? ", id=:$(fc.id)" : "",
-          fc.transform isa NoTransform ? "" : ", transform=$(fc.transform)", ")")
+          fc.transform isa NoTransform ? "" : ", transform=$(fc.transform)",
+          fc.intervals === nothing ? "" : ", intervals=$(fc.intervals)", ")")
 end
 
 function Base.show(io::IO, f::FittedForecaster)

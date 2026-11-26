@@ -48,7 +48,7 @@ export Forecaster, FittedForecaster, fit, forecast, backtest, BacktestResult, su
        ForecastStrategy, Recursive, Direct,
        mae, rmse, mape, smape, mase, rmsse, Mase, Rmsse,
        crps, fair_crps, pinball_loss, Coverage, IntervalWidth,
-       SeasonalNaive,
+       SeasonalNaive, ConformalSeasonalPool,
        tune, TuneResult, TuningStrategy, GridSearch, RandomSearch,
        SeriesState, nseries,
        TargetTransform, NoTransform, MeanScale, LastScale,

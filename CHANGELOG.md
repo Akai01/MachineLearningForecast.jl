@@ -8,6 +8,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `ConformalSeasonalPool(period; freq, ...)` (exported): the training-free probabilistic
+  forecaster of Manokhin (2026), "Training-Free Probabilistic Time-Series Forecasting
+  with Conformal Seasonal Pools", arXiv:2605.03789. It returns a `Forecaster` with a
+  `SeasonalNaive(period)` model, `Lag(period)`, `Recursive()`, no transform and the
+  interval method `PoolIntervals`; `AdaptiveWeight()` (CSP-Adaptive, the default) and
+  `FixedWeight(w)` (CSP-Fixed at 0.5) set the mixture (all three public, not exported).
+  The method has no coverage guarantee: measure it with `Coverage` in a `backtest`.
 - `SeasonalNaive(period)` (exported): an MLJ model that needs no training and predicts
   its `y_lag_<period>` input. With `FeatureSet(Lag(period))` and `Recursive()` it is
   the seasonal naive forecast at every horizon, a baseline for `backtest`. The recipe
@@ -137,6 +144,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `Forecaster` has a field and keyword `intervals` (default `nothing`) and a fifth type
+  parameter for it. `PoolIntervals` is accepted only with the setup the paper defines
+  (`SeasonalNaive(m)`, exactly `FeatureSet(Lag(m))`, `Recursive()`, no transform); other
+  combinations throw an `ArgumentError` naming the fix. `intervals` is not tunable: `tune` and
+  `reconstruct` refuse it with a message of its own.
 - Breaking: `BacktestResult` has the fields `forecasts` and `scores` (were `folds` and
   `metrics`) and is parametric in their types. The `scores` table no longer has the
   `fold = 0` summary rows: use `summarize(r)`, which adds `std` and `nfolds`. `tune`

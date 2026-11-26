@@ -137,6 +137,11 @@ MachineLearningForecast.Scaled
 ### Probabilistic forecasts
 
 ```@docs
+ConformalSeasonalPool
+MachineLearningForecast.PoolIntervals
+MachineLearningForecast.AdaptiveWeight
+MachineLearningForecast.FixedWeight
+MachineLearningForecast.MixtureWeight
 crps
 fair_crps
 pinball_loss

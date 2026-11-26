@@ -6,9 +6,10 @@ input, the target one season back. With `FeatureSet(Lag(period))` and [`Recursiv
 a [`Forecaster`](@ref) repeats the last observed value at each step's position in the
 season, the seasonal naive forecast, at every horizon: the fed-back forecasts supply the
 lags beyond one season. This holds without a target transform or with a scaling one such
-as [`MeanScale`](@ref); `Difference` or `LogRatio` change the forecasts. Use it as a baseline in [`backtest`](@ref). Under
-[`Direct`](@ref), `Lag(period)` is not in phase with the target at every step, so the
-forecasts are not seasonal naive: use `Recursive()`.
+as [`MeanScale`](@ref); `Difference` or `LogRatio` change the forecasts. Use it as a
+baseline in [`backtest`](@ref), or as the centre of [`ConformalSeasonalPool`](@ref).
+Under [`Direct`](@ref), `Lag(period)` is not in phase with the target at every step, so
+the forecasts are not seasonal naive: use `Recursive()`.
 
 # Example
 ```julia

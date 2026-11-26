@@ -377,7 +377,7 @@ end
         MLF = MachineLearningForecast
         alt = (model=EvoTreeRegressor(nrounds=7), features=FeatureSet(Lag(3)),
                strategy=Direct(2), freq=Hour(1), target=:v, time=:t, id=:uid,
-               transform=LastScale(3))
+               transform=LastScale(3), intervals=MLF.PoolIntervals(7))
         # A new field must be added here, or this test fails.
         @test Set(keys(alt)) == Set(fieldnames(Forecaster))
         @test Set(MLF.TUNABLE_FIELDS) ⊆ Set(fieldnames(Forecaster))

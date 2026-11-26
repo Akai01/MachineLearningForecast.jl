@@ -283,16 +283,17 @@ end
     @testset "export surface is pinned" begin
         # The README quotes these counts; keep them honest.
         exports = setdiff(names(MachineLearningForecast), [:MachineLearningForecast])
-        @test length(exports) == 53
+        @test length(exports) == 54
         @test :summarize in exports && summarize isa Function
         @test :Forecaster in exports && :tune in exports && :mase in exports
         @test :rmsse in exports
         @test :Mase in exports && :Rmsse in exports
         @test all(n -> n in exports,
                   (:crps, :fair_crps, :pinball_loss, :Coverage, :IntervalWidth,
-                   :SeasonalNaive))
+                   :SeasonalNaive, :ConformalSeasonalPool))
         for name in (:Point, :Scaled, :Samples, :MetricInput, :metric_inputs, :metric_name,
-                     :needs_ytrain)
+                     :needs_ytrain, :PoolIntervals, :MixtureWeight, :AdaptiveWeight,
+                     :FixedWeight)
             @test !(name in exports)
         end
         @test :TransformChain in exports

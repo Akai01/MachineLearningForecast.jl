@@ -17,6 +17,7 @@ season has no history).
 
 # Example
 ```julia
+using MachineLearningForecast: FixedWeight
 ConformalSeasonalPool(12; freq=Month(1), weight=FixedWeight(0.5))
 ```
 """
@@ -65,7 +66,8 @@ forecast plus a signed seasonal difference `y[t] - y[t - period]` drawn uniforml
 last `calibration` share of the series. The defaults are the paper's. `period` is the
 season length in steps of `freq` (1 for none). Build the paired forecaster with
 [`ConformalSeasonalPool`](@ref); a hand-built `Forecaster` accepts this method only with a
-[`SeasonalNaive`](@ref)`(period)` model, `Lag(period)`, `Recursive()` and no transform.
+[`SeasonalNaive`](@ref)`(period)` model, exactly `FeatureSet(Lag(period))`, `Recursive()`
+and no transform.
 
 The seasonal pool weighs the value at time `t` by `exp(-recency * (T - t))`, with `T - t`
 in time steps of `freq` (so the weights fall by `exp(-recency * period)` per season).
@@ -88,6 +90,7 @@ paper did not test other values of `samples`, `recency` or `calibration`.
 
 # Example
 ```julia
+using MachineLearningForecast: PoolIntervals
 PoolIntervals(12; calibration=0.5, recency=0.01, samples=100)
 ```
 """
@@ -100,12 +103,15 @@ struct PoolIntervals{W<:MixtureWeight,G<:Random.AbstractRNG}
     rng::G
     function PoolIntervals(period; weight=AdaptiveWeight(), calibration=0.5,
                            recency=0.01, samples=100,
-                           rng::Random.AbstractRNG=Random.Xoshiro(42))
+                           rng=Random.Xoshiro(42))
         _whole(period, "PoolIntervals period", "Pass the season length in steps, " *
                "e.g. 12 for monthly data, or 1 for no seasonality.")
         period ≥ 1 || throw(ArgumentError(
             "PoolIntervals needs a seasonal period ≥ 1 in steps of freq, got $period. " *
             "Pass e.g. 12 for monthly data, or 1 for no seasonality."))
+        rng isa Random.AbstractRNG || throw(ArgumentError(
+            "rng must be a random number generator, got $(repr(rng)). Pass e.g. " *
+            "rng=StableRNG(42) or rng=Random.Xoshiro(42)."))
         weight isa MixtureWeight || throw(ArgumentError(
             "weight must be an AdaptiveWeight() or a FixedWeight(w), got " *
             "$(repr(weight)). Pass e.g. weight=FixedWeight(0.5)."))
@@ -167,4 +173,95 @@ function _pool_samples(rng::Random.AbstractRNG, y::AbstractVector{Float64},
         end
     end
     return S
+end
+
+_csp_fix(p::Integer) = "Use ConformalSeasonalPool($p; freq=...) to build the paired " *
+                       "forecaster, or Forecaster(SeasonalNaive($p); " *
+                       "features=FeatureSet(Lag($p)), strategy=Recursive(), freq=..., " *
+                       "intervals=PoolIntervals($p))."
+
+_check_pairing(model, features, strategy, transform, ::Nothing) = nothing
+
+_check_pairing(model, features, strategy, transform, x) = throw(ArgumentError(
+    "intervals must be nothing or a PoolIntervals(m), got $(repr(x)). Pass " *
+    "intervals=PoolIntervals(m) here; ConformalSeasonalPool(m; freq) builds a whole " *
+    "Forecaster."))
+
+function _check_pairing(model, features, strategy, transform, iv::PoolIntervals)
+    _check_centre(model, iv)
+    outputnames(features) == [Symbol("y_lag_", iv.period)] || throw(ArgumentError(
+        "intervals=PoolIntervals($(iv.period)) needs the feature set to be exactly " *
+        "FeatureSet(Lag($(iv.period))), which feeds SeasonalNaive($(iv.period)), but " *
+        "the feature set produces $(outputnames(features)). " * _csp_fix(iv.period)))
+    _check_recursive(strategy, iv)
+    _check_untransformed(transform, iv)
+    return nothing
+end
+
+_check_centre(m::SeasonalNaive, iv::PoolIntervals) = m.period == iv.period ||
+    throw(ArgumentError(
+        "intervals=PoolIntervals($(iv.period)) needs SeasonalNaive($(iv.period)), got " *
+        "SeasonalNaive($(m.period)): the pools are built around the seasonal naive " *
+        "forecast of that period. " * _csp_fix(iv.period)))
+
+_check_centre(m, iv::PoolIntervals) = throw(ArgumentError(
+    "intervals=PoolIntervals($(iv.period)) is the paper's Conformal Seasonal Pools, " *
+    "defined around the seasonal naive forecast, but the model is " *
+    "$(nameof(typeof(m))). Intervals around other models are not available. " *
+    _csp_fix(iv.period)))
+
+_check_recursive(::Recursive, iv::PoolIntervals) = nothing
+_check_recursive(s::ForecastStrategy, iv::PoolIntervals) = throw(ArgumentError(
+    "intervals=PoolIntervals($(iv.period)) needs strategy=Recursive(), got $s: under " *
+    "Direct, Lag($(iv.period)) is not in phase with the target at every step, so the " *
+    "centre is not the seasonal naive forecast. " * _csp_fix(iv.period)))
+
+_check_untransformed(::NoTransform, iv::PoolIntervals) = nothing
+_check_untransformed(t::TargetTransform, iv::PoolIntervals) = throw(ArgumentError(
+    "intervals=PoolIntervals($(iv.period)) needs no target transform, got $t: the " *
+    "paper's pools and centre are on the original scale. " * _csp_fix(iv.period)))
+
+"""
+    ConformalSeasonalPool(period; freq, weight=AdaptiveWeight(), calibration=0.5,
+                          recency=0.01, samples=100, rng=Random.Xoshiro(42),
+                          target=:y, time=:ds, id=nothing) -> Forecaster
+
+The forecaster of Conformal Seasonal Pools (CSP; Manokhin 2026, arXiv:2605.03789): a
+training-free probabilistic forecast around the seasonal naive forecast with season
+length `period` (in steps of `freq`; 1 for none). It returns a [`Forecaster`](@ref) with
+`SeasonalNaive(period)`, `FeatureSet(Lag(period))`, `Recursive()`, no transform and
+`intervals=PoolIntervals(period; weight, calibration, recency, samples, rng)`, the only
+setup the method is defined for (a hand-built `Forecaster` with a mismatched setup, or
+with features beyond `FeatureSet(Lag(period))`, is refused). With `id` set, each series
+of the panel has its own pools. `weight` is `AdaptiveWeight()` (the paper's
+CSP-Adaptive, the default) or `FixedWeight(w)` (`FixedWeight(0.5)` is CSP-Fixed); both,
+like `PoolIntervals`, are public and not exported:
+`using MachineLearningForecast: PoolIntervals, FixedWeight`. `calibration`,
+`recency`, `samples` and `rng` are described under `PoolIntervals`.
+
+The method has no coverage guarantee: the paper reports empirical coverage only (mean
+0.89 at the 0.95 level on its benchmark), so measure it on your data with
+[`Coverage`](@ref) in a [`backtest`](@ref). Horizons are sampled independently; the
+samples are not paths.
+
+# Example
+```julia
+using MachineLearningForecast, Dates
+csp = ConformalSeasonalPool(12; freq=Month(1))
+fitted = fit(csp, df)      # trains nothing; keeps each series' history
+```
+"""
+function ConformalSeasonalPool(period; freq, weight=AdaptiveWeight(), calibration=0.5,
+                               recency=0.01, samples=100,
+                               rng=Random.Xoshiro(42), target::Symbol=:y, time::Symbol=:ds,
+                               id::Union{Nothing,Symbol}=nothing)
+    fix = "Pass the season length in steps, e.g. 12 for monthly data, or 1 for no " *
+          "seasonality."
+    _whole(period, "ConformalSeasonalPool period", fix)
+    period ≥ 1 || throw(ArgumentError(
+        "ConformalSeasonalPool needs a seasonal period ≥ 1 in steps of freq, got " *
+        "$period. $fix"))
+    iv = PoolIntervals(period; weight, calibration, recency, samples, rng)
+    return Forecaster(SeasonalNaive(iv.period); features=FeatureSet(Lag(iv.period)),
+                      freq, target, time, id, intervals=iv)
 end
