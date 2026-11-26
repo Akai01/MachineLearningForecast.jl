@@ -244,7 +244,8 @@ function _fold_origin(cut)
     return length(origins) == 1 ? only(origins) : missing
 end
 
-function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, scheme, metrics)
+function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, scheme, metrics,
+                         lv)
     groups = panel_groups(fc, tbl)
     for (key, sub, rows) in groups                       # validates each series
         _in_series(() -> target_vector(sub, fc.target, rows), fc, key)
@@ -273,12 +274,15 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, scheme, metri
     m_origin = Union{Missing,T}[]
     m_metric = Symbol[]
     m_value = Float64[]
+    level_cols = [Float64[] for _ in 1:(2 * length(lv))]
+    need_S = _wants_samples(lv, metrics)
 
     for (k, cut) in enumerate(cuts)
         train_rows = _rows_before(cut, ids, t_all)
         fitted = _fit_spec(fc, row_subset(tbl, train_rows), train_rows)
-        fcast = if isempty(exogcols)
-            forecast(fitted, horizon)
+        origin = _fold_origin(cut)
+        hs, nd = if isempty(exogcols)
+            fill(Int(horizon), nseries(fitted)), nothing
         else
             nd = row_subset(tbl[Tuple([fc.id; fc.time; exogcols])],
                             _rows_after(cut, ids, t_all))
@@ -287,20 +291,25 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, scheme, metri
                 g = future_grid(st.t_start, fc.freq, st.n_train, horizon)
                 something(findfirst(t -> !haskey(actual, (st.id, t)), g), horizon + 1) - 1
             end
-            _forecast(fitted, hs, nd)
+            hs, nd
         end
+        fcast, draws = need_S ?
+            _in_fold(() -> _forecast_samples(fitted, hs, nd), k, origin) :
+            (_forecast(fitted, hs, nd), nothing)
 
         fid, ft, fy = fcast[fc.id], fcast[fc.time], fcast.y_hat
         steps = _steps_by_id(fid)
         ytrue = Float64[]
         yhat = Float64[]
         scored = eltype(fid)[]
+        kept = Int[]
         for j in eachindex(fy)
             a = get(actual, (fid[j], ft[j]), nothing)
             a === nothing && continue
             push!(ytrue, a)
             push!(yhat, fy[j])
             push!(scored, fid[j])
+            push!(kept, j)
             push!(fold_col, k)
             push!(origin_col, cut[fid[j]])
             push!(step_col, steps[j])
@@ -309,14 +318,15 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, scheme, metri
             push!(y_col, a)
             push!(yhat_col, fy[j])
         end
-        origin = _fold_origin(cut)
         isempty(ytrue) && throw(ArgumentError(
             "backtest fold $k (origin $origin) produced no forecast that lines up " *
             "with an actual: no series trained on data up to the origin has data " *
             "after it. Choose initial and step so each origin falls inside the data " *
             "of a series."))
         history = Dict(st.id => st.y_history for st in getfield(fitted, :series))
-        fold = (; fc, history, ids=scored, y=ytrue, ŷ=yhat)
+        samp = need_S ? reduce(vcat, draws)[kept, :] : nothing
+        isempty(lv) || foreach(append!, level_cols, _interval_columns(samp, lv))
+        fold = (; fc, history, ids=scored, y=ytrue, ŷ=yhat, S=samp)
         for (name, m) in metrics
             push!(m_fold, k)
             push!(m_origin, origin)
@@ -324,8 +334,9 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, scheme, metri
             push!(m_value, Float64(score(metric_inputs(m), m, fold)))
         end
     end
-    forecasts = NamedTuple{(:fold, :origin, :step, fc.id, fc.time, :y, :y_hat)}(
+    base = NamedTuple{(:fold, :origin, :step, fc.id, fc.time, :y, :y_hat)}(
         (fold_col, origin_col, step_col, id_col, time_col, y_col, yhat_col))
+    forecasts = merge(base, _level_table(keys(base), lv, level_cols))
     scores = (fold=m_fold, origin=m_origin, metric=m_metric, value=m_value)
     return BacktestResult(forecasts, scores)
 end

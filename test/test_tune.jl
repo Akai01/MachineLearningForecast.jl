@@ -599,7 +599,7 @@ end
             @test_throws "tune metric: got the type Rmsse; pass Rmsse() or Rmsse(12)" tune(
                 base, df; grid, horizon=14, initial=90, metric=Rmsse)
             @test_throws "tune metric: metric_inputs returned true, which is not " *
-                         "Point() or Scaled()." tune(
+                         "Point(), Scaled() or Samples()." tune(
                 base, df; grid, horizon=14, initial=90, metric=TestModels.badtrait)
             # A tuner that would fail on its first ask never runs.
             tuner = ThirdPartyTuning.Fixed(1)

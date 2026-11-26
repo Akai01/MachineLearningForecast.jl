@@ -294,6 +294,10 @@ MachineLearningForecast.metric_inputs(::typeof(otherkind)) = OtherInput()
 struct BadName end
 (::BadName)(y, ŷ) = 1.0
 MachineLearningForecast.metric_name(::BadName) = "bad"
+"A user metric on samples: the mean spread of each row."
+spread(y, S) = Statistics.mean(Statistics.std(S; dims=2))
+MachineLearningForecast.metric_inputs(::typeof(spread)) =
+    MachineLearningForecast.Samples()
 
 end
 

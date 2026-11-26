@@ -215,9 +215,10 @@ end
     @testset "metric_inputs and metric_name must answer the protocol" begin
         @test_throws ArgumentError named((TestModels.badtrait,))
         @test_throws "backtest metric :badtrait: metric_inputs returned true, which " *
-                     "is not Point() or Scaled(). Define metric_inputs for your " *
-                     "metric, e.g. MachineLearningForecast.metric_inputs(::typeof(f)) " *
-                     "= MachineLearningForecast.Scaled()." named((TestModels.badtrait,))
+                     "is not Point(), Scaled() or Samples(). Define metric_inputs for " *
+                     "your metric, e.g. MachineLearningForecast.metric_inputs(" *
+                     "::typeof(f)) = MachineLearningForecast.Scaled()." named(
+            (TestModels.badtrait,))
         @test_throws "backtest metric :k: metric_inputs returned true" named(
             (k=TestModels.badtrait,))
         @test_throws ArgumentError named((TestModels.BadName(),))
@@ -226,7 +227,8 @@ end
                      "MachineLearningForecast.metric_name(::MyMetric) = :my_metric." named(
             (TestModels.BadName(),))
         @test_throws "metric_inputs returned $(repr(TestModels.OtherInput())), " *
-                     "which is not Point() or Scaled()." named((TestModels.otherkind,))
+                     "which is not Point(), Scaled() or Samples()." named(
+            (TestModels.otherkind,))
         # Keys name the metric, so metric_name is not asked.
         @test first.(named((k=TestModels.BadName(),))) == [:k]
     end

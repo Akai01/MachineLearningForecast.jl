@@ -337,9 +337,9 @@ function _check_metric(who, m)
         "$who: got the type $(nameof(m)); pass " *
         (m <: Union{Mase,Rmsse} ? "$(nameof(m))() or $(nameof(m))(12)" :
          "an instance of it") * "."))
-    metric_inputs(m) isa Union{Point,Scaled} || throw(ArgumentError(
-        "$who: metric_inputs returned $(repr(metric_inputs(m))), which is not Point() " *
-        "or Scaled(). Define metric_inputs for your metric, e.g. " *
+    metric_inputs(m) isa Union{Point,Scaled,Samples} || throw(ArgumentError(
+        "$who: metric_inputs returned $(repr(metric_inputs(m))), which is not Point(), " *
+        "Scaled() or Samples(). Define metric_inputs for your metric, e.g. " *
         "MachineLearningForecast.metric_inputs(::typeof(f)) = " *
         "MachineLearningForecast.Scaled()."))
     return nothing
@@ -383,8 +383,8 @@ end
 
 The [`metric_inputs`](@ref) kind of a metric called as `metric(y, S)`, where row `i` of
 the matrix `S` holds the sampled forecasts for `y[i]`, such as [`crps`](@ref).
-[`backtest`](@ref) does not score it yet, and [`tune`](@ref) refuses it. Public, not
-exported.
+[`backtest`](@ref) scores it with the fold's samples, and [`tune`](@ref) refuses it.
+Public, not exported.
 
 # Example
 ```julia

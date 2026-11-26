@@ -250,7 +250,10 @@ samples are not paths.
 ```julia
 using MachineLearningForecast, Dates
 csp = ConformalSeasonalPool(12; freq=Month(1))
-fitted = fit(csp, df)      # trains nothing; keeps each series' history
+fitted = fit(csp, df)                      # trains nothing; keeps each series' history
+forecast(fitted, 18; levels=(80, 95))      # adds lo_80, hi_80, lo_95, hi_95
+forecast_samples(fitted, 18)               # the draws, long format
+backtest(csp, df; horizon=18, windows=3, levels=(95,), metrics=(crps, Coverage(95)))
 ```
 """
 function ConformalSeasonalPool(period; freq, weight=AdaptiveWeight(), calibration=0.5,

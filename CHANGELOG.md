@@ -37,8 +37,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Coverage(level)` and `IntervalWidth(level)`, where row `i` of the matrix `S` holds
   the samples for `y[i]`. Sample quantiles are Hyndman and Fan type 6. Levels are
   percentages in (1, 100). They declare the new metric input kind `Samples()`
-  (`metric_inputs`, public, not exported); `tune` refuses such a metric. `backtest`
-  does not score them yet.
+  (`metric_inputs`, public, not exported); `tune` refuses such a metric, `backtest`
+  scores it.
+- `backtest` takes `levels=(80, 95)` and adds `lo_<L>`/`hi_<L>` columns to `forecasts`
+  (after `:y_hat`) for a forecaster with an interval method. It also scores metrics whose
+  `metric_inputs` is `Samples()`: `crps`, `fair_crps`, `pinball_loss`, `Coverage(level)`,
+  `IntervalWidth(level)` and your own `metric(y, S)`, with the fold's samples, pooled over
+  its rows. A fold's samples come from its training window only, drawn from a fresh copy
+  of the method's `rng`, so folds share the random stream. Without levels or such a
+  metric nothing is sampled and the results are unchanged. `summarize` works unchanged.
+  An empty residual pool in a fold is an error that names the fold (and the series).
 - `summarize(r)` (exported): one row per metric of a `BacktestResult`, with the
   `:mean`, the sample `:std` over folds (`NaN` with one fold) and `:nfolds`. Its mean
   is the number the `fold = 0` rows held.
@@ -155,6 +163,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The error for a metric whose `metric_inputs` is not a known kind now names all three,
+  `Point()`, `Scaled()` and `Samples()`.
 - `:sample` joins the column names a time or id column may not use (`forecast_samples`
   has a `:sample` column).
 - `Forecaster` has a field and keyword `intervals` (default `nothing`) and a fifth type

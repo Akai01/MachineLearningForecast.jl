@@ -598,4 +598,226 @@
                      "result. Rename your time or id column." forecast(
             clash, 3; levels=(95,))
     end
+
+    @testset "backtest scores samples and adds interval columns" begin
+        spec = csp()
+        data = (ds=monthly, y=yseas)
+        ms = (mae, crps, Coverage(95), IntervalWidth(95))
+        r = backtest(spec, data; horizon=6, windows=3, levels=(95,), metrics=ms)
+        @test keys(r.forecasts) == (:fold, :origin, :step, :ds, :y, :y_hat, :lo_95, :hi_95)
+        @test summarize(r).metric == [:mae, :crps, :coverage_95, :interval_width_95]
+        @test unique(r.forecasts.origin) == monthly[[42, 48, 54]]
+        for k in 1:3
+            o = 36 + 6k
+            fk = fit(spec, map(c -> c[1:o], data))
+            manual = forecast(fk, 6; levels=(95,))
+            sel = r.forecasts.fold .== k
+            truth = yseas[o .+ (1:6)]
+            @test r.forecasts.y[sel] == truth
+            @test r.forecasts.y_hat[sel] == manual.y_hat
+            @test r.forecasts.lo_95[sel] == manual.lo_95
+            @test r.forecasts.hi_95[sel] == manual.hi_95
+            # Every fold starts from a fresh copy of the same rng.
+            S = only(C._forecast_samples(fk, [6], nothing)[2])
+            val(name) = only(r.scores.value[(r.scores.fold .== k) .&
+                                            (r.scores.metric .== name)])
+            @test val(:crps) == crps(truth, S)
+            @test val(:coverage_95) == Coverage(95)(truth, S)
+            @test val(:interval_width_95) == IntervalWidth(95)(truth, S)
+            @test val(:mae) == mae(truth, manual.y_hat)
+            # The metric and the columns come from the same samples.
+            @test val(:coverage_95) == mean(manual.lo_95 .≤ truth .≤ manual.hi_95)
+        end
+        two = backtest(spec, data; horizon=6, windows=2, levels=(80, 95), metrics=(crps,))
+        @test keys(two.forecasts)[end - 3:end] == (:lo_80, :hi_80, :lo_95, :hi_95)
+        # Levels add columns and change no point result.
+        plain = backtest(spec, data; horizon=6, windows=2)
+        withlv = backtest(spec, data; horizon=6, windows=2, levels=(95,))
+        @test keys(plain.forecasts) == (:fold, :origin, :step, :ds, :y, :y_hat)
+        @test plain.forecasts.y_hat == withlv.forecasts.y_hat
+        @test plain.scores == withlv.scores
+        # Horizon 1.
+        one = backtest(spec, data; horizon=1, windows=2, levels=(95,), metrics=(crps,))
+        @test all(isfinite, one.scores.value) && length(one.forecasts.y_hat) == 2
+        # A metric of your own on samples.
+        mine = backtest(spec, data; horizon=6, windows=2, metrics=(TestModels.spread,))
+        @test summarize(mine).metric == [:spread] && all(>(0), mine.scores.value)
+        # A level given as a scalar and a NamedTuple of metrics.
+        sc = backtest(spec, data; horizon=6, windows=2, levels=95,
+                      metrics=(score=crps, cover=Coverage(95)))
+        @test keys(sc.forecasts)[end - 1:end] == (:lo_95, :hi_95)
+        @test summarize(sc).metric == [:score, :cover]
+    end
+
+    @testset "ConformalSeasonalPool(1) backtest" begin
+        s1 = ConformalSeasonalPool(1; freq=Month(1), rng=StableRNG(3))
+        data = (ds=monthly, y=yseas)
+        r = backtest(s1, data; horizon=3, windows=2, levels=(90,),
+                     metrics=(crps, Coverage(90)))
+        for (k, o) in enumerate((54, 57))
+            fk = fit(s1, map(c -> c[1:o], data))
+            manual = forecast(fk, 3; levels=(90,))
+            sel = r.forecasts.fold .== k
+            @test r.forecasts.y_hat[sel] == fill(yseas[o], 3)
+            @test r.forecasts.lo_90[sel] == manual.lo_90
+            @test r.forecasts.hi_90[sel] == manual.hi_90
+            S = only(C._forecast_samples(fk, [3], nothing)[2])
+            sk = r.scores.fold .== k
+            @test r.scores.value[sk] ==
+                  [crps(yseas[o .+ (1:3)], S), Coverage(90)(yseas[o .+ (1:3)], S)]
+        end
+    end
+
+    @testset "a panel backtest keeps the samples of the scored rows" begin
+        # "b" ends at row 54: no fold-2 actuals for it.
+        ids = [fill("b", 54); fill("a", 60)]
+        panel = (unique_id=ids, ds=[monthly[1:54]; monthly],
+                 y=[2 .* yseas[1:54]; yseas])
+        spec = csp(id=:unique_id)
+        r = backtest(spec, panel; horizon=6, initial=48, step=6, levels=(95,),
+                     metrics=(crps, Coverage(95)))
+        @test keys(r.forecasts) ==
+              (:fold, :origin, :step, :unique_id, :ds, :y, :y_hat, :lo_95, :hi_95)
+        sel = r.forecasts.fold .== 2
+        @test count(==(1), r.forecasts.fold) == 12 && count(sel) == 6
+        @test all(==("a"), r.forecasts.unique_id[sel])
+        val(k, name) = only(r.scores.value[(r.scores.fold .== k) .&
+                                           (r.scores.metric .== name)])
+        # Fold 2: "b" comes first and loses all its rows.
+        rows2 = panel.ds .≤ monthly[54]
+        f2 = fit(spec, map(c -> c[rows2], panel))
+        out2, draws = C._forecast_samples(f2, [6, 6], nothing)
+        @test out2.unique_id == [fill("b", 6); fill("a", 6)]
+        Sa = draws[2]
+        truth = yseas[55:60]
+        @test val(2, :crps) == crps(truth, Sa)
+        @test val(2, :coverage_95) == Coverage(95)(truth, Sa)
+        los, his = C._interval_bounds(Sa, [95.0])
+        @test r.forecasts.lo_95[sel] == only(los) && r.forecasts.hi_95[sel] == only(his)
+        @test r.forecasts.y_hat[sel] == out2.y_hat[7:12]
+        # Fold 1 pools the rows of both series, in series order.
+        f1 = fit(spec, map(c -> c[panel.ds .≤ monthly[48]], panel))
+        _, d1 = C._forecast_samples(f1, [6, 6], nothing)
+        truth1 = [2 .* yseas[49:54]; yseas[49:54]]
+        @test val(1, :crps) == crps(truth1, reduce(vcat, d1))
+        @test val(1, :coverage_95) == Coverage(95)(truth1, reduce(vcat, d1))
+    end
+
+    @testset "a one-series panel backtest equals the single series" begin
+        data = (ds=monthly, y=yseas)
+        pan = (unique_id=fill("a", 60), ds=monthly, y=yseas)
+        ms = (mae, crps, Coverage(80), IntervalWidth(80))
+        one = backtest(csp(), data; horizon=6, windows=3, levels=(80, 95), metrics=ms)
+        many = backtest(csp(id=:unique_id), pan; horizon=6, windows=3, levels=(80, 95),
+                        metrics=ms)
+        for c in keys(one.forecasts)
+            @test one.forecasts[c] == many.forecasts[c]
+        end
+        @test many.forecasts.unique_id == fill("a", 18)
+        @test one.scores == many.scores
+    end
+
+    @testset "intervals use only the fold's training window" begin
+        spec = csp()
+        later = [yseas[1:48]; 1000 .* yseas[49:60]]
+        ms = (mae, crps, Coverage(95))
+        bt(y) = backtest(spec, (ds=monthly, y=y); horizon=6, windows=3, levels=(95,),
+                         metrics=ms)
+        r1, r2 = bt(yseas), bt(later)
+        f1 = r1.forecasts.fold .== 1
+        for c in (:y, :y_hat, :lo_95, :hi_95)
+            @test r1.forecasts[c][f1] == r2.forecasts[c][f1]
+        end
+        s1 = r1.scores.fold .== 1
+        @test r1.scores.value[s1] == r2.scores.value[s1]
+        @test any(r1.scores.value[.!s1] .!= r2.scores.value[.!s1])
+        # Fold 2 trains up to row 48: only its actuals move.
+        f2 = r1.forecasts.fold .== 2
+        for c in (:y_hat, :lo_95, :hi_95)
+            @test r1.forecasts[c][f2] == r2.forecasts[c][f2]
+        end
+        @test r1.forecasts.y[f2] != r2.forecasts.y[f2]
+        f3 = r1.forecasts.fold .== 3
+        @test r1.forecasts.y_hat[f3] == r2.forecasts.y_hat[f3]
+        @test r1.forecasts.hi_95[f3] != r2.forecasts.hi_95[f3]
+        # Panel: series "a" changes after its own fold-1 window.
+        ids = [fill("b", 60); fill("a", 60)]
+        ya = yseas .+ 5
+        pan(y) = (unique_id=ids, ds=[monthly; monthly], y=[yseas; y])
+        ps = csp(id=:unique_id)
+        btp(y) = backtest(ps, pan(y); horizon=6, windows=3, levels=(95,), metrics=ms)
+        p1, p2 = btp(ya), btp(vcat(ya[1:48], 1000 .* yseas[49:60]))
+        g1 = p1.forecasts.fold .== 1
+        for c in (:y, :y_hat, :lo_95, :hi_95)
+            @test p1.forecasts[c][g1] == p2.forecasts[c][g1]
+        end
+        @test p1.scores.value[p1.scores.fold .== 1] ==
+              p2.scores.value[p2.scores.fold .== 1]
+        @test any(p1.scores.value[p1.scores.fold .!= 1] .!=
+                  p2.scores.value[p2.scores.fold .!= 1])
+        g3 = p1.forecasts.fold .== 3
+        @test p1.forecasts.hi_95[g3] != p2.forecasts.hi_95[g3]
+    end
+
+    @testset "backtest needs an interval method for levels and sample metrics" begin
+        data = (ds=monthly, y=yseas)
+        plain = Forecaster(SeasonalNaive(12); features=FeatureSet(Lag(12)), freq=Month(1))
+        who = "backtest with levels or a sample-based metric needs an interval method, " *
+              "but this forecaster has none. Build it with ConformalSeasonalPool(period; " *
+              "freq=...), or pass intervals=PoolIntervals(period) with a " *
+              "SeasonalNaive(period) model."
+        @test_throws who backtest(plain, data; horizon=6, windows=2, metrics=(crps,))
+        @test_throws who backtest(plain, data; horizon=6, windows=2, levels=(95,))
+        @test_throws who backtest(plain, data; horizon=6, windows=2,
+                                  metrics=(TestModels.spread,))
+        pplain = Forecaster(SeasonalNaive(12); features=FeatureSet(Lag(12)),
+                            freq=Month(1), id=:unique_id)
+        pan = (unique_id=fill("a", 60), ds=monthly, y=yseas)
+        @test_throws who backtest(pplain, pan; horizon=6, windows=2, levels=(95,))
+        # Point metrics on a plain forecaster still run.
+        @test backtest(plain, data; horizon=6, windows=2) isa BacktestResult
+        spec = csp()
+        @test_throws "an interval level is a percentage in (1, 100), got 0.95" backtest(
+            spec, data; horizon=6, windows=2, levels=(0.95,))
+        @test_throws "levels is empty" backtest(spec, data; horizon=6, windows=2,
+                                                levels=())
+        @test_throws "which is not Point(), Scaled() or Samples()." backtest(
+            spec, data; horizon=6, windows=2, metrics=(TestModels.badtrait,))
+        # tune refuses a sample metric before any fit.
+        @test_throws "tune ranks candidates by a point-forecast metric" tune(
+            spec, data; grid=(model=[SeasonalNaive(12)],), horizon=6, windows=2,
+            metric=crps)
+    end
+
+    @testset "an empty residual pool names the fold" begin
+        # 5 % of 14 values leaves no seasonal difference.
+        thin = csp(calibration=0.05)
+        @test_throws("backtest fold 1 (origin 2016-02-01): the residual pool for " *
+                     "step 1 is empty",
+                     backtest(thin, (ds=monthly, y=yseas); horizon=3, initial=14,
+                              levels=(95,)))
+        @test_throws("backtest fold 1 (origin 2016-02-01): the residual pool",
+                     backtest(thin, (ds=monthly, y=yseas); horizon=3, initial=14,
+                              metrics=(crps,)))
+        ids = [fill("a", 60); fill("z", 14)]
+        panel = (unique_id=ids, ds=[monthly; monthly[1:14]], y=[yseas; yseas[1:14]])
+        # Each series is cut at its own end, so no single origin.
+        @test_throws("backtest fold 1: series unique_id=\"z\": the residual pool for " *
+                     "step 1 is empty",
+                     backtest(csp(id=:unique_id, calibration=0.05), panel;
+                              horizon=1, windows=1, levels=(95,)))
+        @test_throws("backtest fold 1 (origin 2016-02-01): series unique_id=\"a\": the " *
+                     "residual pool for step 1 is empty",
+                     backtest(csp(id=:unique_id, calibration=0.05), panel;
+                              horizon=3, initial=14, levels=(95,)))
+        # Without levels or sample metrics nothing is sampled.
+        @test backtest(thin, (ds=monthly, y=yseas); horizon=3, initial=14) isa
+              BacktestResult
+        @test backtest(csp(id=:unique_id, calibration=0.05), panel; horizon=1,
+                       windows=1) isa BacktestResult
+        @test C._in_fold(() -> 1, 2, missing) == 1
+        @test_throws "backtest fold 2: boom" C._in_fold(
+            () -> throw(ArgumentError("boom")), 2, missing)
+        @test_throws ErrorException C._in_fold(() -> error("x"), 2, missing)
+    end
 end

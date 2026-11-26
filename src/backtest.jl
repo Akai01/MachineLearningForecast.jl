@@ -7,7 +7,8 @@ vectors, Tables.jl-compatible):
 - `forecasts`: one row per fold × horizon step, with columns `:fold`, `:origin`
   (the last training timestamp the row's forecast starts from), `:step`
   (1..horizon), the spec's time column, `:y` (actual), and `:y_hat` (forecast).
-  A panel backtest adds the id column after `:step`.
+  A panel backtest adds the id column after `:step`. With `levels`, the columns
+  `lo_<L>` and `hi_<L>` follow `:y_hat`.
 - `scores`: one row per fold × metric (columns `:fold`, `:origin`, `:metric`,
   `:value`). A fold's `:origin` is `missing` when its series start their
   forecasts at different timestamps. [`summarize`](@ref) reduces it to the mean
@@ -67,10 +68,13 @@ end
 Score metric `m` of input `kind` (see [`metric_inputs`](@ref)) on one backtest fold.
 `fold` holds `fc`, the forecaster, `history`, the fold's training target (a vector
 for a single series, a `Dict` by series id for a panel), `ids` (a panel only, the
-series of each scored row), `y` and `ŷ`.
+series of each scored row), `y`, `ŷ` and `S`, the forecast samples (a matrix with one row
+per scored row, `nothing` unless the backtest has `levels` or a metric of kind
+[`Samples`](@ref)).
 """
 score(::Point, m, fold::NamedTuple) = m(fold.y, fold.ŷ)
 score(::Scaled, m, fold::NamedTuple) = _score_scaled(fold.fc, m, fold)
+score(::Samples, m, fold::NamedTuple) = m(fold.y, fold.S)
 
 _score_scaled(::Forecaster{M,S,Nothing}, m, fold) where {M,S<:ForecastStrategy} =
     m(fold.y, fold.ŷ; y_train=fold.history)
@@ -160,7 +164,7 @@ end
 
 """
     backtest(fc::Forecaster, data; horizon, initial=nothing, windows=nothing,
-             step=horizon, metrics=(mae, rmse)) -> BacktestResult
+             step=horizon, metrics=(mae, rmse), levels=nothing) -> BacktestResult
 
 Expanding-window time-series cross-validation. Pass exactly one of:
 
@@ -205,6 +209,17 @@ training-window naive error, then averaged over series (here weighted by scored 
 our choice). Unscaled metrics are pooled across series, so on a panel they are dominated
 by the large-scale series; use a scaled metric to compare series of different scale.
 
+`levels` (percentages in (1, 100), such as `(80, 95)`) adds the columns `lo_<L>` and
+`hi_<L>` to `forecasts`, as [`forecast`](@ref) does. A metric that scores samples
+([`crps`](@ref), [`fair_crps`](@ref), [`pinball_loss`](@ref), [`Coverage`](@ref),
+[`IntervalWidth`](@ref), or your own declared with [`metric_inputs`](@ref)) is called as
+`metric(y, S)` with the fold's samples and pools the rows of all series, like an unscaled
+point metric. Both need
+a forecaster with an interval method ([`ConformalSeasonalPool`](@ref)). The samples of a
+fold are drawn from that fold's training window only. Every fold draws from its own copy
+of the method's `rng`, so folds share the random stream: they repeat the same uniform
+numbers on different histories.
+
 When the feature set includes [`Exogenous`](@ref) columns, they are sliced from
 the held-out data automatically (they are "known" in a backtest).
 A backtest uses the realised values of the covariates, so it scores ex-post forecasts
@@ -225,7 +240,7 @@ summarize(results)   # mean and std of each metric over folds
 function backtest(fc::Forecaster, data; horizon::Integer,
                   initial::Union{Nothing,Integer}=nothing,
                   windows::Union{Nothing,Integer}=nothing,
-                  step::Integer=horizon, metrics=(mae, rmse))
+                  step::Integer=horizon, metrics=(mae, rmse), levels=nothing)
     _nobool(horizon, "backtest horizon", "Pass the number of steps each fold " *
             "forecasts, e.g. horizon=28.")
     horizon ≥ 1 || throw(ArgumentError(
@@ -239,16 +254,32 @@ function backtest(fc::Forecaster, data; horizon::Integer,
         "the origin, e.g. step=$horizon, which equals horizon (the default)."))
     _check_horizon(fc, horizon)
     named = _named_metrics(metrics)
+    lv = _check_levels(levels)
+    _wants_samples(lv, named) &&
+        _require_intervals(fc, "backtest with levels or a sample-based metric")
     tbl = normalize_table(data)
-    return _backtest_spec(fc, tbl, horizon, scheme, named)
+    return _backtest_spec(fc, tbl, horizon, scheme, named, lv)
 end
 
-_backtest_spec(fc::Forecaster{M,S,Symbol}, tbl, horizon, scheme,
-               metrics) where {M,S} =
-    _backtest_panel(fc, tbl, horizon, scheme, metrics)
+_wants_samples(lv, named) =
+    !isempty(lv) || any(p -> metric_inputs(last(p)) isa Samples, named)
 
-function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, scheme,
-                        metrics) where {M,S}
+# Names the fold, so a sampler error says where it happened.
+function _in_fold(f, k, origin)
+    try
+        return f()
+    catch err
+        err isa ArgumentError || rethrow()
+        at = origin === missing ? "fold $k" : "fold $k (origin $origin)"
+        throw(ArgumentError("backtest $at: " * err.msg))
+    end
+end
+
+_backtest_spec(fc::Forecaster{M,S,Symbol}, tbl, horizon, scheme, metrics,
+               lv) where {M,S} = _backtest_panel(fc, tbl, horizon, scheme, metrics, lv)
+
+function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, scheme, metrics,
+                        lv) where {M,S}
     t_all = require_column(tbl, fc.time, "time")
     validate_time_column(t_all, fc.time, fc.freq)
     y_all = target_vector(tbl, fc.target)
@@ -266,11 +297,16 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, scheme,
     m_origin = Union{Missing,T}[]
     m_metric = Symbol[]
     m_value = Float64[]
+    level_cols = [Float64[] for _ in 1:(2 * length(lv))]
+    need_S = _wants_samples(lv, metrics)
     for (k, o) in enumerate(origins)
         fitted = fit(fc, row_subset(tbl, 1:o))
         nd = isempty(exogcols) ? nothing :
              row_subset(tbl[Tuple([fc.time; exogcols])], (o + 1):(o + horizon))
-        fcast = forecast(fitted, horizon; future=nd)
+        fcast, draws = need_S ?
+            _in_fold(() -> _forecast_samples(fitted, [Int(horizon)], nd), k, t_all[o]) :
+            (forecast(fitted, horizon; future=nd), nothing)
+        samp = need_S ? only(draws) : nothing
         ytrue = y_all[(o + 1):(o + horizon)]
         yhat = fcast.y_hat
         append!(fold_col, fill(k, horizon))
@@ -279,7 +315,8 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, scheme,
         append!(time_col, fcast[fc.time])
         append!(y_col, ytrue)
         append!(yhat_col, yhat)
-        fold = (; fc, history=y_all[1:o], y=ytrue, ŷ=yhat)
+        isempty(lv) || foreach(append!, level_cols, _interval_columns(samp, lv))
+        fold = (; fc, history=y_all[1:o], y=ytrue, ŷ=yhat, S=samp)
         for (name, m) in metrics
             push!(m_fold, k)
             push!(m_origin, t_all[o])
@@ -287,8 +324,9 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, scheme,
             push!(m_value, Float64(score(metric_inputs(m), m, fold)))
         end
     end
-    forecasts = NamedTuple{(:fold, :origin, :step, fc.time, :y, :y_hat)}(
+    base = NamedTuple{(:fold, :origin, :step, fc.time, :y, :y_hat)}(
         (fold_col, origin_col, step_col, time_col, y_col, yhat_col))
+    forecasts = merge(base, _level_table(keys(base), lv, level_cols))
     scores = (fold=m_fold, origin=m_origin, metric=m_metric, value=m_value)
     return BacktestResult(forecasts, scores)
 end

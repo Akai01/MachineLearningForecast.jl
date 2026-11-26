@@ -338,8 +338,8 @@
                 for (bad, msg) in (
                         (Mase,) => "got the type Mase; pass Mase() or Mase(12)",
                         (a=Rmsse,) => "got the type Rmsse; pass Rmsse() or Rmsse(12)",
-                        (TestModels.badtrait,) => "metric_inputs returned true, which " *
-                                                  "is not Point() or Scaled().",
+                        (TestModels.badtrait,) => "metric_inputs returned true, " *
+                            "which is not Point(), Scaled() or Samples().",
                         (a=:b => mae,) => "not with a Pair.",
                         (TestModels.BadName(),) => "which is not a Symbol.")
                     @test_throws ArgumentError backtest(
