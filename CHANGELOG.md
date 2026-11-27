@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `backtest` accepts a `SplitConformal` forecaster. Every fold fits and calibrates the
+  published head on the fold's own rows, with or without `levels`, so `y_hat` does not
+  depend on `levels`; a fold costs the model fits of a plain fit, and `levels` or a samples
+  metric adds the error triangle. A single series whose first fold has too few rows is
+  refused before any fit, naming fold 1; on a panel, a fold leaves out a series too short
+  to calibrate, with a warning naming the fold and the series, and trains on the others.
 - `SplitConformal(holdout=c)` (exported): intervals and samples for any MLJ model. The
   last `holdout` rows of each series measure the model's own forecast errors, and the
   forecast comes from the model fitted without them, so `y_hat` differs from a forecaster

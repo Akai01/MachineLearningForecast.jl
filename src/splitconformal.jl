@@ -110,8 +110,9 @@ origin. `PoolIntervals` follows the paper and does not refuse a small pool;
   ends later comes from a model that has not seen its last rows, and it moves when a
   series with an earlier end is added. A series that ended long ago pulls the cutoff back
   for every series: leave out the series that ends earliest (under `Direct` the refusal
-  names it) or lower `holdout`; trimming the later series does not help. Coverage is
-  correlated across series.
+  names it) or lower `holdout`; trimming the later series does not help. A fold of a
+  [`backtest`](@ref) that drops a series too short to calibrate trains on fewer series.
+  Coverage is correlated across series.
 - `show` of the fitted forecaster and `SeriesState.n_train` report the history length,
   not the rows the head model was fitted on.
 - An error scale that depends on the season gives uneven coverage by month, though the
@@ -255,6 +256,12 @@ function _hist_text(fc)
            rows(d, "dropped")
 end
 
+# The earliest holdout start, and the rows before it.
+function _cutoff_rows(c, usable)
+    cutoff = minimum(p.t[length(p.t) - c + 1] for p in usable)
+    return cutoff, [searchsortedfirst(p.t, cutoff) - 1 for p in usable]
+end
+
 _check_head(iv, fc, ::Recursive, usable, rs, cutoff) = nothing
 function _check_head(iv::SplitConformal, fc::Forecaster{M,S,Nothing}, s::Direct,
                      usable, rs, cutoff) where {M,S}
@@ -389,9 +396,8 @@ function _fit_head(iv::SplitConformal, fc::Forecaster, groups)
     usable, short = _prepare_all(fc, groups)
     _warn_short(fc, short)
     exog = _exogenous_history(fc, usable, groups)
-    cutoff = minimum(p.t[length(p.t) - c + 1] for p in usable)
-    rmap = Dict(p.id => searchsortedfirst(p.t, cutoff) - 1 for p in usable)
-    rs = [rmap[p.id] for p in usable]
+    cutoff, rs = _cutoff_rows(c, usable)
+    rmap = Dict(p.id => r for (p, r) in zip(usable, rs))
     _check_head(iv, fc, fc.strategy, usable, rs, cutoff)
     head_groups = [(id, row_subset(sub, 1:rmap[id]), rows[1:rmap[id]])
                    for (id, sub, rows) in groups if get(rmap, id, 0) > mh]
@@ -467,5 +473,73 @@ function _check_support(iv::SplitConformal, f, lv, h, who)
     _check_horizon(f, h)
     msg = _support_message(iv.holdout, h, _depth(_strategy(f), iv.holdout), lv, who)
     msg === nothing || throw(ArgumentError(msg))
+    return nothing
+end
+
+const _MOVE_FOLD = "Move the first fold later (raise initial, or reduce windows, step " *
+                   "or horizon)"
+
+_fold_extra(::Recursive) = 1
+_fold_extra(s::Direct) = s.max_horizon
+_fold_who(::Recursive, c, mh) = ("", " to fit and calibrate")
+_fold_who(s::Direct, c, mh) = (" with $s", " ($c + $mh + $(s.max_horizon))")
+_fold_use(::Recursive, c, mh, o) = ""
+_fold_use(::Direct, c, mh, o) = o - c - mh >= 1 ? " use Direct($(o - c - mh))," : ""
+
+# Fold 1 is the smallest, so it fails first.
+function _check_fold_rows(iv::SplitConformal, fc::Forecaster{M,S,Nothing}, origins,
+                          t_all) where {M,S}
+    c, mh, st = iv.holdout, minhistory(fc), fc.strategy
+    o = Int(first(origins))
+    need = c + mh + _fold_extra(st)
+    o >= need && return nothing
+    with, detail = _fold_who(st, c, mh)
+    low = o - mh - _fold_extra(st)
+    lower = low >= 9 ? " lower holdout to $low or less," : ""
+    throw(ArgumentError(
+        "backtest fold 1 (origin $(t_all[o])): intervals=$iv$with needs at least " *
+        "$need training rows$detail, but the fold trains on $o. $_MOVE_FOLD,$lower" *
+        "$(_fold_use(st, c, mh, o)) or provide more data."))
+end
+
+# Series with n <= mh are the point fit's to skip.
+function _fold_train_rows(iv::SplitConformal, fc::Forecaster{M,S,Symbol}, groups, cut,
+                          train_rows, k, origin) where {M,S}
+    c, mh = iv.holdout, minhistory(fc)
+    need = c + mh + 1
+    ns = [haskey(cut, key) ? searchsortedlast(sub[fc.time], cut[key]) : 0
+          for (key, sub, _) in groups]
+    short = [(g[1], n) for (g, n) in zip(groups, ns) if mh < n < need]
+    kept = train_rows
+    if !isempty(short)
+        any(>=(need), ns) || throw(_no_calibratable(iv, mh, maximum(ns), need, k, origin))
+        drop = Set{Int}(i for (g, n) in zip(groups, ns) if mh < n < need for i in g[3])
+        kept = filter(i -> i ∉ drop, train_rows)
+        _warn_left_out(fc, iv, short, need, k, origin)
+    end
+    usable = [(id=g[1], t=view(g[2][fc.time], 1:n))
+              for (g, n) in zip(groups, ns) if n >= need]
+    isempty(usable) && return kept
+    cutoff, rs = _cutoff_rows(c, usable)
+    _in_fold(() -> _check_head(iv, fc, fc.strategy, usable, rs, cutoff), k, origin)
+    return kept
+end
+
+function _no_calibratable(iv, mh, longest, need, k, origin)
+    low = longest - mh - 1
+    lower = low >= 9 ? " lower holdout to $low or less," : ""
+    return ArgumentError(
+        "backtest $(_fold_at(k, origin)): intervals=$iv needs at least $need rows in " *
+        "a series up to the fold's cut, but the longest has $longest. " *
+        "$_MOVE_FOLD,$lower or provide longer series.")
+end
+
+function _warn_left_out(fc, iv, short, need, k, origin)
+    names = join((string(fc.id, "=", repr(id), " (", n, " rows)")
+                  for (id, n) in first(short, 5)), ", ")
+    @warn "backtest $(_fold_at(k, origin)): leaving out $(length(short)) series with " *
+          "fewer than $need rows up to the fold's cut, the minimum to calibrate with " *
+          "intervals=$iv; the fold trains on the other series: " *
+          "$names$(length(short) > 5 ? ", …" : "")"
     return nothing
 end

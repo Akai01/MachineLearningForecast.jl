@@ -178,17 +178,19 @@ Expanding-window time-series cross-validation. Pass exactly one of:
 For a **panel** forecaster (one with `id` set), `initial` cuts folds on the
 *global timestamp grid*, since rows are spread across series: `initial`,
 `step` and `horizon` count distinct timestamps. Each fold trains on every row
-at or before the origin timestamp, forecasts each series forward from its own
-last observed timestamp, and scores the result by joining forecasts to actuals
-on `(id, time)`, so ragged series contribute wherever they have actuals.
+at or before the origin timestamp (the head model of a `SplitConformal` forecaster stops
+earlier, see below), forecasts each series forward from its own last observed timestamp,
+and scores the result by joining forecasts to actuals on `(id, time)`, so ragged series
+contribute wherever they have actuals.
 `windows` instead counts the folds back from **each series' own end**, as the
 M competitions hold out each series' last values: in fold `k`, every series
 trains on its rows up to its own cutoff, and one global model is fitted on all
 of them. If the series are not aligned in calendar time, the training set of a fold
 can contain values from after another series' cutoff, a known pitfall of global
 models (Hewamalage, Ackermann & Bergmeir 2023). With `initial`, all series are cut at
-the same timestamp, which avoids it. For a panel, the `forecasts` table carries the id
-column too.
+the same timestamp, which avoids it, and so does a `SplitConformal` forecaster, whose head
+model trains only on the rows before the earliest holdout start of the fold's series. For
+a panel, the `forecasts` table carries the id column too.
 A fold does not score a series that has no rows up to the fold's origin, too few of them
 to train on (it is skipped with a warning), or no actuals after it, so the set of scored
 series can change from fold to fold.
@@ -215,9 +217,25 @@ by the large-scale series; use a scaled metric to compare series of different sc
 [`IntervalWidth`](@ref), or your own declared with [`metric_inputs`](@ref)) is called as
 `metric(y, S)` with the fold's samples and pools the rows of all series, like an unscaled
 point metric. `levels` and a samples metric both need a forecaster with an interval
-method ([`ConformalSeasonalPool`](@ref)). The samples of a fold are drawn from that fold's
-training window only. Every fold draws from its own copy of the method's `rng`, so the
-folds start from the same random numbers on different histories.
+method: [`ConformalSeasonalPool`](@ref), or any model with
+`intervals=SplitConformal(holdout=c)` ([`SplitConformal`](@ref)). The samples of a fold
+are drawn from that fold's training window only. With `ConformalSeasonalPool`, every fold
+draws from its own copy of the method's `rng`, so the folds start from the same random
+numbers on different histories; `SplitConformal` has no rng.
+
+With `SplitConformal`, every fold fits the published head: the model trained on the rows of
+the fold before its holdout (a panel: before the earliest holdout start of any series the
+fold calibrates) and calibrated on the holdout, the forecast that `fit` and `forecast` would
+publish at that origin. So `y_hat` does not depend on `levels`, and it differs from that of
+the same forecaster without `intervals`. A fold costs the model fits of one plain fit;
+`levels` or a samples metric adds the error triangle, about `holdout^2 / 2` predict rows per
+series under `Recursive`. A single series needs at least `holdout + minhistory + 1` rows in
+its first fold (`holdout + minhistory + D` under `Direct(D)`), or it is refused before any
+fit, naming fold 1. On a panel, each series needs `holdout + minhistory + 1` rows up to the
+fold's cut (under `Direct(D)` the series with the most rows before the common cutoff also
+needs `D` rows past `minhistory`). So a fold that drops a series too short to calibrate
+trains on fewer series, for point-only and `levels` runs alike; it warns, naming the fold
+and the series, and is refused when no series is left.
 
 When the feature set includes [`Exogenous`](@ref) columns, they are sliced from
 the held-out data automatically (they are "known" in a backtest).
@@ -265,14 +283,15 @@ end
 _wants_samples(lv, named) =
     !isempty(lv) || any(p -> metric_inputs(last(p)) isa Samples, named)
 
+_fold_at(k, origin) = origin === missing ? "fold $k" : "fold $k (origin $origin)"
+
 # Names the fold, so a sampler error says where it happened.
 function _in_fold(f, k, origin)
     try
         return f()
     catch err
         err isa ArgumentError || rethrow()
-        at = origin === missing ? "fold $k" : "fold $k (origin $origin)"
-        throw(ArgumentError("backtest $at: " * err.msg))
+        throw(ArgumentError("backtest $(_fold_at(k, origin)): " * err.msg))
     end
 end
 

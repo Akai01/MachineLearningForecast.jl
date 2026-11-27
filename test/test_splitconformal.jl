@@ -1880,6 +1880,615 @@ end
     end
 end
 
+@testset "SplitConformal backtest" begin
+    C = MachineLearningForecast
+    LinAR, MeanModel, CountFit = TestModels.LinAR, TestModels.MeanModel, TestModels.CountFit
+    FIT = TestModels.FIT_COUNT
+    D0 = Date(2020, 1, 1)
+    day(d) = D0 + Day(d - 1)
+    siv(c) = SplitConformal(holdout=c)
+    mk(model; c=nothing, feats=FeatureSet(Lag(1)), strat=Recursive(), id=nothing,
+       transform=NoTransform()) =
+        Forecaster(model; features=feats, strategy=strat, freq=Day(1), id, transform,
+                   intervals=c === nothing ? nothing : siv(c))
+    pmk(model; kw...) = mk(model; id=:unique_id, kw...)
+    models() = (LinAR(0.5, 1.0), MeanModel(), EvoTreeRegressor(nrounds=5), dtree())
+    # Dyadic values, so closed forms compare exactly.
+    yv(d, k) = 8 + mod(7d + 3k, 16) / 4 + d / 8
+    xv(d, k) = 100 + mod(5d + k, 8) / 2 + d / 4
+    ys(k, r) = [yv(d, k) for d in r]
+    function mkpanel(spans...; x=false)
+        ids, ds, y, xs = Any[], Date[], Float64[], Float64[]
+        for (k, (id, r)) in enumerate(spans), d in r
+            push!(ids, id)
+            push!(ds, day(d))
+            push!(y, yv(d, k))
+            push!(xs, xv(d, k))
+        end
+        base = (unique_id=identity.(ids), ds=ds, y=y)
+        return x ? merge(base, (x=xs,)) : base
+    end
+    mkdata(n) = (d = mkpanel(("a", 1:n)); (ds=d.ds, y=d.y))
+    take(d, mask) = NamedTuple{keys(d)}(map(v -> v[mask], values(d)))
+    headmean(parts, mh) = (v = reduce(vcat, [ys(k, (first(r) + mh):last(r))
+                                              for (k, r) in parts]);
+                           sum(v) / length(v))
+    val(r, k, name) = only(r.scores.value[(r.scores.fold .== k) .&
+                                          (r.scores.metric .== name)])
+    caught(f) = try f(); nothing catch err err end
+
+    @testset "levels on a single series equal the intervals of each fold's fit" begin
+        d, h = mkdata(90), 3
+        ms = (mae, crps, fair_crps, Coverage(95), IntervalWidth(95), pinball_loss)
+        for model in models()
+            fc = mk(model; c=45)
+            r = backtest(fc, d; horizon=h, windows=3, levels=(95,), metrics=ms)
+            @test keys(r.forecasts) == (:fold, :origin, :step, :ds, :y, :y_hat,
+                                        :lo_95, :hi_95)
+            @test summarize(r).metric == [:mae, :crps, :fair_crps, :coverage_95,
+                                          :interval_width_95, :pinball_loss]
+            for k in 1:3
+                o = 78 + 3k
+                f = fit(fc, (ds=d.ds[1:o], y=d.y[1:o]))
+                fo = forecast(f, h; levels=(95,))
+                sel = r.forecasts.fold .== k
+                for c in (:y_hat, :lo_95, :hi_95)
+                    @test r.forecasts[c][sel] == fo[c]
+                end
+                @test r.forecasts.y[sel] == d.y[(o + 1):(o + h)]
+                _, dr = C._forecast_samples(f, [h], nothing)
+                S, truth = only(dr), r.forecasts.y[sel]
+                @test val(r, k, :crps) == crps(truth, S)
+                @test val(r, k, :fair_crps) == fair_crps(truth, S)
+                @test val(r, k, :pinball_loss) == pinball_loss(truth, S)
+                @test val(r, k, :interval_width_95) == IntervalWidth(95)(truth, S)
+                @test val(r, k, :coverage_95) == Coverage(95)(truth, S)
+                @test val(r, k, :mae) == mae(truth, fo.y_hat)
+            end
+        end
+    end
+
+    @testset "levels on a panel equal the intervals of each fold's fit" begin
+        d, h = mkpanel("a" => 1:90, "b" => 1:80), 3
+        ms = (mae, crps, Coverage(95), IntervalWidth(95))
+        for model in models()
+            fc = pmk(model; c=45)
+            r = backtest(fc, d; horizon=h, windows=2, levels=(95,), metrics=ms)
+            @test keys(r.forecasts) == (:fold, :origin, :step, :unique_id, :ds, :y,
+                                        :y_hat, :lo_95, :hi_95)
+            @test all(ismissing, r.scores.origin)
+            for k in 1:2
+                cut = Dict("a" => 87 - 3 * (2 - k), "b" => 77 - 3 * (2 - k))
+                keep = [Dates.value(d.ds[i] - D0) + 1 ≤ cut[d.unique_id[i]]
+                        for i in eachindex(d.ds)]
+                f = fit(fc, take(d, keep))
+                fo = forecast(f, h; levels=(95,))
+                sel = r.forecasts.fold .== k
+                @test r.forecasts.unique_id[sel] == [fill("a", h); fill("b", h)]
+                for c in (:y_hat, :lo_95, :hi_95)
+                    @test r.forecasts[c][sel] == fo[c]
+                end
+                _, dr = C._forecast_samples(f, [h, h], nothing)
+                S, truth = reduce(vcat, dr), r.forecasts.y[sel]
+                @test val(r, k, :crps) == crps(truth, S)
+                @test val(r, k, :coverage_95) == Coverage(95)(truth, S)
+                @test val(r, k, :interval_width_95) == IntervalWidth(95)(truth, S)
+            end
+        end
+    end
+
+    @testset "y_hat does not depend on levels, and is the fold's head forecast" begin
+        d, h, c = mkdata(90), 3, 20
+        for model in models()
+            fc = mk(model; c)
+            a = backtest(fc, d; horizon=h, windows=3)
+            b = backtest(fc, d; horizon=h, windows=3, levels=(80,))
+            e = backtest(fc, d; horizon=h, windows=3, metrics=(mae, crps))
+            @test a.forecasts.y_hat == b.forecasts.y_hat == e.forecasts.y_hat
+            @test keys(a.forecasts) == (:fold, :origin, :step, :ds, :y, :y_hat)
+        end
+        # MeanModel: mean of the rows before the holdout.
+        fc = mk(MeanModel(); c)
+        for kw in ((;), (levels=(80,),))
+            r = backtest(fc, d; horizon=h, windows=3, kw...)
+            for k in 1:3
+                o = 78 + 3k
+                @test r.forecasts.y_hat[r.forecasts.fold .== k] ==
+                      fill(headmean([(1, 1:(o - c))], 1), h)
+            end
+        end
+        # A plain forecaster fits all the rows of the fold.
+        plain = backtest(mk(MeanModel()), d; horizon=h, windows=3)
+        @test plain.forecasts.y_hat[1:h] == fill(headmean([(1, 1:81)], 1), h)
+        # A panel's head stops before the earliest holdout.
+        pd = mkpanel("a" => 1:90, "b" => 1:70)
+        for model in models()
+            pfc = pmk(model; c)
+            a = backtest(pfc, pd; horizon=h, windows=3)
+            b = backtest(pfc, pd; horizon=h, windows=3, levels=(80,))
+            @test a.forecasts.y_hat == b.forecasts.y_hat
+        end
+        pm = pmk(MeanModel(); c)
+        r = backtest(pm, pd; horizon=h, windows=3)
+        for k in 1:3
+            # Series b ends first and sets the cutoff.
+            cutb = 70 - h - (3 - k) * h
+            want = headmean([(1, 1:(cutb - c)), (2, 1:(cutb - c))], 1)
+            @test r.forecasts.y_hat[r.forecasts.fold .== k] == fill(want, 2h)
+        end
+    end
+
+    @testset "refused before any fit" begin
+        d = mkdata(100)
+        fc = mk(CountFit(); c=40)
+        FIT[] = 0
+        @test_throws "levels=(95,) needs at least 39 calibration errors per step, but " *
+                     "intervals=SplitConformal(holdout=40) gives 29 at backtest horizon " *
+                     "12 (the origins that have 12 actuals), which supports central " *
+                     "levels up to 93.33. Pass levels <= 93.33, use horizon <= 2, or fit " *
+                     "with holdout >= 50." backtest(fc, d; horizon=12, windows=2,
+                                                    levels=(95,))
+        @test FIT[] == 0
+        fc20 = mk(CountFit(); c=20)
+        deep = "backtest horizon 13 needs at least 9 calibration errors per step, " *
+               "but intervals=SplitConformal(holdout=20) gives 8 at that horizon " *
+               "(the origins that have 13 actuals). Use horizon <= 12, or fit with " *
+               "holdout >= 21."
+        @test_throws deep backtest(fc20, d; horizon=13, windows=2, metrics=(mae, crps))
+        @test FIT[] == 0
+        pd = mkpanel("a" => 1:60, "b" => 1:60)
+        @test_throws deep backtest(pmk(CountFit(); c=20), pd; horizon=13, windows=2,
+                                   metrics=(Coverage(80),))
+        @test FIT[] == 0
+        # A point-only call has no depth rule.
+        @test backtest(fc20, d; horizon=13, windows=2) isa BacktestResult
+        @test FIT[] == 2
+        # The row check refuses before the first fit.
+        FIT[] = 0
+        @test_throws "backtest fold 1 (origin" backtest(
+            mk(CountFit(); c=60), mkdata(66); horizon=3, windows=2, step=5)
+        @test FIT[] == 0
+    end
+
+    @testset "a backtest fits nm models per fold, levels add only the triangle" begin
+        d = mkdata(60)
+        pd = mkpanel("a" => 1:60, "b" => 1:50)
+        for (strat, nm) in ((Recursive(), 1), (Direct(3), 3))
+            for (fc, data) in ((mk(CountFit(); c=20, strat), d),
+                               (pmk(CountFit(); c=20, strat), pd))
+                for kw in ((;), (levels=(80,),), (metrics=(mae, crps),),
+                           (levels=(80,), metrics=(crps,)))
+                    FIT[] = 0
+                    backtest(fc, data; horizon=3, windows=3, kw...)
+                    @test FIT[] == 3nm
+                end
+            end
+        end
+    end
+
+    @testset "nothing in a fold sees values after its window" begin
+        d, h = mkdata(90), 3
+        late = (ds=d.ds, y=[d.y[1:84]; 1000 .* d.y[85:90]])   # after fold 1
+        ms = (mae, crps, Coverage(95))
+        for model in (LinAR(0.5, 1.0), dtree())
+            fc = mk(model; c=45)
+            bt(x) = backtest(fc, x; horizon=h, windows=3, levels=(95,), metrics=ms)
+            r1, r2 = bt(d), bt(late)
+            f1 = r1.forecasts.fold .== 1
+            for c in (:y, :y_hat, :lo_95, :hi_95)
+                @test r1.forecasts[c][f1] == r2.forecasts[c][f1]
+            end
+            s1 = r1.scores.fold .== 1
+            @test r1.scores.value[s1] == r2.scores.value[s1]
+            @test any(r1.scores.value[.!s1] .!= r2.scores.value[.!s1])
+        end
+        # Ragged folds: the head stops before the holdout.
+        c = 20
+        pd = mkpanel("a" => 1:90, "b" => 1:70)
+        pm = pmk(MeanModel(); c)
+        # Series b's holdout starts at day 42 in fold 1.
+        moved = merge(pd, (y=[pd.unique_id[i] == "a" && pd.ds[i] ≥ day(42) ?
+                              1000.0 + pd.y[i] : pd.y[i] for i in eachindex(pd.y)],))
+        a, b = (backtest(pm, x; horizon=h, windows=3) for x in (pd, moved))
+        f1 = a.forecasts.fold .== 1
+        @test a.forecasts.y_hat[f1] == b.forecasts.y_hat[b.forecasts.fold .== 1]
+        @test a.forecasts.y_hat[f1] == fill(headmean([(1, 1:41), (2, 1:41)], 1), 2h)
+        @test a.forecasts.y_hat != b.forecasts.y_hat
+    end
+
+    @testset "single series: the first fold must fit and calibrate" begin
+        feats = FeatureSet(Lag(13))
+        fc = mk(MeanModel(); c=60, feats)
+        d = mkdata(70)
+        recursive = "backtest fold 1 (origin $(day(62))): intervals=SplitConformal" *
+                    "(holdout=60) needs at least 74 training rows to fit and calibrate, " *
+                    "but the fold trains on 62. Move the first fold later (raise " *
+                    "initial, or reduce windows, step or horizon), lower holdout to 48 " *
+                    "or less, or provide more data."
+        @test_throws recursive backtest(fc, d; horizon=3, windows=2, step=5)
+        @test_throws recursive backtest(fc, d; horizon=3, initial=62, step=5)
+        @test_throws recursive backtest(fc, d; horizon=3, windows=2, step=5,
+                                        metrics=(mae, crps), levels=(80,))
+        direct = "backtest fold 1 (origin $(day(80))): intervals=SplitConformal" *
+                 "(holdout=60) with Direct(12) needs at least 85 training rows " *
+                 "(60 + 13 + 12), but the fold trains on 80. Move the first fold " *
+                 "later (raise initial, or reduce windows, step or horizon), lower " *
+                 "holdout to 55 or less, use Direct(7), or provide more data."
+        fd = mk(MeanModel(); c=60, feats, strat=Direct(12))
+        @test_throws direct backtest(fd, mkdata(83); horizon=3, windows=1)
+        @test_throws direct backtest(fd, mkdata(83); horizon=3, initial=80)
+        # Without it the error would not name the fold.
+        @test_throws "intervals=SplitConformal(holdout=60) leaves 20 of the 80 rows" fit(
+            fd, take(mkdata(83), 1:80))
+        # Same bound as fit: c + mh fails, c + mh + 1 runs.
+        for (tr, f_) in ((NoTransform(), FeatureSet(Lag(1))),
+                         (Difference(1), FeatureSet(Lag(1), Lag(3))))
+            g = mk(MeanModel(); c=20, feats=f_, transform=tr)
+            lim = 20 + C.minhistory(g)
+            dd = mkdata(lim + 3)
+            @test caught(() -> fit(g, take(dd, 1:lim))) isa ArgumentError
+            @test fit(g, take(dd, 1:(lim + 1))) isa FittedForecaster
+            mh = C.minhistory(g)
+            full = "backtest fold 1 (origin $(day(lim))): intervals=SplitConformal" *
+                   "(holdout=20) needs at least $(lim + 1) training rows to fit and " *
+                   "calibrate, but the fold trains on $lim. Move the first fold later " *
+                   "(raise initial, or reduce windows, step or horizon), lower holdout " *
+                   "to $(lim - mh - 1) or less, or provide more data."
+            @test_throws full backtest(g, dd; horizon=3, windows=1)
+            @test backtest(g, mkdata(lim + 4); horizon=3, windows=1) isa BacktestResult
+        end
+        # Clauses that cannot hold are dropped.
+        tiny = mk(MeanModel(); c=9, feats)
+        @test_throws "but the fold trains on 20. Move the first fold later (raise " *
+                     "initial, or reduce windows, step or horizon), or provide more " *
+                     "data." backtest(tiny, mkdata(23); horizon=3, windows=1)
+        dt = mk(MeanModel(); c=20, strat=Direct(5))
+        @test_throws "(20 + 1 + 5), but the fold trains on 21. Move the first fold " *
+                     "later (raise initial, or reduce windows, step or horizon), lower " *
+                     "holdout to 15 or less, or provide more data." backtest(
+            dt, mkdata(24); horizon=3, windows=1)
+        @test_throws "(20 + 1 + 5), but the fold trains on 25. Move the first fold " *
+                     "later (raise initial, or reduce windows, step or horizon), lower " *
+                     "holdout to 19 or less, use Direct(4), or provide more data." backtest(
+            dt, mkdata(28); horizon=3, windows=1)
+        @test backtest(dt, mkdata(29); horizon=3, windows=1) isa BacktestResult
+    end
+
+    @testset "a panel fold leaves out a series too short to calibrate" begin
+        c, h = 20, 3
+        warn1 = "backtest fold 1: leaving out 1 series with fewer than 22 rows up to " *
+                "the fold's cut, the minimum to calibrate with intervals=" *
+                "SplitConformal(holdout=20); the fold trains on the other series: " *
+                "unique_id=\"s\" (21 rows)"
+        d = mkpanel("a" => 1:60, "b" => 1:50, "s" => 1:27)
+        rest = mkpanel("a" => 1:60, "b" => 1:50)
+        for model in models(), kw in ((;), (levels=(80,), metrics=(mae, crps)))
+            fc = pmk(model; c)
+            r = @test_logs (:warn, warn1) backtest(fc, d; horizon=h, windows=2, kw...)
+            ref = backtest(fc, rest; horizon=h, windows=2, kw...)
+            f1, g1 = r.forecasts.fold .== 1, ref.forecasts.fold .== 1
+            @test r.forecasts.unique_id[f1] == [fill("a", h); fill("b", h)]
+            @test "s" in r.forecasts.unique_id[r.forecasts.fold .== 2]
+            for col in keys(r.forecasts)
+                col == :fold && continue
+                @test r.forecasts[col][f1] == ref.forecasts[col][g1]
+            end
+            @test r.scores.value[r.scores.fold .== 1] ==
+                  ref.scores.value[ref.scores.fold .== 1]
+        end
+        # y_hat does not depend on levels either.
+        fc = pmk(MeanModel(); c)
+        a = @test_logs (:warn, warn1) backtest(fc, d; horizon=h, windows=2)
+        b = @test_logs (:warn, warn1) backtest(fc, d; horizon=h, windows=2,
+                                               levels=(80,))
+        @test a.forecasts.y_hat == b.forecasts.y_hat
+        # Fold 1's head: the mean before b's holdout start.
+        cutb = 50 - h - h
+        @test a.forecasts.y_hat[a.forecasts.fold .== 1] ==
+              fill(headmean([(1, 1:(cutb - c)), (2, 1:(cutb - c))], 1), 2h)
+        # Over five ids: five are named, then an ellipsis.
+        many = mkpanel("a" => 1:60, "s1" => 1:24, "s2" => 1:23, "s3" => 1:24,
+                       "s4" => 1:22, "s5" => 1:21, "s6" => 1:24)
+        m = "backtest fold 1: leaving out 6 series with fewer than 22 rows up to the " *
+            "fold's cut, the minimum to calibrate with intervals=SplitConformal(" *
+            "holdout=20); the fold trains on the other series: unique_id=\"s1\" (21 " *
+            "rows), unique_id=\"s2\" (20 rows), unique_id=\"s3\" (21 rows), " *
+            "unique_id=\"s4\" (19 rows), unique_id=\"s5\" (18 rows), …"
+        @test_logs (:warn, m) backtest(pmk(MeanModel(); c), many; horizon=h, windows=1)
+        # Direct: the dropped series must not set the cutoff.
+        for model in models()
+            fc = pmk(model; c, strat=Direct(3))
+            r = @test_logs (:warn, warn1) backtest(fc, d; horizon=h, windows=2)
+            ref = backtest(fc, rest; horizon=h, windows=2)
+            f1, g1 = r.forecasts.fold .== 1, ref.forecasts.fold .== 1
+            @test r.forecasts.y_hat[f1] == ref.forecasts.y_hat[g1]
+        end
+        # A series absent from fold 1's cuts is not named there.
+        @test_logs (:warn, r"^backtest fold 2: leaving out 1 series") backtest(
+            pmk(MeanModel(); c), mkpanel("a" => 1:60, "s" => 1:5); horizon=h, windows=2)
+    end
+
+    @testset "the panel bound is c + mh + 1 rows up to the cut" begin
+        c = 20
+        for (tr, feats) in ((NoTransform(), FeatureSet(Lag(1))),
+                            (Difference(1), FeatureSet(Lag(1), Lag(3))))
+            fc = pmk(MeanModel(); c, feats, transform=tr)
+            mh = C.minhistory(fc)
+            need = c + mh + 1
+            # windows=1, h=3: n rows train on n - 3 in fold 1.
+            d = mkpanel("a" => 1:60, "lo" => 1:(need + 2), "ok" => 1:(need + 3))
+            warn = "backtest fold 1: leaving out 1 series with fewer than $need rows " *
+                   "up to the fold's cut, the minimum to calibrate with intervals=" *
+                   "SplitConformal(holdout=20); the fold trains on the other series: " *
+                   "unique_id=\"lo\" ($(need - 1) rows)"
+            for kw in ((;), (levels=(80,),))
+                r = @test_logs (:warn, warn) backtest(fc, d; horizon=3, windows=1, kw...)
+                @test unique(r.forecasts.unique_id) == ["a", "ok"]
+                rest = take(d, d.unique_id .!= "lo")
+                ref = backtest(fc, rest; horizon=3, windows=1, kw...)
+                @test r.forecasts.y_hat == ref.forecasts.y_hat
+            end
+        end
+    end
+
+    @testset "horizon 1: K = holdout and nested intervals" begin
+        c, h = 45, 1
+        d = mkdata(90)
+        pd = mkpanel("a" => 1:90, "b" => 1:80)
+        q6(v, p) = quantile(v, p; alpha=0.0, beta=0.0)
+        for model in (LinAR(0.5, 1.0), EvoTreeRegressor(nrounds=5), dtree()),
+            (fc, data) in ((mk(model; c), d), (pmk(model; c), pd))
+            kw = (horizon=h, windows=3)
+            r = backtest(fc, data; kw..., levels=(80, 95))
+            @test r.forecasts.y_hat == backtest(fc, data; kw...).forecasts.y_hat
+            f = r.forecasts
+            for c_ in (:lo_80, :hi_80, :lo_95, :hi_95)
+                @test all(isfinite, f[c_])
+            end
+            @test all(f.lo_95 .≤ f.lo_80 .≤ f.hi_80 .≤ f.hi_95)
+            # Fold 1: type 6 quantiles of y_hat + E[1:c, 1].
+            sel = f.fold .== 1
+            cut = Dict("a" => 87, "b" => 77)
+            fit1 = fc.id === nothing ? fit(fc, take(data, 1:87)) :
+                   fit(fc, take(data, [data.ds[i] ≤ day(cut[data.unique_id[i]])
+                                       for i in eachindex(data.ds)]))
+            E = getfield(fit1, :calibration)
+            yh = forecast(fit1, h).y_hat
+            for (j, e) in enumerate(E)
+                v = yh[j] .+ e[1:c, 1]
+                @test length(v) == c
+                @test f.lo_80[sel][j] ≈ q6(v, 0.1)
+                @test f.hi_95[sel][j] ≈ q6(v, 0.975)
+            end
+        end
+    end
+
+    @testset "a FromStart fold names its origin; late starters are aligned" begin
+        c, h = 20, 3
+        d = mkpanel("a" => 1:70, "s" => 41:70)
+        a_only = take(d, d.unique_id .== "a")
+        warn1 = "backtest fold 1 (origin $(day(50))): leaving out 1 series with fewer " *
+                "than 22 rows up to the fold's cut, the minimum to calibrate with " *
+                "intervals=SplitConformal(holdout=20); the fold trains on the other " *
+                "series: unique_id=\"s\" (10 rows)"
+        for model in models()
+            fc = pmk(model; c)
+            r = @test_logs (:warn, warn1) backtest(fc, d; horizon=h, initial=50, step=15)
+            @test unique(r.forecasts.fold) == [1, 2]
+            f1 = r.forecasts.fold .== 1
+            @test all(==("a"), r.forecasts.unique_id[f1])
+            ref = fit(fc, take(a_only, a_only.ds .≤ day(50)))
+            @test r.forecasts.y_hat[f1] == forecast(ref, h).y_hat
+            # Fold 2: the late series has 25 rows, joins.
+            f2 = r.forecasts.fold .== 2
+            both = fit(fc, take(d, d.ds .≤ day(65)))
+            @test r.forecasts.unique_id[f2] == [fill("a", h); fill("s", h)]
+            @test r.forecasts.y_hat[f2] == forecast(both, h).y_hat
+        end
+        # A series with no rows up to the cut is not named.
+        late = mkpanel("a" => 1:70, "s" => 56:70)
+        @test_logs backtest(pmk(MeanModel(); c), late; horizon=h, initial=50, step=100)
+        # A series that ended before the cut sets T*.
+        ended = mkpanel("a" => 1:60, "e" => 1:40)
+        for kw in ((;), (levels=(80,),))
+            r = backtest(pmk(MeanModel(); c), ended; horizon=h, initial=50, step=100,
+                         kw...)
+            @test unique(r.forecasts.fold) == [1]
+            @test r.forecasts.unique_id == fill("a", h)
+            # e's holdout starts at day 21, a's at day 31.
+            @test r.forecasts.y_hat == fill(headmean([(1, 1:20), (2, 1:20)], 1), h)
+        end
+    end
+
+    @testset "a fold with no series that can calibrate is refused" begin
+        d = mkpanel("a" => 1:30, "b" => 1:29)
+        msg = "backtest fold 1: intervals=SplitConformal(holdout=25) needs at least 27 " *
+              "rows in a series up to the fold's cut, but the longest has 24. Move the " *
+              "first fold later (raise initial, or reduce windows, step or horizon), " *
+              "lower holdout to 22 or less, or provide longer series."
+        for model in (MeanModel(), dtree(), EvoTreeRegressor(nrounds=5))
+            fc = pmk(model; c=25)
+            @test_throws msg backtest(fc, d; horizon=3, windows=2)
+            @test_throws msg backtest(fc, d; horizon=3, windows=2, levels=(80,))
+        end
+        # FromStart names the origin.
+        @test_throws "backtest fold 1 (origin $(day(24))): intervals=" backtest(
+            pmk(MeanModel(); c=25), d; horizon=3, initial=24)
+        # Few rows left: no lower-holdout clause below 9.
+        @test_throws "up to the fold's cut, but the longest has 10. Move the first " *
+                     "fold later (raise initial, or reduce windows, step or horizon), " *
+                     "or provide longer series." backtest(
+            pmk(MeanModel(); c=9), mkpanel("a" => 1:13, "b" => 1:12); horizon=3,
+            windows=1)
+    end
+
+    @testset "series with at most mh rows stay with the point fit" begin
+        # b has one row in fold 1 (mh is 1), four in fold 2.
+        d = mkpanel("a" => 1:60, "b" => 1:7)
+        fc = pmk(MeanModel(); c=20)
+        warn2 = "backtest fold 2: leaving out 1 series with fewer than 22 rows up to " *
+                "the fold's cut, the minimum to calibrate with intervals=" *
+                "SplitConformal(holdout=20); the fold trains on the other series: " *
+                "unique_id=\"b\" (4 rows)"
+        r = @test_logs (:warn, r"skipping 1 series with fewer than 2 rows") (
+            :warn, warn2) backtest(fc, d; horizon=3, windows=2)
+        @test unique(r.forecasts.unique_id) == ["a"]
+    end
+
+    @testset "the Direct head bound names the fold" begin
+        c, h = 20, 3
+        d = mkpanel("a" => 1:60, "b" => 1:28)
+        fc = pmk(MeanModel(); c, strat=Direct(3))
+        want = "backtest fold 1: intervals=SplitConformal(holdout=20) trains the " *
+               "calibration model on rows before $(day(3)), the earliest holdout start " *
+               "(series unique_id=\"b\"). That leaves 2 rows in the series with the " *
+               "most rows before it, 1 after the feature set's 1 history row, but " *
+               "Direct(3) needs 3. Lower holdout to 18 or less, use Direct(1) or a " *
+               "shorter max_horizon, or provide 2 more rows before $(day(3)) in that " *
+               "series."
+        @test_throws want backtest(fc, d; horizon=h, windows=2)
+        @test_throws want backtest(fc, d; horizon=h, windows=2, levels=(80,))
+        # FromStart names the origin.
+        ok = mkpanel("a" => 1:60, "b" => 1:60)
+        @test backtest(fc, ok; horizon=h, initial=45, step=15) isa BacktestResult
+        @test_throws "backtest fold 1 (origin $(day(24))): intervals=SplitConformal" (
+            backtest(pmk(MeanModel(); c, strat=Direct(30)), ok; horizon=h, initial=24))
+    end
+
+    @testset "folds where a series has fewer than horizon steps" begin
+        c, h = 20, 6
+        feats = FeatureSet(Lag(1), Exogenous(:x))
+        d = mkpanel("a" => 1:60, "b" => 1:52; x=true)
+        for model in (LinAR(0.5, 1.0), EvoTreeRegressor(nrounds=5), dtree())
+            fc = pmk(model; c, feats)
+            r = backtest(fc, d; horizon=h, initial=48, step=3, levels=(80,))
+            @test [count(==(k), r.forecasts.fold) for k in 1:3] == [10, 7, 6]
+            @test all(isfinite, r.forecasts.lo_80) && all(isfinite, r.forecasts.hi_80)
+            @test r.forecasts.y_hat == backtest(fc, d; horizon=h, initial=48,
+                                                step=3).forecasts.y_hat
+            # One K for every series, from the longest call.
+            f = fit(fc, take(d, d.ds .≤ day(48)))
+            nd = take(d, d.ds .> day(48))
+            _, dr = C._forecast_samples(f, [h, 4], (unique_id=nd.unique_id, ds=nd.ds,
+                                                    x=nd.x))
+            @test size.(dr, 2) == [c - h + 1, c - h + 1]
+            @test size.(dr, 1) == [h, 4]
+            los, his = C._interval_bounds(reduce(vcat, dr), [80.0])
+            f1 = r.forecasts.fold .== 1
+            @test r.forecasts.lo_80[f1] == los[1] && r.forecasts.hi_80[f1] == his[1]
+        end
+        # No actual after the cut: the existing error.
+        apart = mkpanel("a" => 1:50, "s" => 51:60; x=true)
+        text = "backtest fold 1 (origin $(day(50))) produced no forecast that lines up " *
+               "with an actual: no series trained on data up to the origin has data " *
+               "after it. Choose initial and step so each origin falls inside the data " *
+               "of a series."
+        for model in (MeanModel(), dtree()), kw in ((;), (levels=(80,),)), fts in (
+            FeatureSet(Lag(1)), feats)
+            fc = pmk(model; c=12, feats=fts)
+            @test_throws text backtest(fc, apart; horizon=3, initial=50, step=100, kw...)
+        end
+    end
+
+    @testset "the hooks" begin
+        fc = pmk(MeanModel(); c=20)
+        d = mkpanel("a" => 1:60, "s" => 1:30)
+        tbl = C.normalize_table(d)
+        groups = C.panel_groups(fc, tbl)
+        all_rows = collect(eachindex(tbl.y))
+        iv = fc.intervals
+        cut = Dict("a" => day(50), "s" => day(30))
+        # Nothing to drop: the very same vector comes back.
+        @test C._fold_train_rows(iv, fc, groups, cut, all_rows, 1, day(50)) === all_rows
+        short = Dict("a" => day(50), "s" => day(21))
+        rows = C._rows_before(short, tbl.unique_id, tbl.ds)
+        kept = @test_logs (:warn, r"leaving out 1 series") C._fold_train_rows(
+            iv, fc, groups, short, rows, 2, missing)
+        @test kept isa Vector{Int}
+        @test kept == [i for i in rows if tbl.unique_id[i] == "a"]
+        @test rows == C._rows_before(short, tbl.unique_id, tbl.ds)
+        @test_logs (:warn, r"^backtest fold 2 \(origin 2020-02-19\): leaving out") (
+            C._fold_train_rows(iv, fc, groups, short, rows, 2, day(50)))
+        sfc = mk(MeanModel(); c=20)
+        t = mkdata(80).ds
+        @test C._check_fold_rows(siv(20), sfc, [22, 30], t) === nothing
+        @test_throws "backtest fold 1 (origin $(t[21])): intervals=SplitConformal" (
+            C._check_fold_rows(siv(20), sfc, [21, 30], t))
+    end
+
+    @testset "a coverage by step table from a levels backtest" begin
+        d = mkdata(120)
+        fc = mk(dtree(); c=60, feats=FeatureSet(Lag(1), Lag(2)))
+        r = backtest(fc, d; horizon=4, initial=80, step=4, levels=(80,))
+        f = r.forecasts
+        inside = f.lo_80 .≤ f.y .≤ f.hi_80
+        by_step = [sum(inside[f.step .== j]) / count(==(j), f.step) for j in 1:4]
+        @test length(by_step) == 4 && all(x -> 0 ≤ x ≤ 1, by_step)
+        @test all(f.lo_80 .< f.hi_80)
+    end
+
+    @testset "plain and CSP backtests are unchanged" begin
+        # Literals of b8ea2cb, equal at 69c57ef, --check-bounds=yes.
+        t = collect(Date(2020, 1, 1):Month(1):Date(2022, 12, 1))
+        y = [10.0 + mod1(i, 12) + i / 4 for i in 1:36]
+        pfc = Forecaster(LinAR(0.5, 1.0); features=FeatureSet(Lag(1)), freq=Month(1),
+                         id=:unique_id)
+        pcsp = ConformalSeasonalPool(12; freq=Month(1), rng=StableRNG(9), id=:unique_id)
+        ends = (unique_id=[fill("a", 36); fill("b", 8)], ds=[t; t[1:8]],
+                y=[y; 2 .* y[1:8]])
+        late = (unique_id=[fill("a", 36); fill("c", 10)], ds=[t; t[27:36]],
+                y=[y; 2 .* y[27:36]])
+        r = backtest(pfc, ends; horizon=3, windows=3)
+        @test r.forecasts.y_hat == [10.875, 6.4375, 4.21875, 12.75, 7.375, 4.6875, 13.5,
+                                    7.75, 4.875, 14.625, 8.3125, 5.15625, 17.25, 9.625,
+                                    5.8125]
+        @test r.forecasts.fold == [1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3]
+        @test r.forecasts.unique_id == ["a", "a", "a", "a", "a", "a", "b", "b", "b",
+                                        "a", "a", "a", "b", "b", "b"]
+        @test r.scores.value ≈ [15.072916666666666, 15.53831160725536, 19.510416666666668,
+                                20.22440834013033, 23.494791666666668, 24.429642945141122]
+        r = backtest(pfc, late; horizon=3, initial=4, step=6)
+        @test r.forecasts.y_hat == [8.5, 5.25, 3.625, 12.25, 7.125, 4.5625, 10.0, 6.0,
+                                    4.0, 13.75, 7.875, 4.9375, 11.5, 6.75, 4.375, 22.0,
+                                    12.0, 7.0]
+        @test r.forecasts.fold == [1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 5, 5, 5]
+        @test r.forecasts.unique_id == [fill("a", 15); fill("c", 3)]
+        @test r.scores.value ≈ [11.708333333333334, 12.095324509908776,
+                                13.020833333333334, 13.48595913348398,
+                                13.833333333333334, 14.269723192830336,
+                                15.145833333333334, 15.552205430420472,
+                                24.645833333333332, 26.922003469900478]
+        r = @test_logs (:warn, r"unique_id=\"b\" \(2 rows\)") (
+            :warn, r"unique_id=\"b\" \(5 rows\)") backtest(pcsp, ends; horizon=3,
+                                                            windows=3, levels=(80,))
+        @test r.forecasts.y_hat == [18.0, 19.25, 20.5, 21.75, 23.0, 24.25, 25.5, 26.75,
+                                    28.0]
+        @test r.forecasts.fold == [1, 1, 1, 2, 2, 2, 3, 3, 3]
+        @test r.scores.value == fill(3.0, 6)
+        r = @test_logs (:warn, r"unique_id=\"c\" \(6 rows\)") backtest(
+            pcsp, late; horizon=3, initial=14, step=6, levels=(80,))
+        @test r.forecasts.y_hat == [13.75, 15.0, 16.25, 21.25, 22.5, 23.75, 16.75, 18.0,
+                                    19.25, 24.25, 25.5, 26.75]
+        @test r.forecasts.fold == [1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4]
+        @test r.scores.value == fill(3.0, 8)
+    end
+
+    @testset "the docstrings describe the backtest of a SplitConformal forecaster" begin
+        doc = replace(string(@doc(backtest)), r"\s+" => " ")
+        @test occursin("`SplitConformal`", doc)
+        @test occursin("every fold fits the published head", doc)
+        @test occursin("`y_hat` does not depend on `levels`", doc)
+        @test occursin("a fold that drops a series too short to calibrate trains on " *
+                       "fewer series", doc)
+        @test !occursin("Every fold draws from its own copy of the method's `rng`", doc)
+        @test !occursin("Each fold trains on every row at or before the origin " *
+                        "timestamp, forecasts", doc)
+        sdoc = replace(string(@doc(SplitConformal)), r"\s+" => " ")
+        @test occursin("A fold of a [`backtest`](@ref) that drops a series too short to " *
+                       "calibrate trains on fewer series", sdoc)
+    end
+end
+
 @testset "SplitConformal is exported and documented" begin
     @test :SplitConformal in names(MachineLearningForecast)
     doc = replace(string(@doc(SplitConformal)), r"\s+" => " ")
