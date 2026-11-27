@@ -1420,3 +1420,462 @@ end
         @test_throws ArgumentError(want.msg) cal(fc, absent, c)
     end
 end
+
+@testset "SplitConformal forecaster" begin
+    C = MachineLearningForecast
+    LinAR, MeanModel = TestModels.LinAR, TestModels.MeanModel
+    siv(c) = C.SplitConformal(holdout=c)
+    mk(model; c=nothing, feats=FeatureSet(Lag(1)), strat=Recursive(), id=nothing,
+       kw...) = Forecaster(model; features=feats, strategy=strat, freq=Day(1), id,
+                           intervals=c === nothing ? nothing : siv(c), kw...)
+    # Dyadic values, so closed forms compare exactly.
+    function mkdata(n)
+        return (ds=collect(Date(2020, 1, 1):Day(1):(Date(2020, 1, 1) + Day(n - 1))),
+                y=[8 + mod(7i, 16) / 4 + i / 8 for i in 1:n])
+    end
+    q6(v, p) = quantile(v, p; alpha=0.0, beta=0.0)
+    function smat(f, h)
+        s = forecast_samples(f, h)
+        K = maximum(s.sample)
+        return permutedims(reshape(s.y_hat, K, h))
+    end
+    models() = (LinAR(0.5, 1.0), MeanModel(), EvoTreeRegressor(nrounds=5), dtree())
+    triangle(f) = getfield(f, :calibration)
+
+    @testset "y_hat is the head's forecast" begin
+        n, c = 40, 12
+        d = mkdata(n)
+        m = sum(d.y[2:(n - c)]) / (n - c - 1)
+        f = fit(mk(MeanModel(); c), d)
+        @test forecast(f, 3).y_hat ≈ fill(m, 3)
+        @test forecast(fit(mk(MeanModel()), d), 3).y_hat ≈
+              fill(sum(d.y[2:n]) / (n - 1), 3)
+        @test forecast(f, 3).y_hat != forecast(fit(mk(MeanModel()), d), 3).y_hat
+        @test forecast(f, 3; levels=(80,)).y_hat == forecast(f, 3).y_hat
+
+        f = fit(mk(MeanModel(); c, strat=Direct(3)), d)
+        @test forecast(f, 3).y_hat ≈
+              [sum(d.y[(1 + j):(n - c)]) / (n - c - j) for j in 1:3]
+
+        for strat in (Recursive(), Direct(2))
+            TestModels.FIT_COUNT[] = 0
+            fit(mk(TestModels.CountFit(); c, strat), d)
+            @test TestModels.FIT_COUNT[] == C.nmodels(strat)
+        end
+
+        # LinAR ignores training: the states are the full history.
+        for strat in (Recursive(), Direct(4))
+            a = fit(mk(LinAR(0.5, 1.0); c, strat), d)
+            b = fit(mk(LinAR(0.5, 1.0); strat), d)
+            @test forecast(a, 4).y_hat == forecast(b, 4).y_hat
+            @test a.n_train == n && a.t_last == d.ds[end] && a.t_start == d.ds[1]
+            @test a.y_history == d.y
+        end
+
+        # Trees publish models fitted before the holdout.
+        n, c = 70, 20
+        d = mkdata(n)
+        for model in (EvoTreeRegressor(nrounds=5), dtree())
+            plain = mk(model)
+            f = fit(mk(model; c), d)
+            head = fit(plain, (ds=d.ds[1:(n - c)], y=d.y[1:(n - c)]))
+            fh = C.FittedForecaster(plain, head.models, f.series, head.feature_names)
+            @test forecast(f, 5).y_hat == forecast(fh, 5).y_hat
+            @test forecast(f, 5).y_hat != forecast(fit(plain, d), 5).y_hat
+        end
+    end
+
+    @testset "levels give ordered interval columns" begin
+        n, c, h = 90, 50, 5
+        d = mkdata(n)
+        for model in models(), strat in (Recursive(), Direct(5))
+            f = fit(mk(model; c, strat), d)
+            o = forecast(f, h; levels=(80, 95))
+            @test keys(o) == (:ds, :y_hat, :lo_80, :hi_80, :lo_95, :hi_95)
+            @test o.ds == forecast(f, h).ds
+            @test o.y_hat == forecast(f, h).y_hat
+            @test all(o.lo_95 .<= o.lo_80 .<= o.hi_80 .<= o.hi_95)
+            r = forecast(f, h; levels=(95, 80))
+            @test keys(r) == (:ds, :y_hat, :lo_95, :hi_95, :lo_80, :hi_80)
+            @test r.lo_95 == o.lo_95 && r.hi_80 == o.hi_80
+        end
+    end
+
+    @testset "intervals are the samples' type 6 quantiles" begin
+        n, c, h = 90, 50, 5
+        d = mkdata(n)
+        for model in models(), strat in (Recursive(), Direct(5))
+            f = fit(mk(model; c, strat), d)
+            o = forecast(f, h; levels=(80, 95))
+            S = smat(f, h)
+            @test size(S) == (h, c - h + 1)
+            for j in 1:h
+                @test o.lo_80[j] ≈ q6(S[j, :], 0.1)
+                @test o.hi_80[j] ≈ q6(S[j, :], 0.9)
+                @test o.lo_95[j] ≈ q6(S[j, :], 0.025)
+                @test o.hi_95[j] ≈ q6(S[j, :], 0.975)
+            end
+            E = triangle(f)[1]
+            o1 = forecast(f, 1; levels=(80,))
+            S1 = forecast(f, 1).y_hat[1] .+ E[1:c, 1]
+            @test o1.lo_80[1] ≈ q6(S1, 0.1) && o1.hi_80[1] ≈ q6(S1, 0.9)
+        end
+    end
+
+    @testset "at K = need(L) the interval is the sample range" begin
+        d = mkdata(50)
+        for model in models(), (c, h, L) in ((12, 4, 80), (21, 3, 90))
+            f = fit(mk(model; c), d)
+            o = forecast(f, h; levels=(L,))
+            S = smat(f, h)
+            @test size(S, 2) == C._need_errors(Float64(L))
+            @test getproperty(o, Symbol("lo_", L)) ≈ vec(minimum(S; dims=2))
+            @test getproperty(o, Symbol("hi_", L)) ≈ vec(maximum(S; dims=2))
+        end
+    end
+
+    @testset "closed form: type 6 over the head's errors" begin
+        n, c = 60, 40
+        d = mkdata(n)
+        y = d.y
+        m = sum(y[2:(n - c)]) / (n - c - 1)
+        f = fit(mk(MeanModel(); c), d)
+        errs(K, j) = [y[n - c + i - 1 + j] - m for i in 1:K]
+        for h in (1, 6, 12)
+            K = c - h + 1
+            o = forecast(f, h; levels=(80, 90))
+            for j in 1:h
+                S = m .+ errs(K, j)
+                @test o.lo_80[j] ≈ q6(S, 0.1) && o.hi_90[j] ≈ q6(S, 0.95)
+            end
+        end
+        # A longer call keeps fewer, older origins at every step.
+        lo1 = forecast(f, 1; levels=(80,)).lo_80[1]
+        lo12 = forecast(f, 12; levels=(80,)).lo_80[1]
+        @test lo1 ≈ q6(m .+ errs(c, 1), 0.1)
+        @test lo12 ≈ q6(m .+ errs(c - 11, 1), 0.1)
+        @test lo1 != lo12
+        @test size(triangle(f)[1]) == (c, C._depth(Recursive(), c))
+    end
+
+    @testset "forecast_samples" begin
+        n, c, h = 50, 20, 6
+        d = mkdata(n)
+        K = c - h + 1
+        for model in models()
+            f = fit(mk(model; c), d)
+            s = forecast_samples(f, h)
+            @test keys(s) == (:ds, :sample, :y_hat)
+            @test length(s.y_hat) == h * K
+            @test s.sample == repeat(1:K; outer=h)
+            @test s.ds == repeat(forecast(f, h).ds; inner=K)
+            @test s == forecast_samples(f, h)
+            E = triangle(f)[1]
+            @test s.y_hat[1:K] == forecast(f, h).y_hat[1] .+ E[1:K, 1]
+            Random.seed!(7)
+            a = rand()
+            Random.seed!(7)
+            forecast_samples(f, h)
+            forecast(f, h; levels=(80,))
+            @test rand() == a
+        end
+        f = fit(mk(MeanModel(); c), d)
+        s = forecast_samples(f, 1)
+        @test s.sample == 1:c
+    end
+
+    @testset "a panel" begin
+        c, h = 12, 3
+        D0 = Date(2020, 1, 1)
+        yv(d, k) = 8 + mod(7d + 3k, 16) / 4 + d / 8
+        spans = (("a", 60), ("b", 50))
+        pd = (unique_id=[id for (id, n) in spans for _ in 1:n],
+              ds=[D0 + Day(d - 1) for (_, n) in spans for d in 1:n],
+              y=[yv(d, k) for (k, (_, n)) in enumerate(spans) for d in 1:n])
+        f = fit(mk(MeanModel(); c, id=:unique_id), pd)
+        # The cutoff is day 39, series b's holdout start.
+        m = sum(yv(d, k) for k in 1:2 for d in 2:38) / (2 * 37)
+        o = forecast(f, h; levels=(80,))
+        @test keys(o) == (:unique_id, :ds, :y_hat, :lo_80, :hi_80)
+        @test o.unique_id == ["a", "a", "a", "b", "b", "b"]
+        @test o.y_hat ≈ fill(m, 6)
+        K = c - h + 1
+        for (k, (id, n)) in enumerate(spans), j in 1:h
+            S = m .+ [yv(n - c + i - 1 + j, k) - m for i in 1:K]
+            r = findfirst(==(id), o.unique_id) + j - 1
+            @test o.lo_80[r] ≈ q6(S, 0.1) && o.hi_80[r] ≈ q6(S, 0.9)
+        end
+        @test [size(E) for E in triangle(f)] == [(c, 4), (c, 4)]
+        s = forecast_samples(f, h)
+        @test keys(s) == (:unique_id, :ds, :sample, :y_hat)
+        @test [count(==(id), s.unique_id) for id in ("a", "b")] == [h * K, h * K]
+        @test s.sample == repeat(1:K; outer=2h)
+
+        n = 70
+        pd = (unique_id=[fill("a", n); fill("b", n - 10)],
+              ds=[mkdata(n).ds; mkdata(n).ds[11:n]],
+              y=[mkdata(n).y; 2 .* mkdata(n).y[11:n]])
+        for model in models(), strat in (Recursive(), Direct(5))
+            f = fit(mk(model; c=30, strat, id=:unique_id), pd)
+            o = forecast(f, 5; levels=(80,))
+            s = forecast_samples(f, 5)
+            @test length(o.y_hat) == 10 && length(s.y_hat) == 10 * 26
+            @test all(o.lo_80 .<= o.hi_80)
+            for k in 1:2, j in 1:5
+                S = reshape(s.y_hat[(26 * 5 * (k - 1) + 1):(26 * 5 * k)], 26, 5)'
+                @test o.lo_80[5 * (k - 1) + j] ≈ q6(S[j, :], 0.1)
+            end
+        end
+    end
+
+    @testset "levels the holdout cannot support are refused" begin
+        d = mkdata(80)
+        f40 = fit(mk(MeanModel(); c=40), d)
+        top = "levels=(95,) needs at least 39 calibration errors per step, but " *
+              "intervals=SplitConformal(holdout=40) gives 29 at forecast horizon 12 " *
+              "(the origins that have 12 actuals), which supports central levels up " *
+              "to 93.33. Pass levels <= 93.33, forecast at most 2 steps, or fit with " *
+              "holdout >= 50."
+        @test_throws top forecast(f40, 12; levels=(95,))
+        @test_throws top forecast(f40, 12; levels=(80, 95))
+        @test_throws top forecast(f40, 12; levels=(95, 80))
+        @test forecast(f40, 12; levels=(93,)) isa NamedTuple
+        @test forecast(f40, 2; levels=(95,)) isa NamedTuple
+        @test_throws "gives 38 at forecast horizon 3" forecast(f40, 3; levels=(95,))
+
+        f30 = fit(mk(MeanModel(); c=30), d)
+        @test_throws "levels=(95,) needs at least 39 calibration errors per step, but " *
+                     "intervals=SplitConformal(holdout=30) gives 29 at forecast " *
+                     "horizon 2 (the origins that have 2 actuals), which supports " *
+                     "central levels up to 93.33. Pass levels <= 93.33, or fit with " *
+                     "holdout >= 40." forecast(f30, 2; levels=(95,))
+        @test_throws "gives 30 at forecast horizon 1 (the origins that have 1 " *
+                     "actual), which supports central levels up to 93.54. Pass " *
+                     "levels <= 93.54, or fit with holdout >= 39." forecast(
+            f30, 1; levels=(95,))
+
+        f60 = fit(mk(MeanModel(); c=60), d)
+        deep = "horizon 55 needs at least 9 calibration errors per step, but " *
+               "intervals=SplitConformal(holdout=60) gives 6 at that horizon (the " *
+               "origins that have 55 actuals). Forecast at most 52 steps, or fit " *
+               "with holdout >= 63."
+        @test_throws "forecast_samples $deep" forecast_samples(f60, 55)
+        @test_throws "forecast $deep" forecast(f60, 55; levels=(80,))
+        @test_throws "forecast $deep" forecast(f60, 55; levels=(95, 50))
+        @test forecast_samples(f60, 52) isa NamedTuple
+
+        # One step is never refused at a supported level.
+        f9 = fit(mk(MeanModel(); c=9), d)
+        @test forecast(f9, 1; levels=(80,)) isa NamedTuple
+        @test forecast_samples(f9, 1).sample == 1:9
+        @test_throws "forecast horizon 2 needs at least 9 calibration errors per " *
+                     "step, but intervals=SplitConformal(holdout=9) gives 8 at that " *
+                     "horizon (the origins that have 2 actuals). Forecast at most 1 " *
+                     "step, or fit with holdout >= 10." forecast(f9, 2; levels=(80,))
+
+        # Without levels no horizon is refused.
+        for f in (f9, f40, f60)
+            @test length(forecast(f, 100).y_hat) == 100
+        end
+    end
+
+    @testset "Direct's own horizon check comes first" begin
+        d = mkdata(80)
+        f = fit(mk(MeanModel(); c=40, strat=Direct(12)), d)
+        text = "strategy=Direct(12) was fit with max_horizon=12 but forecast(h=24) " *
+               "was requested. Refit with Direct(24) or use Recursive()."
+        @test_throws text forecast(f, 24)
+        @test_throws text forecast(f, 24; levels=(80,))
+        @test_throws text forecast_samples(f, 24)
+        @test forecast(f, 12; levels=(80,)) isa NamedTuple
+        @test_throws "forecast horizon 13 needs" forecast(
+            fit(mk(MeanModel(); c=20, strat=Direct(20)), d), 13; levels=(80,))
+        @test_throws "backtest horizon=24 exceeds the Direct strategy's " *
+                     "max_horizon=12. Use Direct(24) or reduce horizon." C._check_support(
+            siv(40), mk(MeanModel(); c=40, strat=Direct(12)), (80.0,), 24,
+            "backtest horizon")
+    end
+
+    @testset "backtest wording" begin
+        fc = mk(MeanModel(); c=40)
+        @test_throws "levels=(95,) needs at least 39 calibration errors per step, but " *
+                     "intervals=SplitConformal(holdout=40) gives 29 at backtest horizon " *
+                     "12 (the origins that have 12 actuals), which supports central " *
+                     "levels up to 93.33. Pass levels <= 93.33, use horizon <= 2, or " *
+                     "fit with holdout >= 50." backtest(
+            fc, mkdata(100); horizon=12, windows=2, levels=(95,))
+        @test_throws "backtest horizon 55 needs at least 9 calibration errors per " *
+                     "step, but intervals=SplitConformal(holdout=60) gives 6 at that " *
+                     "horizon (the origins that have 55 actuals). Use horizon <= 52, " *
+                     "or fit with holdout >= 63." C._check_support(
+            siv(60), mk(MeanModel(); c=60), Float64[], 55, "backtest horizon")
+        @test C._check_support(siv(60), mk(MeanModel(); c=60), Float64[], 52,
+                               "backtest horizon") === nothing
+    end
+
+    @testset "Phase 1 level messages are kept" begin
+        f = fit(mk(MeanModel(); c=40), mkdata(80))
+        @test_throws "an interval level is a percentage in (1, 100), got 0.95. Pass " *
+                     "e.g. 95 for a 95% interval, not 0.95." forecast(
+            f, 3; levels=0.95)
+        @test_throws "levels is empty; pass at least one level, e.g. levels=(95,)." (
+            forecast(f, 3; levels=()))
+        @test_throws "levels repeats a level" forecast(f, 3; levels=(80, 80))
+        d = mkdata(80)
+        clash = fit(mk(MeanModel(); c=40, time=:lo_80), (lo_80=d.ds, y=d.y))
+        @test_throws "the interval column :lo_80 would overwrite a column of the " *
+                     "result. Rename your time or id column." forecast(
+            clash, 3; levels=(80,))
+    end
+
+    @testset "the message texts" begin
+        csp = ConformalSeasonalPool(12; freq=Month(1))
+        bad = "intervals must be nothing, a SplitConformal(holdout=c) or a " *
+              "PoolIntervals(m), got :csp. Pass intervals=SplitConformal(holdout=60) " *
+              "for any model, or intervals=PoolIntervals(m) for the seasonal naive " *
+              "one; ConformalSeasonalPool(m; freq) builds a whole Forecaster."
+        @test_throws bad mk(MeanModel(); intervals=:csp)
+        @test_throws "intervals must be nothing, a SplitConformal" mk(
+            MeanModel(); intervals=0.95)
+        @test mk(MeanModel(); c=12).intervals === siv(12)
+        @test C.reconstruct(mk(MeanModel(); c=12); model=LinAR(1.0, 0.0)).intervals ==
+              siv(12)
+        none = fit(mk(MeanModel()), mkdata(40))
+        who(w) = "$w needs an interval method, but this forecaster has none. Pass " *
+                 "intervals=SplitConformal(holdout=60) for any model, or build the " *
+                 "seasonal naive one with ConformalSeasonalPool(period; freq=...)."
+        @test_throws who("forecast with levels") forecast(none, 3; levels=(80,))
+        @test_throws who("forecast_samples") forecast_samples(none, 3)
+        @test_throws who("backtest with levels or a sample-based metric") backtest(
+            mk(MeanModel()), mkdata(40); horizon=3, windows=2, levels=(80,))
+        @test_throws "For any other model pass intervals=SplitConformal(holdout=60)." *
+                     " Use ConformalSeasonalPool(12; freq=...)" Forecaster(
+            MeanModel(); features=FeatureSet(Lag(12)), freq=Month(1),
+            intervals=C.PoolIntervals(12))
+        tunable = "cannot reconstruct Forecaster with the field :intervals, which " *
+                  "cannot be tuned: tune ranks candidates by the published point " *
+                  "forecasts, and a SplitConformal forecaster publishes a model fitted " *
+                  "without its last holdout rows, so interval settings change y_hat. " *
+                  "Compare them with backtest(...; metrics=(crps, Coverage(95)))."
+        @test_throws tunable C.reconstruct(mk(MeanModel(); c=12); intervals=nothing)
+        @test occursin("so changing it changes `y_hat`", string(@doc(C.TUNABLE_FIELDS)))
+        @test !occursin("leave `y_hat` unchanged", string(@doc(C.TUNABLE_FIELDS)))
+
+        # The old texts are gone (split in this file).
+        old = ["Build it with " * "ConformalSeasonalPool",
+               "must be nothing " * "or a PoolIntervals",
+               "models are not " * "available",
+               "leave y_hat " * "unchanged"]
+        for dir in (joinpath(pkgdir(C), "src"), @__DIR__), file in readdir(dir)
+            endswith(file, ".jl") || continue
+            text = read(joinpath(dir, file), String)
+            @test !any(s -> occursin(s, text), old)
+        end
+    end
+
+    @testset "_sample_matrices" begin
+        n, c = 40, 12
+        f = fit(mk(MeanModel(); c), mkdata(n))
+        iv = f.spec.intervals
+        preds = [[1.0, 2.0, 3.0]]
+        S = @inferred C._sample_matrices(iv, f, preds)
+        @test S isa Vector{Matrix{Float64}}
+        E = triangle(f)[1]
+        @test S[1] == preds[1] .+ transpose(E[1:(c - 2), 1:3])
+        @test size(S[1]) == (3, c - 2)
+        @test size(only(C._sample_matrices(iv, f, [Float64[]]))) == (0, c)
+        @test_throws "forecast horizon 20 needs at least 9 calibration errors per " *
+                     "step, but intervals=SplitConformal(holdout=12) gives 0 at that " *
+                     "horizon (the origins that have 20 actuals). Forecast at most 4 " *
+                     "steps, or fit with holdout >= 28." C._sample_matrices(
+            iv, f, [fill(1.0, 20)])
+    end
+
+    @testset "the triangle is a hidden field" begin
+        d = mkdata(40)
+        public = (:spec, :models, :series, :feature_names, :y_history, :t_last,
+                  :t_start, :n_train, :z_history, :transform_state)
+        private = (:spec, :models, :series, :feature_names, :calibration, :y_history,
+                   :t_last, :t_start, :n_train, :z_history, :transform_state)
+        @test fieldnames(C.FittedForecaster) ==
+              (:spec, :models, :series, :feature_names, :calibration)
+        @test fieldnames(Forecaster) == (:model, :features, :strategy, :freq, :target,
+                                         :time, :id, :transform, :intervals)
+        csp = ConformalSeasonalPool(12; freq=Day(1))
+        for fc in (mk(MeanModel()), mk(MeanModel(); c=12), csp)
+            f = fit(fc, d)
+            @test propertynames(f) == public
+            @test propertynames(f, false) == public
+            @test propertynames(f, true) == private
+            @test f.calibration === triangle(f)
+        end
+        @test triangle(fit(mk(MeanModel()), d)) == Matrix{Float64}[]
+        @test triangle(fit(csp, d)) isa Vector{Matrix{Float64}}
+        @test isempty(triangle(fit(csp, d)))
+        @test isempty(triangle(fit(mk(MeanModel(); id=:g), (g=fill("a", 40), d...))))
+        for strat in (Recursive(), Direct(3))
+            f = fit(mk(MeanModel(); c=12, strat), d)
+            @test [size(E) for E in triangle(f)] == [(12, C._depth(strat, 12))]
+        end
+        # The four-argument constructor leaves it empty.
+        f = fit(mk(MeanModel()), d)
+        g = C.FittedForecaster(f.spec, f.models, f.series, f.feature_names)
+        @test isempty(triangle(g)) && g.spec === f.spec
+    end
+
+    @testset "the spec carries no stale triangle" begin
+        d, d2 = mkdata(60), mkdata(75)
+        for model in models(), strat in (Recursive(), Direct(3))
+            fc = mk(model; c=20, strat)
+            f = fit(fc, d)
+            @test f.spec === fc
+            a, b = fit(f.spec, d2), fit(fc, d2)
+            @test isequal(triangle(a), triangle(b))
+            @test !isequal(triangle(a), triangle(f))
+            @test forecast(a, 3).y_hat == forecast(b, 3).y_hat
+            @test forecast_samples(a, 3) == forecast_samples(b, 3)
+        end
+    end
+
+    @testset "backtest and tune through the spec" begin
+        d = mkdata(60)
+        for model in (LinAR(0.5, 1.0), dtree())
+            fc = mk(model; c=12)
+            f = fit(fc, d)
+            kw = (horizon=3, windows=2)
+            a = backtest(f.spec, d; kw..., levels=(80,))
+            b = backtest(fc, d; kw..., levels=(80,))
+            @test isequal(a.forecasts, b.forecasts) && isequal(a.scores, b.scores)
+            @test isequal(backtest(f.spec, d; kw...).forecasts,
+                          backtest(fc, d; kw...).forecasts)
+            grid = (model=[LinAR(0.5, 1.0), LinAR(0.25, 1.0)],)
+            r = tune(f.spec, d; grid, kw..., metric=rmse)
+            s = tune(fc, d; grid, kw..., metric=rmse)
+            @test isequal(r.table, s.table)
+        end
+    end
+
+    @testset "fit mutates nothing" begin
+        d = mkdata(50)
+        pd = (unique_id=[fill("a", 50); fill("b", 44)], ds=[d.ds; d.ds[7:50]],
+              y=[d.y; 2 .* d.y[7:50]])
+        for (data, id) in ((d, nothing), (pd, :unique_id)), model in models()
+            d0 = deepcopy(data)
+            proto = deepcopy(model)
+            fc = mk(model; c=12, id)
+            f = fit(fc, data)
+            @test data == d0
+            @test TestModels.MMI.is_same_except(fc.model, proto)
+            @test all(m -> m.model !== fc.model, f.models)
+        end
+    end
+
+    @testset "show is unchanged" begin
+        d = mkdata(40)
+        f = fit(mk(MeanModel(); c=12), d)
+        @test sprint(show, f) == sprint(show, fit(mk(MeanModel()), d))
+        @test sprint(show, f) == "FittedForecaster(MeanModel, 1 features, Recursive(), " *
+                                 "freq=1 day, trained on 40 rows ending $(d.ds[end]))"
+        @test endswith(sprint(show, f.spec), ", intervals=SplitConformal(holdout=12))")
+    end
+end

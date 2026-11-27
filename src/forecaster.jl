@@ -202,8 +202,9 @@ _history_who(fc::Forecaster) = iszero(dropped_rows(fc.transform)) ?
 """
 Fields `reconstruct` (and so `tune`) may override. The data-shape fields
 (`freq`, `target`, `time`, `id`) stay fixed: they describe the data, not the
-model. `intervals` stays fixed too: `tune` scores point forecasts, and interval
-settings leave `y_hat` unchanged.
+model. `intervals` stays fixed too: a `SplitConformal` forecaster publishes a model fitted
+without its last `holdout` rows, so changing it changes `y_hat`; compare interval
+settings with `backtest`.
 """
 const TUNABLE_FIELDS = (:model, :features, :strategy, :transform)
 
@@ -219,8 +220,9 @@ function _check_tunable(ks, lead, noun, subject)
         "valid $(noun)s are $(list(TUNABLE_FIELDS))."))
     :intervals in ks && throw(ArgumentError(
         "$lead the $noun :intervals, which cannot be tuned: tune ranks candidates by " *
-        "point-forecast metrics and interval settings leave y_hat unchanged. Compare " *
-        "them with backtest(...; metrics=(crps, Coverage(95)))."))
+        "the published point forecasts, and a SplitConformal forecaster publishes a " *
+        "model fitted without its last holdout rows, so interval settings change " *
+        "y_hat. Compare them with backtest(...; metrics=(crps, Coverage(95)))."))
     data = setdiff(ks, TUNABLE_FIELDS)
     isempty(data) || throw(ArgumentError(
         "$subject$(length(data) == 1 ? "" : "s") $(list(data)) " *
@@ -423,7 +425,12 @@ struct FittedForecaster{F<:Forecaster,T<:TrainedModel}
     models::Vector{T}
     series::Vector{SeriesState}
     feature_names::Vector{Symbol}
+    calibration::Vector{Matrix{Float64}}
 end
+
+# Only SplitConformal fits fill the triangle.
+FittedForecaster(spec, models, series, feature_names) =
+    FittedForecaster(spec, models, series, feature_names, Matrix{Float64}[])
 
 # Panels have no single history; refuse, don't guess.
 const _SERIES_PROPS = (:y_history, :t_last, :t_start, :n_train, :z_history,
@@ -442,7 +449,8 @@ _series_prop(::Forecaster{M,S,Symbol}, f, name) where {M,S} = throw(ArgumentErro
     "each of which has .id, .y_history, .t_last, .t_start and .n_train."))
 
 Base.propertynames(f::FittedForecaster, private::Bool=false) =
-    (fieldnames(FittedForecaster)..., _SERIES_PROPS...)
+    private ? (fieldnames(FittedForecaster)..., _SERIES_PROPS...) :
+    (filter(!=(:calibration), fieldnames(FittedForecaster))..., _SERIES_PROPS...)
 
 """
     nseries(f::FittedForecaster) -> Int

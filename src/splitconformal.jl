@@ -240,17 +240,8 @@ function _calibrate_chunk!(E, iv, fc, head, usable, step0s, exog, is, depth)
     return nothing
 end
 
-"""
-    _calibrate(iv, fc, groups; chunk) -> (head, triangles, states)
-
-Fit the head model on the rows before the common cutoff and measure its errors at the
-last `iv.holdout` origins of every series. `triangles[k]` is a `holdout x depth` matrix,
-row `i` the origin `i` rows into the holdout and column `j` step `j`; entries without an
-actual stay `NaN`. `states` are the full-history states the head forecasts from.
-`chunk` is the number of origins per `_forecast_states` call.
-"""
-function _calibrate(iv::SplitConformal, fc::Forecaster, groups;
-                    chunk::Integer=max(1, _CALIBRATION_STATES ÷ length(groups)))
+# The head model and what the calibration origins need.
+function _fit_head(iv::SplitConformal, fc::Forecaster, groups)
     c, mh = iv.holdout, minhistory(fc)
     _check_rows(iv, fc, groups)
     usable, short = _prepare_all(fc, groups)
@@ -274,6 +265,22 @@ function _calibrate(iv::SplitConformal, fc::Forecaster, groups;
         throw(ArgumentError("intervals=$iv, fitting the calibration model on " *
                             _head_rows(fc, nrows(head_tbl), cutoff) * ": " * err.msg))
     end
+    return head, usable, step0s, exog
+end
+
+"""
+    _calibrate(iv, fc, groups; chunk) -> (head, triangles, states)
+
+Fit the head model on the rows before the common cutoff and measure its errors at the
+last `iv.holdout` origins of every series. `triangles[k]` is a `holdout x depth` matrix,
+row `i` the origin `i` rows into the holdout and column `j` step `j`; entries without an
+actual stay `NaN`. `states` are the full-history states the head forecasts from.
+`chunk` is the number of origins per `_forecast_states` call.
+"""
+function _calibrate(iv::SplitConformal, fc::Forecaster, groups;
+                    chunk::Integer=max(1, _CALIBRATION_STATES ÷ length(groups)))
+    c = iv.holdout
+    head, usable, step0s, exog = _fit_head(iv, fc, groups)
     depth = _depth(fc.strategy, c)
     E = [fill(NaN, c, depth) for _ in usable]
     for lo in 1:chunk:c
@@ -281,4 +288,42 @@ function _calibrate(iv::SplitConformal, fc::Forecaster, groups;
         _calibrate_chunk!(E, iv, fc, head, usable, step0s, exog, is, depth)
     end
     return head, E, _published_states(usable, step0s)
+end
+
+_check_pairing(model, features, strategy, transform, ::SplitConformal) = nothing
+_require_intervals(::SplitConformal, who) = nothing
+
+# The head publishes: no final fit on all rows.
+function _fit_spec(iv::SplitConformal, fc, tbl, base)
+    head, E, states = _calibrate(iv, fc, _series_groups(fc, tbl, base))
+    return FittedForecaster(fc, head.models, states, head.feature_names, E)
+end
+
+# A fold needs the published head, not the triangle.
+function _fit_fold(iv::SplitConformal, fc, tbl, base)
+    head, usable, step0s, _ = _fit_head(iv, fc, _series_groups(fc, tbl, base))
+    return FittedForecaster(fc, head.models, _published_states(usable, step0s),
+                            head.feature_names)
+end
+
+function _sample_matrices(iv::SplitConformal, f::FittedForecaster, preds)
+    E = getfield(f, :calibration)
+    hmax = max(1, maximum(length, preds))
+    depth = _depth(f.spec.strategy, iv.holdout)
+    hmax > depth && throw(ArgumentError(
+        _support_message(iv.holdout, hmax, depth, nothing, "forecast horizon")))
+    K = iv.holdout - hmax + 1
+    return Matrix{Float64}[preds[k] .+ transpose(E[k][1:K, 1:length(preds[k])])
+                           for k in eachindex(preds)]
+end
+
+_strategy(f::FittedForecaster) = f.spec.strategy
+_strategy(fc::Forecaster) = fc.strategy
+
+# Direct's own horizon check goes first, so its text stands.
+function _check_support(iv::SplitConformal, f, lv, h, who)
+    _check_horizon(f, h)
+    msg = _support_message(iv.holdout, h, _depth(_strategy(f), iv.holdout), lv, who)
+    msg === nothing || throw(ArgumentError(msg))
+    return nothing
 end

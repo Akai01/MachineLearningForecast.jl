@@ -186,9 +186,10 @@ _csp_fix(p::Integer) = "Use ConformalSeasonalPool($p; freq=...) to build the pai
 _check_pairing(model, features, strategy, transform, ::Nothing) = nothing
 
 _check_pairing(model, features, strategy, transform, x) = throw(ArgumentError(
-    "intervals must be nothing or a PoolIntervals(m), got $(repr(x)). Pass " *
-    "intervals=PoolIntervals(m) here; ConformalSeasonalPool(m; freq) builds a whole " *
-    "Forecaster."))
+    "intervals must be nothing, a SplitConformal(holdout=c) or a PoolIntervals(m), got " *
+    "$(repr(x)). Pass intervals=SplitConformal(holdout=60) for any model, or " *
+    "intervals=PoolIntervals(m) for the seasonal naive one; ConformalSeasonalPool(m; " *
+    "freq) builds a whole Forecaster."))
 
 function _check_pairing(model, features, strategy, transform, iv::PoolIntervals)
     _check_centre(model, iv)
@@ -210,8 +211,8 @@ _check_centre(m::SeasonalNaive, iv::PoolIntervals) = m.period == iv.period ||
 _check_centre(m, iv::PoolIntervals) = throw(ArgumentError(
     "intervals=PoolIntervals($(iv.period)) is the paper's Conformal Seasonal Pools, " *
     "defined around the seasonal naive forecast, but the model is " *
-    "$(nameof(typeof(m))). Intervals around other models are not available. " *
-    _csp_fix(iv.period)))
+    "$(nameof(typeof(m))). For any other model pass " *
+    "intervals=SplitConformal(holdout=60). " * _csp_fix(iv.period)))
 
 _check_recursive(::Recursive, iv::PoolIntervals) = nothing
 _check_recursive(s::ForecastStrategy, iv::PoolIntervals) = throw(ArgumentError(
@@ -274,9 +275,9 @@ end
 
 _require_intervals(fc::Forecaster, who) = _require_intervals(fc.intervals, who)
 _require_intervals(::Nothing, who) = throw(ArgumentError(
-    "$who needs an interval method, but this forecaster has none. Build it with " *
-    "ConformalSeasonalPool(period; freq=...), or pass " *
-    "intervals=PoolIntervals(period) with a SeasonalNaive(period) model."))
+    "$who needs an interval method, but this forecaster has none. Pass " *
+    "intervals=SplitConformal(holdout=60) for any model, or build the seasonal naive " *
+    "one with ConformalSeasonalPool(period; freq=...)."))
 _require_intervals(::PoolIntervals, who) = nothing
 
 _check_levels(::Nothing) = Float64[]

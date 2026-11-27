@@ -337,8 +337,8 @@
                       TestModels.LinAR(1.0, 0.0))
             @test_throws "intervals=PoolIntervals(12) is the paper's Conformal Seasonal " *
                          "Pools, defined around the seasonal naive forecast, but the " *
-                         "model is $(nameof(typeof(model))). Intervals around other " *
-                         "models are not available. $fix" Forecaster(
+                         "model is $(nameof(typeof(model))). For any other model pass " *
+                         "intervals=SplitConformal(holdout=60). $fix" Forecaster(
                 model; features=FeatureSet(Lag(12)), freq=Month(1), intervals=iv)
         end
         @test_throws "intervals=PoolIntervals(12) needs SeasonalNaive(12), got " *
@@ -362,10 +362,12 @@
                      "original scale. $fix" hand(transform=LastScale(12))
         # reconstruct runs the constructor, so it is checked.
         @test_throws "needs SeasonalNaive(12)" C.reconstruct(csp(); model=SeasonalNaive(7))
-        # Anything but nothing or a PoolIntervals is refused.
+        # Only nothing, SplitConformal, PoolIntervals pass.
         for bad in (:csp, 0.95, csp())
-            @test_throws "intervals must be nothing or a PoolIntervals(m), got " *
-                         "$(repr(bad)). Pass intervals=PoolIntervals(m) here; " *
+            @test_throws "intervals must be nothing, a SplitConformal(holdout=c) or a " *
+                         "PoolIntervals(m), got $(repr(bad)). Pass " *
+                         "intervals=SplitConformal(holdout=60) for any model, or " *
+                         "intervals=PoolIntervals(m) for the seasonal naive one; " *
                          "ConformalSeasonalPool(m; freq) builds a whole Forecaster." hand(
                 intervals=bad)
         end
@@ -377,9 +379,11 @@
         @test C.reconstruct(fc; model=SeasonalNaive(12)).intervals === fc.intervals
         @test !(:intervals in C.TUNABLE_FIELDS) && :intervals in fieldnames(Forecaster)
         msg(lead, noun) = "$lead the $noun :intervals, which cannot be tuned: tune " *
-                          "ranks candidates by point-forecast metrics and interval " *
-                          "settings leave y_hat unchanged. Compare them with " *
-                          "backtest(...; metrics=(crps, Coverage(95)))."
+                          "ranks candidates by the published point forecasts, and a " *
+                          "SplitConformal forecaster publishes a model fitted without " *
+                          "its last holdout rows, so interval settings change y_hat. " *
+                          "Compare them with backtest(...; metrics=(crps, " *
+                          "Coverage(95)))."
         @test_throws msg("cannot reconstruct Forecaster with", "field") C.reconstruct(
             fc; intervals=nothing)
         @test_throws msg("grid has", "key") tune(
@@ -394,8 +398,8 @@
                       "candidate 1 (model=EvoTreeRegressor(",
                       "ArgumentError: intervals=PoolIntervals(12) is the paper's " *
                       "Conformal Seasonal Pools, defined around the seasonal naive " *
-                      "forecast, but the model is EvoTreeRegressor. Intervals around " *
-                      "other models are not available."] tune(
+                      "forecast, but the model is EvoTreeRegressor. For any other " *
+                      "model pass intervals=SplitConformal(holdout=60)."] tune(
             fc, (ds=monthly, y=yseas); grid=(model=[EvoTreeRegressor(nrounds=5)],),
             horizon=6, windows=2, metric=smape)
     end
@@ -569,9 +573,9 @@
     @testset "interval errors are actionable" begin
         plain = Forecaster(SeasonalNaive(12); features=FeatureSet(Lag(12)), freq=Month(1))
         fp = fit(plain, (ds=monthly, y=yseas))
-        no(who) = "$who needs an interval method, but this forecaster has none. Build " *
-                  "it with ConformalSeasonalPool(period; freq=...), or pass " *
-                  "intervals=PoolIntervals(period) with a SeasonalNaive(period) model."
+        no(who) = "$who needs an interval method, but this forecaster has none. Pass " *
+                  "intervals=SplitConformal(holdout=60) for any model, or build the " *
+                  "seasonal naive one with ConformalSeasonalPool(period; freq=...)."
         @test_throws no("forecast with levels") forecast(fp, 3; levels=(95,))
         @test_throws no("forecast_samples") forecast_samples(fp, 3)
 
@@ -856,9 +860,9 @@
         data = (ds=monthly, y=yseas)
         plain = Forecaster(SeasonalNaive(12); features=FeatureSet(Lag(12)), freq=Month(1))
         who = "backtest with levels or a sample-based metric needs an interval method, " *
-              "but this forecaster has none. Build it with ConformalSeasonalPool(period; " *
-              "freq=...), or pass intervals=PoolIntervals(period) with a " *
-              "SeasonalNaive(period) model."
+              "but this forecaster has none. Pass " *
+              "intervals=SplitConformal(holdout=60) for any model, or build the " *
+              "seasonal naive one with ConformalSeasonalPool(period; freq=...)."
         @test_throws who backtest(plain, data; horizon=6, windows=2, metrics=(crps,))
         @test_throws who backtest(plain, data; horizon=6, windows=2, levels=(95,))
         @test_throws who backtest(plain, data; horizon=6, windows=2,

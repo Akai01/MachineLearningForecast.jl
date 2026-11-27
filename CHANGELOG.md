@@ -170,6 +170,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Three error messages now point to `intervals=SplitConformal(holdout=60)` for any
+  model, not only to `ConformalSeasonalPool`: the refusal of any `intervals` value other
+  than `nothing`, a `SplitConformal` or a `PoolIntervals`; the "needs an interval method"
+  message of `forecast(...; levels)`, `forecast_samples` and `backtest`; and the refusal
+  of a `PoolIntervals` around a model other than `SeasonalNaive`. The message of
+  `tune` and `reconstruct` for the `:intervals` field no longer says that interval
+  settings leave `y_hat` unchanged: a `SplitConformal` forecaster publishes a model
+  fitted without its last `holdout` rows.
 - Three error messages no longer use an em dash: the duplicate-timestamp message for
   `future` ("Deduplicate `future`; otherwise ..."), the non-finite target message
   ("... before fitting; they propagate ..."), and the message for a time column that
