@@ -71,7 +71,6 @@ end
 # Bounds the history copies that one call holds.
 const _CALIBRATION_STATES = 4096
 
-# Single series only; a panel needs its own messages.
 function _check_rows(iv::SplitConformal, fc::Forecaster{M,S,Nothing},
                      groups) where {M,S}
     c, mh = iv.holdout, minhistory(fc)
@@ -83,28 +82,72 @@ function _check_rows(iv::SplitConformal, fc::Forecaster{M,S,Nothing},
     throw(ArgumentError(
         "the data has $n rows. intervals=$iv holds out the last $c rows to measure " *
         "errors and leaves $(max(n - c, 0)) to train the calibration model, but " *
-        "$(_history_who(fc)) more than $mh $(hist)rows. Provide at least " *
+        "$(_history_who(fc)) more than $mh $(hist)row$(mh == 1 ? "" : "s"). " *
+        "Provide at least " *
         "$(c + mh + 1) rows$lower."))
 end
 
-_check_head(iv, fc, ::Recursive, usable, rs) = nothing
+# Series with n <= mh are the point fit's to skip.
+function _check_rows(iv::SplitConformal, fc::Forecaster{M,S,Symbol},
+                     groups) where {M,S}
+    c, mh = iv.holdout, minhistory(fc)
+    short = [(id, nrows(sub)) for (id, sub, _) in groups if mh < nrows(sub) < c + mh + 1]
+    isempty(short) && return nothing
+    k = length(short)
+    names = join((string(fc.id, "=", repr(id), " (", n, " rows)")
+                  for (id, n) in first(short, 5)), ", ")
+    low = minimum(last, short) - mh - 1
+    fix = low ≥ 9 ? "Provide longer series, leave these series out, or lower holdout " *
+                    "to $low or less." : "Provide longer series or leave these series out."
+    throw(ArgumentError(
+        "$k series $(k == 1 ? "is" : "are") too short for intervals=$iv, which holds " *
+        "out the last $c rows of each series to measure errors and needs at least " *
+        "$(c + mh + 1) rows per series: $names$(k > 5 ? ", ..." : ""). $fix"))
+end
+
+function _hist_text(fc)
+    mh, d = minhistory(fc), dropped_rows(fc.transform)
+    rows(k, what) = "$k $what row$(k == 1 ? "" : "s")"
+    return iszero(d) ? "the feature set's $(rows(mh, "history"))" :
+           "the feature set's $(rows(mh - d, "history")) and the transform's " *
+           rows(d, "dropped")
+end
+
+_check_head(iv, fc, ::Recursive, usable, rs, cutoff) = nothing
 function _check_head(iv::SplitConformal, fc::Forecaster{M,S,Nothing}, s::Direct,
-                     usable, rs) where {M,S}
+                     usable, rs, cutoff) where {M,S}
     c, mh, D = iv.holdout, minhistory(fc), s.max_horizon
     r = only(rs)
     r - mh ≥ D && return nothing
     n = length(only(usable).t)
     low = n - mh - D
     lower = low ≥ 9 ? "Lower holdout to $low or less, use" : "Use"
-    d = dropped_rows(fc.transform)
-    hist = iszero(d) ? "the feature set's $mh history rows" :
-           "the feature set's $(mh - d) history rows and the transform's $d dropped rows"
     throw(ArgumentError(
         "intervals=$iv leaves $r of the $n rows to train the calibration model, " *
-        "$(r - mh) after $hist, but $s needs $D. " *
+        "$(r - mh) after $(_hist_text(fc)), but $s needs $D. " *
         "$lower Direct($(r - mh)) or a shorter max_horizon, or provide at least " *
         "$(c + mh + D) rows."))
 end
+
+function _check_head(iv::SplitConformal, fc::Forecaster{M,S,Symbol}, s::Direct,
+                     usable, rs, cutoff) where {M,S}
+    c, mh, D = iv.holdout, minhistory(fc), s.max_horizon
+    r = maximum(rs)
+    r - mh ≥ D && return nothing
+    low = c - D + r - mh
+    lower = low ≥ 9 ? "Lower holdout to $low or less, use" : "Use"
+    setter = usable[findfirst(p -> p.t[length(p.t) - c + 1] == cutoff, usable)]
+    throw(ArgumentError(
+        "intervals=$iv trains the calibration model on rows before $cutoff, the " *
+        "earliest holdout start (series $(fc.id)=$(repr(setter.id))). That leaves $r " *
+        "rows in the series with the most rows before it, $(r - mh) after " *
+        "$(_hist_text(fc)), but $s needs $D. $lower Direct($(r - mh)) or a shorter " *
+        "max_horizon, or provide " *
+        "$(D - r + mh) more rows before $cutoff in that series."))
+end
+
+_head_rows(::Forecaster{M,S,Nothing}, n, cutoff) where {M,S} = "the first $n rows"
+_head_rows(::Forecaster{M,S,Symbol}, n, cutoff) where {M,S} = "the $n rows before $cutoff"
 
 _published_states(usable, step0s) = SeriesState[
     SeriesState(p.id, p.yraw, p.t[end], p.t[1], length(p.t), p.z, p.state, s0)
@@ -124,7 +167,7 @@ function _pseudo_state(iv, fc, p, o, step0)
     yp = p.yraw[1:o]
     try
         _, z, state = _transform_table(fc, NamedTuple{(fc.target,)}((yp,)), yp)
-        return SeriesState(p.id, p.yraw, p.t[o], p.t[1], o, z, state, step0)
+        return SeriesState(p.id, yp, p.t[o], p.t[1], o, z, state, step0)
     catch err
         err isa ArgumentError || rethrow()
         who = fc.id === nothing ? "" : "series $(fc.id)=$(repr(p.id)): "
@@ -155,13 +198,22 @@ function _exogenous_history(fc, usable, groups)
     end
 end
 
-# One _forecast_states call serves the origins `is`.
+function _origins_text(::Forecaster{M,S,Nothing}, usable, is, c) where {M,S}
+    p = only(usable)
+    a, b = (p.rows[length(p.t) - c + i - 1] for i in (first(is), last(is)))
+    return "at rows $a to $b"
+end
+_origins_text(::Forecaster{M,S,Symbol}, usable, is, c) where {M,S} =
+    "$(first(is)) to $(last(is)) of the $c in each series (origin 1 is the last " *
+    "row before its holdout)"
+
+# Origin-major: the first non-finite is chunk-independent.
 function _calibrate_chunk!(E, iv, fc, head, usable, step0s, exog, is, depth)
     c = iv.holdout
     states = SeriesState[]
     hs = Int[]
     exog_rows = exog === nothing ? nothing : Vector{NamedTuple}[]
-    for (k, p) in enumerate(usable), i in is
+    for i in is, (k, p) in enumerate(usable)
         o = length(p.t) - c + i - 1
         push!(states, _pseudo_state(iv, fc, p, o, step0s[k]))
         push!(hs, min(c - i + 1, depth))
@@ -172,13 +224,11 @@ function _calibrate_chunk!(E, iv, fc, head, usable, step0s, exog, is, depth)
         _forecast_states(head, states, hs, grids, exog_rows)
     catch err
         err isa ArgumentError || rethrow()
-        p, n = first(usable), length(first(usable).t)
-        a, b = (p.rows[n - c + i - 1] for i in (first(is), last(is)))
-        throw(ArgumentError("intervals=$iv, calibrating origins at rows $a to $b: " *
-                            err.msg))
+        throw(ArgumentError("intervals=$iv, calibrating origins " *
+                            _origins_text(fc, usable, is, c) * ": " * err.msg))
     end
     m = 0
-    for (k, p) in enumerate(usable), i in is
+    for i in is, (k, p) in enumerate(usable)
         m += 1
         o = length(p.t) - c + i - 1
         for j in 1:hs[m]
@@ -209,7 +259,7 @@ function _calibrate(iv::SplitConformal, fc::Forecaster, groups;
     cutoff = minimum(p.t[length(p.t) - c + 1] for p in usable)
     rmap = Dict(p.id => searchsortedfirst(p.t, cutoff) - 1 for p in usable)
     rs = [rmap[p.id] for p in usable]
-    _check_head(iv, fc, fc.strategy, usable, rs)
+    _check_head(iv, fc, fc.strategy, usable, rs, cutoff)
     head_groups = [(id, row_subset(sub, 1:rmap[id]), rows[1:rmap[id]])
                    for (id, sub, rows) in groups if get(rmap, id, 0) > mh]
     head_tbl = _vcat_frames([g[2] for g in head_groups])
@@ -221,8 +271,8 @@ function _calibrate(iv::SplitConformal, fc::Forecaster, groups;
         head = _fit_point(fc, head_tbl, head_base)
     catch err
         err isa ArgumentError || rethrow()
-        throw(ArgumentError("intervals=$iv, fitting the calibration model on the " *
-                            "first $(sum(rs)) rows: " * err.msg))
+        throw(ArgumentError("intervals=$iv, fitting the calibration model on " *
+                            _head_rows(fc, nrows(head_tbl), cutoff) * ": " * err.msg))
     end
     depth = _depth(fc.strategy, c)
     E = [fill(NaN, c, depth) for _ in usable]

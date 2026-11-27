@@ -1,3 +1,6 @@
+# Seeded, so two fits of one tree are identical.
+dtree() = DecisionTreeRegressor(max_depth=3, rng=StableRNG(1))
+
 @testset "SplitConformal seam" begin
     C = MachineLearningForecast
     t = collect(Date(2020, 1, 1):Month(1):Date(2022, 12, 1))
@@ -261,7 +264,7 @@ end
         d = mkdata(n)
         feats = FeatureSet(Lag(1), RollingMean(3), Calendar(:dayofweek))
         for strat in (Recursive(), Direct(5)),
-            model in (LinAR(0.5, 1.0), DecisionTreeRegressor(max_depth=3))
+            model in (LinAR(0.5, 1.0), dtree())
 
             fc = mk(model; feats, strat)
             depth = C._depth(strat, c)
@@ -349,7 +352,7 @@ end
 
     @testset "Direct head rows and the lower holdout clause" begin
         pre = "intervals=SplitConformal(holdout=9) leaves 5 of the 14 rows to train " *
-              "the calibration model, 4 after the feature set's 1 history rows, but " *
+              "the calibration model, 4 after the feature set's 1 history row, but " *
               "Direct(5) needs 5. "
         fc = mk(MeanModel(); strat=Direct(5))
         _, E = cal(fc, mkdata(15), 9)
@@ -358,7 +361,7 @@ end
                                    "provide at least 15 rows.") cal(fc, mkdata(14), 9)
         @test_throws ArgumentError(
             "intervals=SplitConformal(holdout=25) leaves 5 of the 30 rows to train the " *
-            "calibration model, 4 after the feature set's 1 history rows, but Direct(5) " *
+            "calibration model, 4 after the feature set's 1 history row, but Direct(5) " *
             "needs 5. Lower holdout to 24 or less, use Direct(4) or a shorter " *
             "max_horizon, or provide at least 31 rows.") cal(fc, mkdata(30), 25)
         _, E = cal(fc, mkdata(30), 24)
@@ -434,7 +437,7 @@ end
 
     @testset "leakage" begin
         n, c = 40, 12
-        for model in (LinAR(0.5, 1.0), DecisionTreeRegressor(max_depth=3)),
+        for model in (LinAR(0.5, 1.0), dtree()),
             strat in (Recursive(), Direct(3))
 
             fc = mk(model; feats=FeatureSet(Lag(1), Lag(2)), strat)
@@ -469,7 +472,7 @@ end
     @testset "data and model are not mutated, results repeat" begin
         d = mkdata(40)
         d0 = deepcopy(d)
-        for model in (LinAR(0.5, 1.0), DecisionTreeRegressor(max_depth=3))
+        for model in (LinAR(0.5, 1.0), dtree())
             fc = mk(model)
             proto = deepcopy(model)
             tbl = C.normalize_table(d)
@@ -486,7 +489,7 @@ end
     end
 
     @testset "chunk sizes agree" begin
-        for model in (LinAR(0.5, 1.0), DecisionTreeRegressor(max_depth=3)),
+        for model in (LinAR(0.5, 1.0), dtree()),
             strat in (Recursive(), Direct(4))
 
             fc = mk(model; feats=FeatureSet(Lag(1), RollingMean(3)), strat)
@@ -515,7 +518,7 @@ end
         n, c = 80, 20
         d = mkdata(n)
         feats = FeatureSet(Lag(1), Lag(2), RollingMean(3), Calendar(:dayofweek))
-        for model in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=3)),
+        for model in (EvoTreeRegressor(nrounds=5), dtree()),
             strat in (Recursive(), Direct(5))
 
             _, E = cal(mk(model; feats, strat), d, c)
@@ -580,7 +583,7 @@ end
         @test_throws ArgumentError(
             "the data has 12 rows. intervals=SplitConformal(holdout=12) holds out the " *
             "last 12 rows to measure errors and leaves 0 to train the calibration " *
-            "model, but the feature set needs more than 1 history rows. Provide at " *
+            "model, but the feature set needs more than 1 history row. Provide at " *
             "least 14 rows or lower holdout to 10 or less.") cal(
             fc, (ds=d.ds[1:12], y=ym), 12)
     end
@@ -635,7 +638,7 @@ end
         trs = (MeanScale(), LastScale(3), Deseasonalize(4), LogRatio(3), Difference(2),
                TransformChain(LastScale(3), Difference(2)))
         depth = C._depth(Recursive(), c)
-        for tr in trs, model in (LinAR(0.5, 1.0), DecisionTreeRegressor(max_depth=3))
+        for tr in trs, model in (LinAR(0.5, 1.0), dtree())
             fc = mk(model; transform=tr)
             head, E, st = cal(fc, d, c)
             p = usable_of(fc, d)
@@ -721,12 +724,12 @@ end
         @test size(only(E)) == (9, 1)
         @test_throws ArgumentError(
             "intervals=SplitConformal(holdout=9) leaves 8 of the 17 rows to train the " *
-            "calibration model, 4 after the feature set's 1 history rows and the " *
+            "calibration model, 4 after the feature set's 1 history row and the " *
             "transform's 3 dropped rows, but Direct(5) needs 5. Use Direct(4) or a " *
             "shorter max_horizon, or provide at least 18 rows.") cal(fd, mkdata(17), 9)
         @test_throws ArgumentError(
             "intervals=SplitConformal(holdout=25) leaves 5 of the 30 rows to train the " *
-            "calibration model, 1 after the feature set's 1 history rows and the " *
+            "calibration model, 1 after the feature set's 1 history row and the " *
             "transform's 3 dropped rows, but Direct(5) needs 5. Lower holdout to 21 " *
             "or less, use Direct(1) or a shorter max_horizon, or provide at least 34 " *
             "rows.") cal(fd, mkdata(30), 25)
@@ -904,7 +907,7 @@ end
         d = mkdata(n)
         feats = FeatureSet(Lag(1), Lag(2), RollingMean(3), Exogenous(:x))
         tr = TransformChain(LastScale(3), Difference(1))
-        for model in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=3)),
+        for model in (EvoTreeRegressor(nrounds=5), dtree()),
             strat in (Recursive(), Direct(5))
 
             _, E = cal(mk(model; feats, strat, transform=tr), d, c)
@@ -916,5 +919,504 @@ end
                 j <= c - i + 1 && @test isfinite(E[i, j])
             end
         end
+    end
+end
+
+@testset "SplitConformal panels" begin
+    C = MachineLearningForecast
+    LinAR, MeanModel, EchoColumn = TestModels.LinAR, TestModels.MeanModel,
+                                   TestModels.EchoColumn
+    D0 = Date(2020, 1, 1)
+    day(d) = D0 + Day(d - 1)
+    siv(c) = C.SplitConformal(holdout=c)
+    mk(model; feats=FeatureSet(Lag(1)), strat=Recursive(), transform=NoTransform(),
+       id=:unique_id) =
+        Forecaster(model; features=feats, strategy=strat, freq=Day(1), id, transform)
+    # Dyadic values, so closed forms compare exactly.
+    yv(d, k) = 8 + mod(7d + 3k, 16) / 4 + d / 8
+    xv(d, k) = 100 + mod(5d + k, 8) / 2 + d / 4
+    ys(k, r) = [yv(d, k) for d in r]
+    function mkpanel(spans...; x=false)
+        ids, ds, y, xs = Any[], Date[], Float64[], Union{Missing,Float64}[]
+        for (k, (id, r)) in enumerate(spans), d in r
+            push!(ids, id)
+            push!(ds, day(d))
+            push!(y, yv(d, k))
+            push!(xs, xv(d, k))
+        end
+        base = (unique_id=identity.(ids), ds=ds, y=y)
+        return x ? merge(base, (x=xs,)) : base
+    end
+    shuf(d, seed) = (p = shuffle(StableRNG(seed), 1:length(d.ds));
+                     NamedTuple{keys(d)}(map(v -> v[p], values(d))))
+    groups_of(fc, d) = C._series_groups(fc, C.normalize_table(d))
+    cal(fc, d, c; kw...) = C._calibrate(siv(c), fc, groups_of(fc, d); kw...)
+    caught(f) = try f(); nothing catch err err end
+    ids_of(f) = [s.id for s in f.series]
+    function pseudo(fc, p, o, step0=0)
+        yp = p.yraw[1:o]
+        _, z, state = C._transform_table(fc, NamedTuple{(fc.target,)}((yp,)), yp)
+        return C.SeriesState(p.id, yp, p.t[o], p.t[1], o, z, state, step0)
+    end
+    # The head's mean over the targets of these days.
+    headmean(parts, mh) = (v = reduce(vcat, [ys(k, (first(r) + mh):last(r))
+                                              for (k, r) in parts]);
+                           sum(v) / length(v))
+    # Series k over days r, against a head that predicts m.
+    function eref(k, r, m, c, depth)
+        E = fill(NaN, c, depth)
+        for i in 1:c, j in 1:min(depth, c - i + 1)
+            E[i, j] = yv(first(r) + length(r) - c + i - 2 + j, k) - m
+        end
+        return E
+    end
+
+    @testset "a one-series panel equals the single series" begin
+        c = 12
+        feats = FeatureSet(Lag(1), RollingMean(3))
+        for model in (LinAR(0.5, 1.0), MeanModel(), dtree()),
+            strat in (Recursive(), Direct(3))
+
+            fp = mk(model; feats, strat)
+            fs = mk(model; feats, strat, id=nothing)
+            hp, Ep, sp = cal(fp, mkpanel("a" => 1:60), c)
+            hs, Es, ss = C._calibrate(siv(c), fs, C._series_groups(
+                fs, C.normalize_table((ds=[day(d) for d in 1:60], y=ys(1, 1:60)))))
+            @test isequal(Ep, Es)
+            @test forecast(hp, 3).y_hat == forecast(hs, 3).y_hat
+            @test sp[1].step0 == ss[1].step0 == 0
+            @test sp[1].y_history == ss[1].y_history
+        end
+    end
+
+    @testset "the head trains on rows before the earliest holdout start" begin
+        c, depth = 12, 4
+        spans = ("a" => 1:60, "b" => 10:70, "c" => 1:55)
+        d = mkpanel(spans...)
+        # Holdout starts: days 49, 59, 44; T* = day 44, set by "c".
+        head, E, st = cal(mk(MeanModel()), d, c)
+        @test ids_of(head) == ["a", "b", "c"]
+        @test [s.n_train for s in head.series] == [43, 34, 43]
+        @test [s.t_last for s in head.series] == fill(day(43), 3)
+        m = headmean([(1, 1:43), (2, 10:43), (3, 1:43)], 1)
+        @test head.models[1].fitresult == m
+        for (k, (_, r)) in enumerate(spans)
+            @test isequal(E[k], eref(k, r, m, c, depth))
+            @test st[k].n_train == length(r)
+        end
+        # The series that sets T* is cut at its own end.
+        @test head.series[3].n_train == 55 - c
+        for chunk in (1, 5)
+            @test isequal(cal(mk(MeanModel()), d, c; chunk)[2], E)
+        end
+        # The boundary: the setter keeps mh + 1 head rows.
+        d2 = mkpanel("a" => 1:14, "b" => 1:30)
+        head, E, _ = cal(mk(MeanModel()), d2, 12)
+        @test [s.n_train for s in head.series] == [2, 2]
+        @test head.models[1].fitresult == headmean([(1, 1:2), (2, 1:2)], 1)
+    end
+
+    @testset "an aligned panel equals the per-series cut" begin
+        c, depth = 12, 3
+        d = mkpanel("a" => 1:70, "b" => 15:70, "c" => 30:70)
+        feats = FeatureSet(Lag(1), Lag(2), RollingMean(3))
+        keep = d.ds .<= day(70 - c)
+        cut = NamedTuple{keys(d)}(map(v -> v[keep], values(d)))
+        for model in (LinAR(0.5, 1.0), MeanModel(), dtree(),
+                      EvoTreeRegressor(nrounds=5)),
+            strat in (Recursive(), Direct(3))
+
+            fc = mk(model; feats, strat)
+            head, E, st = cal(fc, d, c)
+            ref = fit(fc, cut)
+            @test forecast(head, depth).y_hat == forecast(ref, depth).y_hat
+            @test [s.step0 for s in head.series] == [s.step0 for s in ref.series]
+            @test [s.n_train for s in head.series] == [s.n_train for s in ref.series]
+            usable, _ = C._prepare_all(fc, groups_of(fc, d))
+            refst = C._published_states(usable, [s.step0 for s in ref.series])
+            for f in fieldnames(C.SeriesState)
+                @test all(getfield(a, f) == getfield(b, f) for (a, b) in zip(st, refst))
+            end
+            fa = C.FittedForecaster(fc, head.models, st, head.feature_names)
+            fb = C.FittedForecaster(fc, ref.models, refst, ref.feature_names)
+            @test forecast(fa, depth).y_hat == forecast(fb, depth).y_hat
+            for (k, p) in enumerate(usable), i in 1:c
+                o = length(p.t) - c + i - 1
+                h = min(c - i + 1, depth)
+                ps = pseudo(fc, p, o, ref.series[k].step0)
+                fk = C.FittedForecaster(fc, ref.models, [ps], ref.feature_names)
+                @test E[k][i, 1:h] == p.yraw[(o + 1):(o + h)] .- forecast(fk, h).y_hat
+            end
+        end
+    end
+
+    @testset "no leakage across series" begin
+        c, depth = 12, 4
+        spans = ("a" => 1:60, "b" => 10:70, "c" => 1:55)
+        d = mkpanel(spans...)
+        # Rows from T* = day 44 on, and rows before it, per series.
+        late = ("a" => 50, "b" => 60, "c" => 54)
+        early = ("a" => 20, "b" => 30, "c" => 40)
+        row(id, dd) = findfirst(i -> d.unique_id[i] == id && d.ds[i] == day(dd),
+                                eachindex(d.ds))
+        bump(r) = (y = copy(d.y); y[r] += 8.0; merge(d, (y=y,)))
+        fm = mk(MeanModel())
+        head0, E0, _ = cal(fm, d, c)
+        for (id, dd) in late
+            head1, E1, _ = cal(fm, bump(row(id, dd)), c)
+            @test head1.models[1].fitresult == head0.models[1].fitresult
+            for (k, (sid, r)) in enumerate(spans), i in 1:c, j in 1:depth
+                o = length(r) - c + i - 1
+                hit = sid == id && first(r) + o + j - 1 == dd
+                @test isequal(E1[k][i, j], hit ? E0[k][i, j] + 8.0 : E0[k][i, j])
+            end
+        end
+        for (id, dd) in early
+            head1, _ = cal(fm, bump(row(id, dd)), c)
+            @test head1.models[1].fitresult != head0.models[1].fitresult
+        end
+        # A history reader moves only where it reads the row.
+        fl = mk(LinAR(0.5, 1.0))
+        _, L0, _ = cal(fl, d, c)
+        for (id, dd) in late
+            _, L1, _ = cal(fl, bump(row(id, dd)), c)
+            for (k, (sid, r)) in enumerate(spans), i in 1:c, j in 1:depth
+                o = length(r) - c + i - 1
+                day_o = first(r) + o - 1
+                moved = sid == id && (day_o == dd || day_o + j == dd)
+                isnan(L0[k][i, j]) || @test (L1[k][i, j] != L0[k][i, j]) == moved
+            end
+        end
+        # A trained head does not see rows from T* on.
+        ft = mk(dtree(); feats=FeatureSet(Lag(1), Lag(2)))
+        h0 = cal(ft, d, c)[1]
+        for (id, dd) in late
+            h1 = cal(ft, bump(row(id, dd)), c)[1]
+            @test forecast(h1, 3).y_hat == forecast(h0, 3).y_hat
+        end
+        @test any(early) do (id, dd)
+            forecast(cal(ft, bump(row(id, dd)), c)[1], 3).y_hat != forecast(h0, 3).y_hat
+        end
+    end
+
+    @testset "late-starting series" begin
+        c, depth = 12, 4
+        feats = FeatureSet(Lag(3))
+        fc = mk(MeanModel(); feats)
+        # T* = day 49; "d" has 2 rows before it, "e" none (mh = 3).
+        spans = ("a" => 1:60, "b" => 5:60, "d" => 47:62, "e" => 52:67)
+        d = mkpanel(spans...)
+        head, E, st = @test_logs cal(fc, d, c)
+        @test ids_of(head) == ["a", "b"]
+        @test [s.n_train for s in head.series] == [48, 44]
+        m = headmean([(1, 1:48), (2, 5:48)], 3)
+        @test head.models[1].fitresult == m
+        @test [s.id for s in st] == ["a", "b", "d", "e"]
+        for (k, (_, r)) in enumerate(spans)
+            @test isequal(E[k], eref(k, r, m, c, depth))
+        end
+        @test [s.step0 for s in st] == [0, 4, 46, 51]
+        @test all(s -> s.step0 >= 0, st)
+        @test [s.step0 for s in head.series] == [0, 4]
+        @test [s.n_train for s in st] == [60, 56, 16, 16]
+        fh = C.FittedForecaster(fc, head.models, st, head.feature_names)
+        @test forecast(fh, 2).y_hat == fill(m, 8)
+        # A head fit failure counts the head rows only.
+        @test_throws ArgumentError(
+            "intervals=SplitConformal(holdout=12), fitting the calibration model on " *
+            "the 92 rows before $(day(49)): boom") cal(
+            mk(TestModels.ThrowIn(:fit, false); feats), d, c)
+    end
+
+    @testset "shuffled rows, first-appearance order" begin
+        c, depth = 12, 4
+        spans = ("c" => 1:60, "a" => 10:70, "b" => 1:55)
+        d = mkpanel(spans...)
+        for model in (MeanModel(), LinAR(0.5, 1.0))
+            fc = mk(model)
+            head, E, st = cal(fc, d, c)
+            @test [s.id for s in st] == ["c", "a", "b"] == ids_of(head)
+            for seed in (1, 2)
+                head2, E2, st2 = cal(fc, shuf(d, seed), c)
+                @test sort(ids_of(head2)) == ["a", "b", "c"]
+                for (k, s) in enumerate(st)
+                    k2 = findfirst(x -> x.id == s.id, st2)
+                    @test isequal(E2[k2], E[k])
+                    @test st2[k2].step0 == s.step0
+                    @test st2[k2].y_history == s.y_history
+                end
+            end
+        end
+        # E follows the published order, not the sorted ids.
+        m = headmean([(1, 1:43), (2, 10:43), (3, 1:43)], 1)
+        _, E, st = cal(mk(MeanModel()), d, c)
+        for (k, (id, r)) in enumerate(spans)
+            @test st[k].id == id
+            @test isequal(E[k], eref(k, r, m, c, depth))
+        end
+    end
+
+    @testset "step0 of the pseudo-states" begin
+        c = 12
+        # T* = day 69; "c" has one row before it: not in the head.
+        d = mkpanel("a" => 20:80, "b" => 30:80, "c" => 68:83)
+        for tr in (NoTransform(), Difference(2))
+            fc = mk(MeanModel(); transform=tr)
+            head, _, st = cal(fc, d, c)
+            usable, _ = C._prepare_all(fc, groups_of(fc, d))
+            @test ids_of(head) == ["a", "b"]
+            origin = usable[1].tz.ds[1]
+            for (k, s) in enumerate(st)
+                @test s.step0 == C._step0(fc, usable[k].tz, origin)
+                @test s.step0 >= 0
+            end
+            @test [s.step0 for s in head.series] == [s.step0 for s in st[1:2]]
+            @test st[3].step0 == 68 - 20
+        end
+    end
+
+    @testset "transforms that drop undeclared rows" begin
+        c = 12
+        # Skipped on the full table: 15 - 14 leaves one row.
+        fc = mk(LinAR(0.5, 1.0); transform=TestModels.UnderDeclared(14, 1))
+        @test C.minhistory(fc) == 2
+        d = mkpanel("a" => 1:60, "b" => 1:15)
+        head, E, st = @test_logs (:warn, r"skipping 1 series with fewer than 3 rows") cal(
+            fc, d, c)
+        @test length(E) == 1
+        @test [s.id for s in st] == ids_of(head) == ["a"]
+        @test size(E[1]) == (c, 4)
+        # Usable on the full table, skipped by the head's prep.
+        fc = mk(LinAR(0.5, 1.0); transform=TestModels.UnderDeclared(5, 1))
+        d = mkpanel("a" => 20:80, "b" => 65:90)
+        # T* = day 69: "b" has 4 rows before it, but 4 - 5 < 0.
+        head, E, st = @test_logs (:warn, r"skipping 1 series with fewer than 3 rows") cal(
+            fc, d, c)
+        @test ids_of(head) == ["a"]
+        @test [s.id for s in st] == ["a", "b"]
+        @test length(E) == 2
+        @test all(isfinite, E[2][1, :])
+        @test st[1].step0 == head.series[1].step0 == 0
+        # The head's origin is day 25, a's first row after the drop.
+        @test st[2].step0 == 70 - 25
+    end
+
+    @testset "short series" begin
+        c = 12
+        fc = mk(MeanModel(); feats=FeatureSet(Lag(2)))
+        # n <= mh: skipped with one warning, not calibrated.
+        d = mkpanel("a" => 1:60, "z" => 1:2, "b" => 1:50)
+        head, E, st = @test_logs (:warn, r"skipping 1 series with fewer than 3 rows") cal(
+            fc, d, c)
+        @test [s.id for s in st] == ["a", "b"] == ids_of(head)
+        @test length(E) == 2
+        # mh < n < c + mh + 1 is refused, naming five ids.
+        fc1 = mk(MeanModel())
+        d = mkpanel("a" => 1:80, "u1" => 1:31, "u2" => 1:30, "u3" => 1:29,
+                    "u4" => 1:28, "u5" => 1:27, "u6" => 1:12)
+        names = join(("unique_id=\"u$k\" ($(32 - k) rows)" for k in 1:5), ", ")
+        TestModels.FIT_COUNT[] = 0
+        @test_throws ArgumentError(
+            "6 series are too short for intervals=SplitConformal(holdout=30), which " *
+            "holds out the last 30 rows of each series to measure errors and needs " *
+            "at least 32 rows per series: $names, .... Provide longer series, leave " *
+            "these series out, or lower holdout to 10 or less.") cal(fc1, d, 30)
+        # Five are listed in full, without the ellipsis.
+        d5 = mkpanel("a" => 1:80, "u1" => 1:31, "u2" => 1:30, "u3" => 1:29,
+                     "u4" => 1:28, "u5" => 1:20)
+        @test_throws ArgumentError(
+            "5 series are too short for intervals=SplitConformal(holdout=30), which " *
+            "holds out the last 30 rows of each series to measure errors and needs " *
+            "at least 32 rows per series: unique_id=\"u1\" (31 rows), " *
+            "unique_id=\"u2\" (30 rows), unique_id=\"u3\" (29 rows), " *
+            "unique_id=\"u4\" (28 rows), unique_id=\"u5\" (20 rows). Provide longer " *
+            "series, leave these series out, or lower holdout to 18 or less.") cal(
+            fc1, d5, 30)
+        # Lowering would go below 9, so the clause is dropped.
+        d1 = mkpanel("a" => 1:80, "u" => 1:10, "z" => 1:1)
+        @test_throws ArgumentError(
+            "1 series is too short for intervals=SplitConformal(holdout=12), which " *
+            "holds out the last 12 rows of each series to measure errors and needs " *
+            "at least 14 rows per series: unique_id=\"u\" (10 rows). Provide longer " *
+            "series or leave these series out.") cal(fc1, d1, 12)
+        # The check runs before any fit or target read.
+        ym = Vector{Union{Missing,Float64}}(d1.y)
+        ym[end - 1] = missing
+        @test_throws "1 series is too short" cal(
+            mk(TestModels.CountFit()), merge(d1, (y=ym,)), 12)
+        @test TestModels.FIT_COUNT[] == 0
+        # The boundary: n = c + mh + 1 calibrates.
+        _, E, _ = cal(fc1, mkpanel("a" => 1:80, "u" => 1:14), 12)
+        @test length(E) == 2
+        # A long series does not excuse a short one.
+        @test_throws "1 series is too short" cal(
+            fc1, mkpanel("a" => 1:500, "u" => 1:13), 12)
+    end
+
+    @testset "Direct needs rows in the series with most head rows" begin
+        fc = mk(MeanModel(); strat=Direct(20))
+        msg12(id) = "intervals=SplitConformal(holdout=12) trains the calibration " *
+                    "model on rows before $(day(14)), the earliest holdout start " *
+                    "(series unique_id=\"$id\"). That leaves 13 rows in the series " *
+                    "with the most rows before it, 12 after the feature set's 1 " *
+                    "history row, but Direct(20) needs 20. Use Direct(12) or a " *
+                    "shorter max_horizon, or provide 8 more rows before " *
+                    "$(day(14)) in that series."
+        # T* = day 14, set by "b"; 13 rows before it in each.
+        @test_throws ArgumentError(msg12("b")) cal(
+            fc, mkpanel("a" => 1:30, "b" => 1:25), 12)
+        # A tie names the first series in table order.
+        @test_throws ArgumentError(msg12("z")) cal(
+            fc, mkpanel("z" => 1:25, "a" => 1:25), 12)
+        # The setter need not have the most rows before the cutoff.
+        d = mkpanel("a" => 1:70, "b" => 1:60)
+        fc = mk(MeanModel(); strat=Direct(40))
+        for p in (d, mkpanel("a" => 1:70, "b" => 11:60))
+            @test_throws ArgumentError(
+                "intervals=SplitConformal(holdout=30) trains the calibration model " *
+                "on rows before $(day(31)), the earliest holdout start (series " *
+                "unique_id=\"b\"). That leaves 30 rows in the series with the most " *
+                "rows before it, 29 after the feature set's 1 history row, but " *
+                "Direct(40) needs 40. Lower holdout to 19 or less, use Direct(29) " *
+                "or a shorter max_horizon, or provide 11 more rows before " *
+                "$(day(31)) in that series.") cal(fc, p, 30)
+        end
+        _, E, _ = cal(fc, d, 19)
+        @test size(E[1]) == (19, 11)
+        # With a transform the message names its dropped rows.
+        fd = mk(MeanModel(); strat=Direct(20), transform=Difference(2))
+        err = caught(() -> cal(fd, mkpanel("a" => 1:30, "b" => 1:25), 12))
+        @test err isa ArgumentError
+        @test occursin("after the feature set's 1 history row and the transform's " *
+                       "2 dropped rows", err.msg)
+        # A series short of D after the cut warns once.
+        fw = mk(MeanModel(); strat=Direct(10))
+        d = mkpanel("a" => 1:60, "b" => 40:60)
+        head, E, st = @test_logs (:warn, "Direct(10): 1 series with fewer than 10 " *
+                                  "training rows is left out of the step models " *
+                                  "beyond their row count: unique_id=\"b\" " *
+                                  "(8 training rows)") cal(fw, d, 12)
+        @test length(E) == 2
+        @test [s.n_train for s in head.series] == [48, 9]
+    end
+
+    @testset "both learners on a ragged panel" begin
+        c = 20
+        d = mkpanel("a" => 1:90, "b" => 15:100, "c" => 30:85, "d" => 70:110)
+        feats = FeatureSet(Lag(1), Lag(2), RollingMean(3), Calendar(:dayofweek))
+        for model in (EvoTreeRegressor(nrounds=5), dtree()),
+            strat in (Recursive(), Direct(4))
+
+            head, E, st = cal(mk(model; feats, strat), d, c)
+            depth = C._depth(strat, c)
+            @test length(E) == 4 == length(st)
+            for Ek in E
+                @test all(isnan(Ek[i, j]) == (j > c - i + 1) for i in 1:c, j in 1:depth)
+                @test all(isfinite(Ek[i, j]) for i in 1:c for j in 1:min(depth, c - i + 1))
+            end
+            @test all(isfinite, forecast(
+                C.FittedForecaster(mk(model; feats, strat), head.models, st,
+                                   head.feature_names), 4).y_hat)
+        end
+    end
+
+    @testset "errors are named for a panel" begin
+        c = 12
+        d = mkpanel("a" => 1:60, "b" => 10:70)
+        pre = "intervals=SplitConformal(holdout=12), calibrating origins "
+        fp = mk(TestModels.ThrowIn(:predict, false))
+        for (chunk, r) in ((1, "1 to 1"), (5, "1 to 5"), (c, "1 to 12"))
+            @test_throws ArgumentError(
+                pre * "$r of the 12 in each series (origin 1 is the last row before " *
+                "its holdout): boom") cal(fp, d, c; chunk)
+        end
+        # Single series text stays rows.
+        fs = mk(TestModels.ThrowIn(:predict, false); id=nothing)
+        one = (ds=[day(i) for i in 1:60], y=ys(1, 1:60))
+        @test_throws ArgumentError(pre * "at rows 48 to 54: boom") C._calibrate(
+            siv(c), fs, C._series_groups(fs, C.normalize_table(one)); chunk=7)
+        @test_throws ErrorException cal(mk(TestModels.ThrowIn(:predict, true)), d, c)
+    end
+
+    @testset "the failing series does not depend on the chunk size" begin
+        c, n = 12, 60
+        d = mkpanel("a" => 1:n, "b" => 1:n)
+        y = copy(d.y)
+        isb = d.unique_id .== "b"
+        y[isb] .+= 25
+        # "a" diverges at origin 3, "b" at origin 1.
+        y[n - c + 2] = 100.0
+        d = merge(d, (y=y,))
+        fc = mk(TestModels.NaNAbove(30.0))
+        o = n - c
+        r = n + o
+        msg = "series unique_id=\"b\": the calibration forecast from origin " *
+              "$(day(o)) (row $r) is NaN at step 1. A non-finite forecast cannot " *
+              "give an interval. Check the model's hyperparameters and the training " *
+              "data; a smaller holdout calibrates fewer steps."
+        for chunk in (1, 2, 5, c)
+            @test_throws ArgumentError(msg) cal(fc, d, c; chunk)
+        end
+        # Both fail at origin 1: the first series is named.
+        @test_throws "series unique_id=\"a\": the calibration forecast from origin" cal(
+            mk(TestModels.NaNModel()), d, c)
+    end
+
+    @testset "_pseudo_state keeps the prefix as history" begin
+        c = 12
+        d = mkpanel("a" => 1:60, "b" => 10:70)
+        fc = mk(LinAR(0.5, 1.0); transform=LastScale(3))
+        usable, _ = C._prepare_all(fc, groups_of(fc, d))
+        for p in usable, o in (48, 55, length(p.t))
+            ps = C._pseudo_state(siv(c), fc, p, o, 0)
+            @test ps.y_history == p.yraw[1:o]
+            @test length(ps.y_history) == ps.n_train == o
+        end
+    end
+
+    @testset "missing exogenous values in a panel" begin
+        c, depth = 12, 4
+        spans = ("a" => 1:50, "b" => 5:55)
+        feats = FeatureSet(Lag(1), Exogenous(:x))
+        fc = mk(EchoColumn(:x); feats)
+        d = shuf(mkpanel(spans...; x=true), 5)
+        row(id, dd) = findfirst(i -> d.unique_id[i] == id && d.ds[i] == day(dd),
+                                eachindex(d.ds))
+        miss(cells...) = (xm = copy(d.x);
+                          foreach(cl -> xm[row(cl...)] = missing, cells);
+                          merge(d, (x=xm,)))
+        msg(id, dd) = "series unique_id=\"$id\": feature column :x has a missing " *
+                      "value at row $(row(id, dd)) (time $(day(dd))). Missing values " *
+                      "in exogenous columns are not supported; impute or drop them " *
+                      "before fitting."
+        # Rows interleave; each series reads its own x.
+        head, E, st = cal(fc, d, c)
+        for (k, (id, r)) in enumerate(spans)
+            kk = findfirst(s -> s.id == id, st)
+            n = length(r)
+            for i in 1:c, j in 1:min(depth, c - i + 1)
+                dd = first(r) + n - c + i - 2 + j
+                @test E[kk][i, j] == yv(dd, k) - xv(dd, k)
+            end
+        end
+        # The first mh rows are never read.
+        dm = miss(("a", 1), ("b", 5))
+        @test isequal(cal(fc, dm, c)[2], E)
+        @test fit(fc, dm) isa C.FittedForecaster
+        # A holdout row, a head row: the plain fit's message.
+        for cells in ((("b", 50),), (("b", 20),), (("a", 45), ("b", 20)),
+                      (("b", 50), ("a", 45)), (("a", 1), ("b", 50)))
+            data = miss(cells...)
+            want = caught(() -> fit(fc, data))
+            @test want isa ArgumentError
+            @test occursin("series unique_id=", want.msg)
+            @test_throws ArgumentError(want.msg) cal(fc, data, c)
+        end
+        @test_throws ArgumentError(msg("b", 50)) cal(fc, miss(("b", 50)), c)
+        # A missing column gives the message of a plain fit.
+        absent = NamedTuple{(:unique_id, :ds, :y)}((d.unique_id, d.ds, d.y))
+        want = caught(() -> fit(fc, absent))
+        @test want isa ArgumentError
+        @test_throws ArgumentError(want.msg) cal(fc, absent, c)
     end
 end
