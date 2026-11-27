@@ -203,6 +203,14 @@
         S = C._pool_samples(StableRNG(1), Float64.(1:5), [100.0], [1.0, 2.0],
                             C.PoolIntervals(12; weight=C.FixedWeight(1.0), samples=50))
         @test all(in((101.0, 102.0)), S)
+        # The stream does not depend on w at the edges.
+        y = Float64.(1:30)
+        R = [1.0, 2.0, 3.0]
+        c = [100.0, 200.0]
+        pool(w) = C._pool_samples(StableRNG(5), y, c, R,
+                                  C.PoolIntervals(12; weight=C.FixedWeight(w), samples=50))
+        @test pool(0.0) == pool(5e-324)
+        @test pool(1.0) == pool(prevfloat(1.0))
         # An empty residual pool is only an error when it is needed.
         short = Float64.(1:12)
         @test size(C._pool_samples(StableRNG(1), short, fill(1.0, 2), Float64[],

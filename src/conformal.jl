@@ -170,6 +170,7 @@ function _pool_samples(rng::Random.AbstractRNG, y::AbstractVector{Float64},
             "$(cp.calibration) of the $(length(y)) training values hold no seasonal " *
             "difference y[t] - y[t - $m]. Raise calibration or provide a longer series."))
         for b in 1:B
+            # Draw u even at w = 0 or 1, so the edges match nearby w.
             S[j, b] = rand(rng) < w ? vals[_draw(rng, cw)] :
                       centre[j] + R[rand(rng, 1:length(R))]
         end
