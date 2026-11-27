@@ -2,7 +2,7 @@
     normalize_table(data) -> NamedTuple
 
 Normalize any Tables.jl-compatible source (NamedTuple of vectors, vector of
-NamedTuples, DataFrame, CSV.File, ...) to a columntable — a `NamedTuple` of
+NamedTuples, DataFrame, CSV.File, ...) to a columntable, a `NamedTuple` of
 column vectors. Throws an `ArgumentError` if `data` does not satisfy the
 Tables.jl interface. Columns are never mutated by MachineLearningForecast.
 """
@@ -72,7 +72,7 @@ function validate_time_column(t::AbstractVector, time::Symbol, freq, rows=eachin
     applicable(+, t[1], freq) || throw(ArgumentError(
         "time column :$time has element type $(eltype(t)), which does not support " *
         "`+ $freq`. The time column must be a Date/DateTime (or another type " *
-        "supporting `+` with $(typeof(freq))) — if these are strings, parse them " *
+        "supporting `+` with $(typeof(freq))). If these are strings, parse them " *
         "first, e.g. `Date.(col, dateformat\"yyyy-mm-dd\")`."))
     t[1] + freq > t[1] || throw(ArgumentError(
         "freq=$freq does not advance the time column; the frequency must be a " *
@@ -178,7 +178,7 @@ function target_vector(tbl::NamedTuple, target::Symbol, rows=1:nrows(tbl))
     j = findfirst(!isfinite, vals)
     j === nothing || throw(ArgumentError(
         "target column :$target contains the non-finite value $(vals[j]) at row " *
-        "$(rows[j]). Impute, drop, or clip non-finite targets before fitting — they " *
+        "$(rows[j]). Impute, drop, or clip non-finite targets before fitting; they " *
         "propagate silently through lag features into every forecast."))
     return vals
 end

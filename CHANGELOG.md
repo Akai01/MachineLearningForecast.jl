@@ -170,6 +170,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Three error messages no longer use an em dash: the duplicate-timestamp message for
+  `future` ("Deduplicate `future`; otherwise ..."), the non-finite target message
+  ("... before fitting; they propagate ..."), and the message for a time column that
+  does not support `+` with `freq` ("... with T). If these are strings, ..."). The README,
+  CONTRIBUTING.md, the documentation and the docstrings no longer use em dashes either.
 - The precompile workload now also runs `ConformalSeasonalPool` interval forecasts
   (`forecast` with `levels`, `forecast_samples`, and `backtest` with sample
   metrics, for a single series and a panel). On our machine (Julia 1.12.5), in a

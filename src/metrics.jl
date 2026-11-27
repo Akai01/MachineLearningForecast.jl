@@ -46,7 +46,7 @@ end
 
 Mean absolute percentage error, `mean(|y - ŷ| / |y|)`, as a fraction (0.10 =
 10%). If any `y` is zero, MAPE is undefined: a warning is emitted and `Inf` is
-returned — prefer [`smape`](@ref) or [`mase`](@ref) for data with zeros.
+returned; prefer [`smape`](@ref) or [`mase`](@ref) for data with zeros.
 
 # Example
 ```julia

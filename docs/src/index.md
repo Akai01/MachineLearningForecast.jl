@@ -34,7 +34,7 @@ are columntables (NamedTuples of vectors).
 
 See the [README](https://github.com/Akai01/MachineLearningForecast.jl#readme)
 for the full tour: feature catalogue, strategies, backtesting, and the
-two-level tuning story — including the **leakage warning** about preferring
+two-level tuning story, including the **leakage warning** about preferring
 `TimeSeriesCV` to MLJ's `CV()` when tuning base models with MLJ's `TunedModel`.
 
 [Leakage and conventions](conventions.md) states what the package guarantees against

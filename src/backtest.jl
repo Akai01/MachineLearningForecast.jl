@@ -197,9 +197,9 @@ series can change from fold to fold.
 [`mae`](@ref), [`rmse`](@ref), [`smape`](@ref)). Each is named by
 [`metric_name`](@ref) (`:mae`, `:mase_12` for [`Mase`](@ref)`(12)`) in the `scores`
 table, or by its key in a NamedTuple, `metrics=(error=mae, scaled=Mase(12))`; the names
-must be distinct. Scaled metrics that also need the fold's training target —
-[`mase`](@ref), [`rmsse`](@ref), [`Mase`](@ref), [`Rmsse`](@ref), or your own, declared
-via [`metric_inputs`](@ref) — are called as `metric(y, ŷ; y_train=...)` with that
+must be distinct. Scaled metrics that also need the fold's training target
+([`mase`](@ref), [`rmsse`](@ref), [`Mase`](@ref), [`Rmsse`](@ref), or your own, declared
+via [`metric_inputs`](@ref)) are called as `metric(y, ŷ; y_train=...)` with that
 fold's training window supplied automatically (on a panel, each series' own, so a
 scale never mixes series). Pass `Mase(12)`, not the type `Mase`.
 Unscaled metrics pool the fold's rows; scaled metrics are per series, weighted by scored

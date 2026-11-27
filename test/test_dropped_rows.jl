@@ -244,8 +244,8 @@ import MachineLearningForecast as M
         bad(p, i, v) = (y = Vector{Union{Missing,Float64}}(p.y); y[i] = v;
                         merge(p, (y=y,)))
         nanmsg(row) = "target column :y contains the non-finite value NaN at row " *
-                      "$row. Impute, drop, or clip non-finite targets before fitting " *
-                      "— they propagate silently through lag features into every " *
+                      "$row. Impute, drop, or clip non-finite targets before fitting; " *
+                      "they propagate silently through lag features into every " *
                       "forecast."
         # A short series is validated like a long one.
         @test_throws("series unique_id=\"short\": " * nanmsg(62),

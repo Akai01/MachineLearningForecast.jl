@@ -29,7 +29,7 @@ For a bug, please include:
 
 - the MachineLearningForecast version and `versioninfo()`,
 - the base model you used (any MLJ regressor) and its package version,
-- a minimal reproducing script — a short synthetic series is ideal,
+- a minimal reproducing script: a short synthetic series is ideal,
 - what you expected and what happened.
 
 ## Pull requests
@@ -56,7 +56,7 @@ These are load-bearing; please follow them:
 - **Tables.jl for all tabular I/O.** Any Tables.jl-compatible input is accepted
   and normalised to a columntable (a `NamedTuple` of vectors); every tabular
   return value is a columntable too. The package deliberately has **no
-  DataFrames.jl dependency** — do not add one.
+  DataFrames.jl dependency**; do not add one.
 - **Model genericity via MLJ.** Never hard-code a learner. Anything
   implementing the MLJ model interface must work as a base model.
 - **Immutable specs, explicit fitted state.** `Forecaster` is immutable; `fit`

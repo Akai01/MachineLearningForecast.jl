@@ -16,11 +16,11 @@ Subtype `TuningStrategy` and implement two methods; `tune` will drive them in
 an ask!/tell! loop. The two functions are public but not exported, so import
 them first: `import MachineLearningForecast: ask!, tell!`.
 
-- [`ask!`](@ref)`(s::MyStrategy) -> Union{NamedTuple,Nothing}` — return the next
+- [`ask!`](@ref)`(s::MyStrategy) -> Union{NamedTuple,Nothing}`: return the next
   candidate: a NamedTuple of `Forecaster` field overrides (keys among `:model`,
   `:features`, `:strategy`, `:transform`), drawn from your search space. Return
   `nothing` to signal termination.
-- [`tell!`](@ref)`(s::MyStrategy, candidate, score)` — receive the result of
+- [`tell!`](@ref)`(s::MyStrategy, candidate, score)`: receive the result of
   evaluating `candidate`: a `Float64` backtest score (lower is better), or
   `missing` if the candidate failed to evaluate.
 
@@ -199,7 +199,7 @@ end
 Result of [`tune`](@ref):
 
 - `table`: a columntable (NamedTuple of vectors) with one row per evaluated
-  candidate — the overridden parameters (one column per key), `:mean_score`
+  candidate: the overridden parameters (one column per key), `:mean_score`
   and `:std_score` (the mean and standard deviation of the metric across
   backtest folds; `std_score` is `missing` with a single fold), and `:error`
   (the error message if the candidate failed, `missing` otherwise). Failed

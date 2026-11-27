@@ -12,16 +12,16 @@
 
 **Generic, composable time-series forecasting for Julia, built on the MLJ model
 interface.** Any MLJ `Deterministic` regressor is a valid base model, and a
-`Probabilistic` one forecasts its predicted mean — random forests,
+`Probabilistic` one forecasts its predicted mean (random forests,
 [EvoTrees](https://github.com/Evovest/EvoTrees.jl) gradient boosting, XGBoost,
-LightGBM, CatBoost, linear models — MachineLearningForecast never hard-codes a
+LightGBM, CatBoost, linear models). MachineLearningForecast never hard-codes a
 learner.
 
 - **Declarative feature engineering**: lags, rolling statistics, differences,
   calendar features, Fourier seasonal terms, future-known exogenous covariates,
   and custom features, composed as first-class Julia objects.
 - **Pluggable forecasting strategies**: `Recursive` (one model, iterated) and
-  `Direct` (one model per horizon step), chosen by dispatch — extensible by
+  `Direct` (one model per horizon step), chosen by dispatch, extensible by
   design.
 - **Panel (multi-series) forecasting**: set `id=` and MachineLearningForecast fits *one
   global model* across every series, so short or noisy series borrow strength
@@ -35,7 +35,7 @@ learner.
 - **Tables.jl-native**: accepts *any* Tables.jl-compatible source (a NamedTuple
   of vectors, `CSV.File`, a `DataFrame`, ...) and returns plain columntables
   (NamedTuples of vectors) that any table sink understands. MachineLearningForecast's
-  only table dependency is Tables.jl — bring whatever table type you like.
+  only table dependency is Tables.jl: bring whatever table type you like.
 
 ## Quick start
 
@@ -84,7 +84,7 @@ results = backtest(fc, df; horizon=28, windows=3)
 ```
 
 Everything above works identically with a `DataFrame`, a `CSV.File`, or any
-other Tables.jl source in place of the NamedTuple — and the returned
+other Tables.jl source in place of the NamedTuple, and the returned
 columntables convert straight back: `DataFrame(fcast)`.
 
 ## Features
@@ -99,7 +99,7 @@ columntables convert straight back: `DataFrame(fcast)`.
 | `Calendar(parts...)` | time | `:year`, `:quarter`, `:month`, `:weekofyear`, `:dayofweek`, `:dayofmonth`, `:dayofyear`, `:hour`, `:minute` |
 | `Fourier(period, K)` | time | `sin`/`cos` harmonics on a step index continuing seamlessly into the future; on a panel, the same date has the same values in every series |
 | `Exogenous(cols...)` | exogenous | future-known covariates, supplied via `future` at forecast time |
-| `CustomFeature(name, f, minhistory)` | target | `f(history)` — any function of the target history strictly before the current row |
+| `CustomFeature(name, f, minhistory)` | target | `f(history)`: any function of the target history strictly before the current row |
 
 **No-leakage guarantee**: every target-history feature uses only information
 strictly *before* the current row's target (rolling windows and differences
@@ -143,9 +143,9 @@ dropped_rows`.
 
 ## Strategies
 
-- `Recursive()` — one model trained one-step-ahead; forecasts are fed back as
+- `Recursive()`: one model trained one-step-ahead; forecasts are fed back as
   pseudo-history to compute lag features for later steps. Any horizon.
-- `Direct(max_horizon)` — one model per step `1..max_horizon`; forecasting
+- `Direct(max_horizon)`: one model per step `1..max_horizon`; forecasting
   beyond `max_horizon` errors. At forecast time, the direct models condition their
   target-history features on the history up to the forecast origin, while exogenous and
   time features vary per step. Under `Direct`, `Lag(k)` counts back from the forecast
@@ -199,9 +199,9 @@ not available yet.
 
 ## Hyperparameter tuning
 
-### Level 1 — tune the base model with MLJ (no MachineLearningForecast code involved)
+### Level 1: tune the base model with MLJ (no MachineLearningForecast code involved)
 
-Any MLJ model is accepted, so MLJ's own tuning composes for free — wrap your
+Any MLJ model is accepted, so MLJ's own tuning composes for free: wrap your
 regressor in a `TunedModel` and pass it to `Forecaster`:
 
 ```julia
@@ -227,7 +227,7 @@ fc = Forecaster(tuned; features=..., strategy=Recursive(), freq=Day(1))
 > time, so score on a validation window or use `tune` instead.
 >
 > Also note the caveat: this tunes *one-step-ahead tabular* error, which is a
-> proxy — recursion error accumulates over the horizon, and pipeline-level
+> proxy: recursion error accumulates over the horizon, and pipeline-level
 > choices (lags, Fourier order, strategy) are invisible to it. For those, use
 > `tune` below.
 
@@ -248,9 +248,9 @@ fc = Forecaster(tuned; features=..., strategy=Recursive(), freq=Day(1))
 
 The same one-step-ahead-proxy caveat applies.
 
-### Level 2 — tune the whole pipeline on backtest score
+### Level 2: tune the whole pipeline on backtest score
 
-`tune` searches over `Forecaster` fields — model, feature set, strategy — and
+`tune` searches over `Forecaster` fields (model, feature set, strategy) and
 scores each candidate with a full backtest, so recursion effects and feature
 choices are measured for real:
 
@@ -271,7 +271,7 @@ result.best_fitted   # the winner refit on all data, ready to forecast
 
 `tuner=GridSearch()` (default) takes the Cartesian product;
 `tuner=RandomSearch(n; rng=...)` draws `n` candidates. Candidate failures are
-caught, recorded in the table's `:error` column, and excluded from ranking —
+caught, recorded in the table's `:error` column, and excluded from ranking;
 they never abort the search. A non-finite mean score (`NaN` or `Inf`) counts as
 a failure. If every candidate fails, `tune` throws an `ArgumentError` listing
 the first five candidates with their overrides, the first error in full and
@@ -283,11 +283,11 @@ candidate as a NamedTuple of `Forecaster` field overrides, or `nothing` to
 stop) and `tell!(s, candidate, score)` (receive the backtest score, or
 `missing` on failure), and pass it as `tuner=`. Both functions are public but not
 exported: `import MachineLearningForecast: ask!, tell!`. That is the exact interface a
-sequential Bayesian optimizer needs — see the `TuningStrategy` docstring.
+sequential Bayesian optimizer needs; see the `TuningStrategy` docstring.
 
 ## Panel (multi-series) forecasting
 
-Pass `id=` and give MachineLearningForecast a long-format table — one row per (series,
+Pass `id=` and give MachineLearningForecast a long-format table: one row per (series,
 timestamp). Every feature is materialised **within** each series, then the rows
 of all series are pooled to fit a single global model:
 
@@ -313,7 +313,7 @@ forecast(fitted, 28)                         # (unique_id, ds, y_hat), 3 x 28 ro
 Notes:
 
 - **One global model.** `fitted.models` holds a single trained model (or
-  `max_horizon` of them under `Direct`), trained on the pooled rows — not one
+  `max_horizon` of them under `Direct`), trained on the pooled rows, not one
   model per series.
 - **No cross-series leakage.** `Lag(1)` at the first row of a series is
   undefined, never the previous series' last value. Each series drops its own
@@ -325,7 +325,7 @@ Notes:
   training rows trains only the step models it has rows for, and `fit` warns.
 - **Exogenous covariates** join on `(id, time)`, so `future` must carry the id
   column too.
-- **Backtesting** with `initial` cuts folds on the *global timestamp grid* — `initial`,
+- **Backtesting** with `initial` cuts folds on the *global timestamp grid*: `initial`,
   `step` and `horizon` count distinct timestamps, not rows. With `windows` it instead
   counts each series' folds back from *its own* end, as the M competitions hold out each
   series' last values. If the series are not aligned in calendar time, the training set
@@ -343,7 +343,7 @@ Notes:
 
 ## Metrics
 
-`mae`, `rmse`, `mape`, `smape`, `mase`, `rmsse` — all `(y, ŷ) -> Float64`, lower is
+`mae`, `rmse`, `mape`, `smape`, `mase`, `rmsse`: all `(y, ŷ) -> Float64`, lower is
 better. `mape` and `smape` return fractions (0.10 = 10%);
 `mase(y, ŷ; y_train, m=1)` scales by the in-sample seasonal-naive error;
 `rmsse(y, ŷ; y_train, m=1)` is its squared-error counterpart, the RMSE divided by the
@@ -390,7 +390,7 @@ Reindex your data or resample before fitting.
   returns a `FittedForecaster`. Your data and model prototypes are never
   mutated.
 - **`fit`/`forecast` are MachineLearningForecast's own functions** (re-exported), not
-  extensions of `MLJBase.fit` or `StatsAPI.fit` — the signatures differ enough
+  extensions of `MLJBase.fit` or `StatsAPI.fit`; the signatures differ enough
   that sharing a generic function would mislead. (`fit` is not exported by
   `MLJ` itself, so `using MLJ, MachineLearningForecast` does not make it ambiguous.)
 - **Name collisions with `MLJ`.** Four MachineLearningForecast exports share a name with an
@@ -411,14 +411,14 @@ Reindex your data or resample before fitting.
   ```
 
   The other 51 exports are collision-free. Note that MachineLearningForecast's `mae`/`rmse`
-  are plain functions of two vectors, whereas MLJ's are measure objects — they
+  are plain functions of two vectors, whereas MLJ's are measure objects; they
   are not interchangeable, which is exactly why the choice must be explicit.
 - **Multiple dispatch over configuration flags**: strategies, features, and
   tuning strategies are types; behavior is chosen by dispatch.
 
 ## Contributing
 
-Bug reports, documentation fixes and pull requests are welcome — see
+Bug reports, documentation fixes and pull requests are welcome; see
 [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, the design
 principles the code follows, and the dispatch contract for adding a new feature
 type or tuning strategy. By participating you agree to the
@@ -426,7 +426,7 @@ type or tuning strategy. By participating you agree to the
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
 
 ## Roadmap
 

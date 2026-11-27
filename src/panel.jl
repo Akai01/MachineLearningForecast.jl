@@ -166,7 +166,7 @@ function _exogenous_rows(spec::Forecaster{M,S,Symbol}, states, grids, future,
         key = (idv[i], _new_time(tv[i], eltype(first(grids)), spec.time, i))
         haskey(lookup, key) && throw(ArgumentError(
             "`future` has duplicate rows for $(spec.id)=$(repr(idv[i])) at " *
-            "$(tv[i]). Deduplicate `future` — otherwise which row supplies each " *
+            "$(tv[i]). Deduplicate `future`; otherwise which row supplies each " *
             "forecast step is arbitrary."))
         lookup[key] = i
     end

@@ -235,7 +235,7 @@
 
         dup = (ds=[grid[1], grid[1], grid[2], grid[3]], promo=[1.0, 2.0, 3.0, 4.0])
         @test_throws "`future` has duplicate timestamps in column :ds; first duplicate " *
-                     "at $(grid[1]). Deduplicate `future` — otherwise which row " *
+                     "at $(grid[1]). Deduplicate `future`; otherwise which row " *
                      "supplies each forecast step is arbitrary." (
             forecast(fitted, 3; future=dup))
         short = (ds=grid[1:2], promo=[1.0, 2.0])

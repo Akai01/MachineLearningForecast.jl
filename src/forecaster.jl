@@ -11,11 +11,11 @@ const RESERVED_OUTPUT_NAMES = (:origin, :step, :y, :y_hat, :sample, :fold)
 Immutable forecasting specification.
 
 - `model`: any MLJ `Deterministic` regressor instance (EvoTrees, DecisionTree,
-  XGBoost, linear models, ... — anything implementing the MLJ model interface),
+  XGBoost, linear models, or anything implementing the MLJ model interface),
   or a `Probabilistic` one, whose predicted mean is the forecast. Used as a
   prototype; `fit` never mutates it.
 - `features`: a [`FeatureSet`](@ref) describing the design matrix.
-- `strategy`: a [`ForecastStrategy`](@ref) — [`Recursive`](@ref) (default) or
+- `strategy`: a [`ForecastStrategy`](@ref): [`Recursive`](@ref) (default) or
   [`Direct`](@ref).
 - `freq`: the series frequency as a positive `Dates.Period`, e.g. `Day(1)`,
   `Month(1)`; a sum such as `Day(1) + Hour(1)` is not accepted.
@@ -25,7 +25,7 @@ Immutable forecasting specification.
 - `id`: name of the series-id column for **panel (multi-series) data**, or
   `nothing` (the default) for a single series. When set, `data` is a long-format
   panel: one row per (series, timestamp). Features are materialised *within*
-  each series — a lag never reaches across a series boundary — and the rows of
+  each series (a lag never reaches across a series boundary) and the rows of
   every series are then pooled to fit **one global model**, so short or noisy
   series borrow strength from the rest. Series may be ragged (different start
   dates, end dates and lengths); each forecasts forward from its own last
@@ -397,7 +397,7 @@ _predict(t::TrainedModel{<:MLJModelInterface.Probabilistic}, X) =
     FittedForecaster
 
 The result of [`fit`](@ref): the immutable spec plus everything needed to
-forecast — the trained models (one for [`Recursive`](@ref), `max_horizon` for
+forecast: the trained models (one for [`Recursive`](@ref), `max_horizon` for
 [`Direct`](@ref)), the training target history (needed to compute lag features
 at forecast time), the first/last training timestamps, and the stable feature
 column order. Use with [`forecast`](@ref).
@@ -568,7 +568,7 @@ end
 Forecast `h` steps past the end of the training data. Returns a columntable
 (NamedTuple of vectors) with the spec's time column (the future timestamps
 `t_last + freq, ..., t_last + h*freq`) and `:y_hat` (the point forecasts).
-Being a columntable, the result is Tables.jl-compatible — pass it to
+Being a columntable, the result is Tables.jl-compatible; pass it to
 `DataFrame`, `CSV.write`, etc. as-is.
 
 If the feature set contains any [`Exogenous`](@ref) feature, `future` is
@@ -805,7 +805,7 @@ function _exogenous_rows(spec::Forecaster{M,S,Nothing}, states, grids, future,
         v = _new_time(tcol[i], eltype(grid), spec.time, i)
         haskey(lookup, v) && throw(ArgumentError(
             "`future` has duplicate timestamps in column :$(spec.time); first " *
-            "duplicate at $v. Deduplicate `future` — otherwise which row " *
+            "duplicate at $v. Deduplicate `future`; otherwise which row " *
             "supplies each forecast step is arbitrary."))
         lookup[v] = i
     end
