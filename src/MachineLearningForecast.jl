@@ -71,6 +71,7 @@ include("forecaster.jl")
 include("backtest.jl")
 include("panel.jl")
 include("conformal.jl")
+include("splitconformal.jl")
 include("tune.jl")
 include("precompile.jl")
 
