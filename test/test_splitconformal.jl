@@ -609,3 +609,312 @@ end
         @test_logs (:warn, "k must be ≥ 1; resetting k to 1.") cal(fc, mkdata(40), 12)
     end
 end
+
+@testset "SplitConformal transforms and exogenous" begin
+    C = MachineLearningForecast
+    LinAR, MeanModel, EchoColumn = TestModels.LinAR, TestModels.MeanModel,
+                                   TestModels.EchoColumn
+    siv(c) = C.SplitConformal(holdout=c)
+    mk(model; feats=FeatureSet(Lag(1)), strat=Recursive(), transform=NoTransform()) =
+        Forecaster(model; features=feats, strategy=strat, freq=Day(1), transform)
+    # Dyadic values, so closed forms compare exactly.
+    function mkdata(n)
+        return (ds=collect(Date(2020, 1, 1):Day(1):(Date(2020, 1, 1) + Day(n - 1))),
+                y=[8 + mod(7i, 16) / 4 + i / 8 for i in 1:n],
+                x=[100 + mod(5i, 8) / 2 + i / 4 for i in 1:n])
+    end
+    groups_of(fc, d) = C._series_groups(fc, C.normalize_table(d))
+    cal(fc, d, c; kw...) = C._calibrate(siv(c), fc, groups_of(fc, d); kw...)
+    usable_of(fc, d) = only(first(C._prepare_all(fc, groups_of(fc, d))))
+    caught(f) = try f(); nothing catch err err end
+
+    @testset "built-in transforms: original scale and prefix states" begin
+        n, c = 60, 12
+        d = mkdata(n)
+        y = d.y
+        trs = (MeanScale(), LastScale(3), Deseasonalize(4), LogRatio(3), Difference(2),
+               TransformChain(LastScale(3), Difference(2)))
+        depth = C._depth(Recursive(), c)
+        for tr in trs, model in (LinAR(0.5, 1.0), DecisionTreeRegressor(max_depth=3))
+            fc = mk(model; transform=tr)
+            head, E, st = cal(fc, d, c)
+            p = usable_of(fc, d)
+            @test only(st).step0 == only(head.series).step0 == 0
+            for i in 1:c
+                o = n - c + i - 1
+                ps = C._pseudo_state(siv(c), fc, p, o, 0)
+                z, state = C.fit_transform(tr, y[1:o])
+                @test ps.z_history == z
+                @test ps.transform_state == state
+                @test (ps.n_train, ps.t_last, ps.t_start) == (o, d.ds[o], d.ds[1])
+                h = min(c - i + 1, depth)
+                fk = C.FittedForecaster(fc, head.models, [ps], head.feature_names)
+                @test only(E)[i, 1:h] == y[(o + 1):(o + h)] .- forecast(fk, h).y_hat
+                @test all(isnan, only(E)[i, (h + 1):end])
+            end
+        end
+        # Closed forms: ŷ_j = a ŷ_(j-1) + b on the original scale.
+        _, E = cal(mk(LinAR(0.5, 1.0); transform=Difference(1)), d, c)
+        for i in 1:c
+            o = n - c + i - 1
+            f, step = y[o], 0.5 * (y[o] - y[o - 1]) + 1.0
+            for j in 1:min(depth, c - i + 1)
+                f += step
+                @test only(E)[i, j] == y[o + j] - f
+                step = 0.5 * step + 1.0
+            end
+        end
+        for (tr, m) in ((MeanScale(), o -> sum(y[1:o]) / o),
+                        (LastScale(3), o -> sum(y[(o - 2):o]) / 3))
+            _, E = cal(mk(LinAR(0.5, 1.0); transform=tr), d, c)
+            for i in 1:c
+                o = n - c + i - 1
+                f = y[o]
+                for j in 1:min(depth, c - i + 1)
+                    f = 0.5 * f + m(o)
+                    @test only(E)[i, j] ≈ y[o + j] - f
+                end
+            end
+        end
+    end
+
+    @testset "rows after the origin never reach its prediction" begin
+        n, c = 60, 12
+        d = mkdata(n)
+        r = n - c + 5
+        for tr in (MeanScale(), LastScale(3), Deseasonalize(4), LogRatio(3),
+                   Difference(2), TransformChain(LastScale(3), Difference(2)))
+            fc = mk(LinAR(0.5, 1.0); transform=tr)
+            E0 = only(cal(fc, d, c)[2])
+            y2 = copy(d.y)
+            y2[r] += 8.0
+            E1 = only(cal(fc, (ds=d.ds, y=y2), c)[2])
+            for i in 1:c, j in 1:size(E0, 2)
+                o = n - c + i - 1
+                isnan(E0[i, j]) && continue
+                if o < r && o + j != r
+                    @test E1[i, j] == E0[i, j]
+                elseif o < r
+                    @test E1[i, j] ≈ E0[i, j] + 8.0
+                end
+            end
+            @test E1[5, 1] != E0[5, 1]
+        end
+    end
+
+    @testset "the head needs the transform's dropped rows" begin
+        fc = mk(MeanModel(); transform=Difference(3))
+        _, E = cal(fc, mkdata(17), 12)
+        @test size(only(E)) == (12, 4)
+        @test_throws ArgumentError(
+            "the data has 16 rows. intervals=SplitConformal(holdout=12) holds out the " *
+            "last 12 rows to measure errors and leaves 4 to train the calibration " *
+            "model, but the feature set and transform need more than 4 rows. Provide " *
+            "at least 17 rows or lower holdout to 11 or less.") cal(fc, mkdata(16), 12)
+        TestModels.FIT_COUNT[] = 0
+        @test_throws "the feature set and transform need" cal(
+            mk(TestModels.CountFit(); transform=Difference(3)), mkdata(13), 9)
+        @test TestModels.FIT_COUNT[] == 0
+        # Direct names the transform's rows in its own message.
+        fd = mk(MeanModel(); strat=Direct(5), transform=Difference(3))
+        _, E = cal(fd, mkdata(18), 9)
+        @test size(only(E)) == (9, 1)
+        @test_throws ArgumentError(
+            "intervals=SplitConformal(holdout=9) leaves 8 of the 17 rows to train the " *
+            "calibration model, 4 after the feature set's 1 history rows and the " *
+            "transform's 3 dropped rows, but Direct(5) needs 5. Use Direct(4) or a " *
+            "shorter max_horizon, or provide at least 18 rows.") cal(fd, mkdata(17), 9)
+        @test_throws ArgumentError(
+            "intervals=SplitConformal(holdout=25) leaves 5 of the 30 rows to train the " *
+            "calibration model, 1 after the feature set's 1 history rows and the " *
+            "transform's 3 dropped rows, but Direct(5) needs 5. Lower holdout to 21 " *
+            "or less, use Direct(1) or a shorter max_horizon, or provide at least 34 " *
+            "rows.") cal(fd, mkdata(30), 25)
+        _, E = cal(fd, mkdata(30), 21)
+        @test size(only(E)) == (21, 5)
+    end
+
+    @testset "errors from the prefix state name one row" begin
+        n, c = 60, 12
+        d = mkdata(n)
+        # The prefix to row 51 sums to zero; no longer one does.
+        y = copy(d.y)
+        y[51] = -sum(y[1:50])
+        pre = "intervals=SplitConformal(holdout=12), "
+        fc = mk(LinAR(0.5, 1.0); transform=MeanScale())
+        for chunk in (1, 5, c)
+            @test_throws ArgumentError(
+                pre * "calibrating the origin at row 51: MeanScale() cannot scale a " *
+                "series whose training mean is 0.0. Use a transform that does not " *
+                "divide by it, e.g. NoTransform() or Difference(1).") cal(
+                fc, (ds=d.ds, y=y), c; chunk)
+        end
+        # A model error names a range, never one row.
+        fp = mk(TestModels.ThrowIn(:predict, false); transform=MeanScale())
+        for (chunk, rows) in ((1, "48 to 48"), (7, "48 to 54"), (c, "48 to 59"))
+            err = caught(() -> cal(fp, d, c; chunk))
+            @test err isa ArgumentError
+            @test err.msg == pre * "calibrating origins at rows $rows: boom"
+            @test !occursin("the origin at row", err.msg)
+        end
+        # A series the transform refuses fails before calibrating.
+        y = copy(d.y)
+        y[50] = -1.0
+        err = caught(() -> cal(mk(LinAR(0.5, 1.0); transform=LogRatio(3)),
+                               (ds=d.ds, y=y), c))
+        @test err isa ArgumentError
+        @test occursin("LogRatio(3) takes logarithms of ratios", err.msg)
+        @test !occursin("calibrating", err.msg)
+        # Other exceptions pass through unwrapped.
+        @test_throws ErrorException cal(
+            mk(TestModels.ThrowIn(:predict, true); transform=MeanScale()), d, c)
+    end
+
+    @testset "origin o reads exogenous row o + s" begin
+        n, c = 40, 12
+        d = mkdata(n)
+        y, x = d.y, d.x
+        feats = FeatureSet(Lag(1), Exogenous(:x))
+        depth = C._depth(Recursive(), c)
+        fc = mk(EchoColumn(:x); feats)
+        E0 = only(cal(fc, d, c)[2])
+        for i in 1:c, j in 1:size(E0, 2)
+            o = n - c + i - 1
+            @test isnan(E0[i, j]) == (j > c - i + 1)
+            j <= c - i + 1 && @test E0[i, j] == y[o + j] - x[o + j]
+        end
+        # The rows are the ones forecast builds from `future`.
+        usable = [usable_of(fc, d)]
+        exog = C._exogenous_history(fc, usable, groups_of(fc, d))
+        @test length(only(exog)) == n
+        for o in (n - c, n - 3), h in (1, min(3, n - o))
+            ps = C._pseudo_state(siv(c), fc, only(usable), o, 0)
+            future = (ds=d.ds[(o + 1):(o + h)], x=x[(o + 1):(o + h)])
+            want = C._exogenous_rows(fc, [ps], C._grids([ps], fc.freq, [h]), future, [h])
+            got = Vector{NamedTuple}[only(exog)[(o + 1):(o + h)]]
+            @test got == want
+            @test typeof(got) == typeof(want)
+        end
+        # Rows beyond an origin's reach do not move it.
+        r = n - c + 6
+        x2 = copy(x)
+        x2[r] += 8.0
+        E1 = only(cal(fc, (ds=d.ds, y=y, x=x2), c)[2])
+        for i in 1:c, j in 1:depth
+            o = n - c + i - 1
+            isnan(E0[i, j]) && continue
+            @test E1[i, j] == (o + j == r ? E0[i, j] - 8.0 : E0[i, j])
+        end
+        # Direct reads the target's row too.
+        _, ED = cal(mk(EchoColumn(:x); feats, strat=Direct(3)), d, c)
+        for i in 1:c, j in 1:min(3, c - i + 1)
+            o = n - c + i - 1
+            @test only(ED)[i, j] == y[o + j] - x[o + j]
+        end
+        # With a transform: the changes add up from the last value.
+        _, ET = cal(mk(EchoColumn(:x); feats, transform=Difference(1)), d, c)
+        for i in 1:c, j in 1:min(depth, c - i + 1)
+            o = n - c + i - 1
+            @test only(ET)[i, j] == y[o + j] - (y[o] + sum(x[(o + 1):(o + j)]))
+        end
+    end
+
+    @testset "missing exogenous values" begin
+        n, c = 40, 12
+        d = mkdata(n)
+        feats = FeatureSet(Lag(1), Exogenous(:x))
+        fc = mk(EchoColumn(:x); feats)
+        miss(rows) = (xm = Vector{Union{Missing,Float64}}(d.x);
+                      xm[rows] .= missing; (ds=d.ds, y=d.y, x=xm))
+        msg(r) = "feature column :x has a missing value at row $r (time $(d.ds[r])). " *
+                 "Missing values in exogenous columns are not supported; impute or " *
+                 "drop them before fitting."
+        # The first mh rows are never read.
+        _, E = cal(fc, miss([1]), c)
+        @test isequal(E, cal(fc, d, c)[2])
+        @test fit(fc, miss([1])) isa C.FittedForecaster
+        # Holdout row, head row, both: the plain fit message.
+        for rows in ([n - 5], [20], [n - 5, 20], [1, n - 5], [n]), chunk in (1, 1000)
+            data = miss(rows)
+            r = minimum(filter(>(1), rows))
+            want = caught(() -> fit(fc, data))
+            @test want isa ArgumentError
+            @test want.msg == msg(r)
+            @test_throws ArgumentError(msg(r)) cal(fc, data, c; chunk)
+        end
+        @test_throws ArgumentError(msg(20)) C.build_training_frame(
+            feats, C.normalize_table(miss([20])), :y, :ds)
+        # A transform moves mh: the dropped row is read by nobody.
+        ft = mk(EchoColumn(:x); feats, transform=Difference(1))
+        _, E = cal(ft, miss([2]), c)
+        @test isequal(E, cal(ft, d, c)[2])
+        @test fit(ft, miss([2])) isa C.FittedForecaster
+        @test_throws ArgumentError(msg(3)) cal(ft, miss([3]), c)
+        @test_throws ArgumentError(msg(3)) fit(ft, miss([3]))
+        # A missing column gives the message of a plain fit.
+        absent = (ds=d.ds, y=d.y)
+        want = caught(() -> fit(fc, absent))
+        @test want.msg == "features contain Exogenous(:x) but column :x is not " *
+                          "present in the training data. Available columns: ds, y. " *
+                          "Add column :x to the data, or remove it from the " *
+                          "Exogenous feature."
+        @test_throws ArgumentError(want.msg) cal(fc, absent, c)
+    end
+
+    @testset "bad exogenous values in the holdout" begin
+        n, c = 40, 12
+        d = mkdata(n)
+        fc = mk(EchoColumn(:x); feats=FeatureSet(Lag(1), Exogenous(:x)))
+        with(v) = (xv = Vector{Any}(d.x); xv[n - 5] = v; (ds=d.ds, y=d.y, x=xv))
+        pre = "intervals=SplitConformal(holdout=12), calibrating origins at rows " *
+              "28 to 39: exogenous column :x has "
+        err = caught(() -> cal(fc, with(Inf), c; chunk=1000))
+        @test err isa ArgumentError
+        @test startswith(err.msg, pre * "the infinite value Inf at time $(d.ds[n - 5]) ")
+        err = caught(() -> cal(fc, with("a"), c; chunk=1000))
+        @test err isa ArgumentError
+        @test startswith(err.msg, pre * "non-numeric value \"a\" (type String).")
+        # NaN reaches the model, so the finite check names it.
+        @test_throws ArgumentError(
+            "the calibration forecast from origin $(d.ds[31]) (row 31) is NaN at " *
+            "step 4. A non-finite forecast cannot give an interval. Check the " *
+            "model's hyperparameters and the training data; a smaller holdout " *
+            "calibrates fewer steps.") cal(fc, with(NaN), c)
+    end
+
+    @testset "several exogenous columns scan like a plain fit" begin
+        n, c = 40, 12
+        d = mkdata(n)
+        fc = mk(EchoColumn(:x); feats=FeatureSet(Lag(1), Exogenous(:x, :w)))
+        w = Vector{Union{Missing,Float64}}(d.x ./ 2)
+        xm = Vector{Union{Missing,Float64}}(d.x)
+        w[15] = missing
+        xm[n - 5] = missing
+        data = (ds=d.ds, y=d.y, x=xm, w=w)
+        want = caught(() -> fit(fc, data))
+        @test want isa ArgumentError
+        @test_throws ArgumentError(want.msg) cal(fc, data, c)
+        _, E = cal(fc, (ds=d.ds, y=d.y, x=d.x, w=d.x ./ 2), c)
+        @test isequal(E, cal(mk(EchoColumn(:x); feats=FeatureSet(Lag(1), Exogenous(:x))),
+                             d, c)[2])
+    end
+
+    @testset "real learners with a transform and an exogenous feature" begin
+        n, c = 80, 20
+        d = mkdata(n)
+        feats = FeatureSet(Lag(1), Lag(2), RollingMean(3), Exogenous(:x))
+        tr = TransformChain(LastScale(3), Difference(1))
+        for model in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=3)),
+            strat in (Recursive(), Direct(5))
+
+            _, E = cal(mk(model; feats, strat, transform=tr), d, c)
+            E = only(E)
+            depth = C._depth(strat, c)
+            @test size(E) == (c, depth)
+            for i in 1:c, j in 1:depth
+                @test isnan(E[i, j]) == (j > c - i + 1)
+                j <= c - i + 1 && @test isfinite(E[i, j])
+            end
+        end
+    end
+end

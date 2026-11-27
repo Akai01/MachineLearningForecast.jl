@@ -96,9 +96,12 @@ function _check_head(iv::SplitConformal, fc::Forecaster{M,S,Nothing}, s::Direct,
     n = length(only(usable).t)
     low = n - mh - D
     lower = low ≥ 9 ? "Lower holdout to $low or less, use" : "Use"
+    d = dropped_rows(fc.transform)
+    hist = iszero(d) ? "the feature set's $mh history rows" :
+           "the feature set's $(mh - d) history rows and the transform's $d dropped rows"
     throw(ArgumentError(
         "intervals=$iv leaves $r of the $n rows to train the calibration model, " *
-        "$(r - mh) after the feature set's $mh history rows, but $s needs $D. " *
+        "$(r - mh) after $hist, but $s needs $D. " *
         "$lower Direct($(r - mh)) or a shorter max_horizon, or provide at least " *
         "$(c + mh + D) rows."))
 end
@@ -116,21 +119,57 @@ function _nonfinite_error(fc, p, o, j, v)
         "calibrates fewer steps.")
 end
 
+# A fit on rows 1..o would get this state.
+function _pseudo_state(iv, fc, p, o, step0)
+    yp = p.yraw[1:o]
+    try
+        _, z, state = _transform_table(fc, NamedTuple{(fc.target,)}((yp,)), yp)
+        return SeriesState(p.id, p.yraw, p.t[o], p.t[1], o, z, state, step0)
+    catch err
+        err isa ArgumentError || rethrow()
+        who = fc.id === nothing ? "" : "series $(fc.id)=$(repr(p.id)): "
+        throw(ArgumentError("$(who)intervals=$iv, calibrating the origin at row " *
+                            "$(p.rows[o]): " * err.msg))
+    end
+end
+
+# Scans the rows a fit would, as build_training_frame does.
+function _exogenous_history(fc, usable, groups)
+    cols = unique(exogenous_columns(fc.features))
+    isempty(cols) && return nothing
+    mh, names = minhistory(fc), Tuple(cols)
+    subs = Dict(g[1] => g[2] for g in groups)
+    return map(usable) do p
+        sub = subs[p.id]
+        _in_series(fc, p.id) do
+            foreach(c -> _require_input_column(sub, c), cols)
+            for c in cols, i in (mh + 1):length(p.t)
+                ismissing(sub[c][i]) && throw(ArgumentError(
+                    "feature column :$c has a missing value at row $(p.rows[i]) " *
+                    "(time $(p.t[i])). Missing values in exogenous columns are not " *
+                    "supported; impute or drop them before fitting."))
+            end
+        end
+        return NamedTuple[NamedTuple{names}(Tuple(sub[c][i] for c in cols))
+                          for i in eachindex(p.t)]
+    end
+end
+
 # One _forecast_states call serves the origins `is`.
-function _calibrate_chunk!(E, iv, fc, head, usable, step0s, is, depth)
+function _calibrate_chunk!(E, iv, fc, head, usable, step0s, exog, is, depth)
     c = iv.holdout
     states = SeriesState[]
     hs = Int[]
+    exog_rows = exog === nothing ? nothing : Vector{NamedTuple}[]
     for (k, p) in enumerate(usable), i in is
         o = length(p.t) - c + i - 1
-        yp = p.yraw[1:o]
-        _, z, state = _transform_table(fc, NamedTuple{(fc.target,)}((yp,)), yp)
-        push!(states, SeriesState(p.id, p.yraw, p.t[o], p.t[1], o, z, state, step0s[k]))
+        push!(states, _pseudo_state(iv, fc, p, o, step0s[k]))
         push!(hs, min(c - i + 1, depth))
+        exog === nothing || push!(exog_rows, exog[k][(o + 1):(o + hs[end])])
     end
     grids = _grids(states, fc.freq, hs)
     preds = try
-        _forecast_states(head, states, hs, grids, nothing)
+        _forecast_states(head, states, hs, grids, exog_rows)
     catch err
         err isa ArgumentError || rethrow()
         p, n = first(usable), length(first(usable).t)
@@ -166,6 +205,7 @@ function _calibrate(iv::SplitConformal, fc::Forecaster, groups;
     _check_rows(iv, fc, groups)
     usable, short = _prepare_all(fc, groups)
     _warn_short(fc, short)
+    exog = _exogenous_history(fc, usable, groups)
     cutoff = minimum(p.t[length(p.t) - c + 1] for p in usable)
     rmap = Dict(p.id => searchsortedfirst(p.t, cutoff) - 1 for p in usable)
     rs = [rmap[p.id] for p in usable]
@@ -188,7 +228,7 @@ function _calibrate(iv::SplitConformal, fc::Forecaster, groups;
     E = [fill(NaN, c, depth) for _ in usable]
     for lo in 1:chunk:c
         is = lo:min(lo + chunk - 1, c)
-        _calibrate_chunk!(E, iv, fc, head, usable, step0s, is, depth)
+        _calibrate_chunk!(E, iv, fc, head, usable, step0s, exog, is, depth)
     end
     return head, E, _published_states(usable, step0s)
 end
