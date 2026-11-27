@@ -214,8 +214,8 @@ by the large-scale series; use a scaled metric to compare series of different sc
 ([`crps`](@ref), [`fair_crps`](@ref), [`pinball_loss`](@ref), [`Coverage`](@ref),
 [`IntervalWidth`](@ref), or your own declared with [`metric_inputs`](@ref)) is called as
 `metric(y, S)` with the fold's samples and pools the rows of all series, like an unscaled
-point metric. Both need a forecaster with an interval method
-([`ConformalSeasonalPool`](@ref)). The samples of a fold are drawn from that fold's
+point metric. `levels` and a samples metric both need a forecaster with an interval
+method ([`ConformalSeasonalPool`](@ref)). The samples of a fold are drawn from that fold's
 training window only. Every fold draws from its own copy of the method's `rng`, so the
 folds start from the same random numbers on different histories.
 

@@ -329,6 +329,10 @@ naive = Forecaster(NaiveLast(); features = FeatureSet(Lag(1)), freq = Day(1))
 summarize(backtest(naive, df; horizon = 7, windows = 3, metrics = (mae, smape)))
 ```
 
+A base model must not keep the table `predict` receives. `forecast` reuses its
+columns at later steps, so a model that stores `Xnew`, or a column of it, can see it
+change afterwards. Copy what you need, as `collect(Float64, ...)` does above.
+
 ### A seasonal naive forecaster as a baseline
 
 Naive and seasonal naive forecasts are the standard benchmarks (Hyndman &
