@@ -235,3 +235,377 @@ end
               "with holdout >= 10."
     end
 end
+
+@testset "SplitConformal calibration" begin
+    C = MachineLearningForecast
+    LinAR, MeanModel = TestModels.LinAR, TestModels.MeanModel
+    siv(c) = C.SplitConformal(holdout=c)
+    mk(model; feats=FeatureSet(Lag(1)), strat=Recursive()) =
+        Forecaster(model; features=feats, strategy=strat, freq=Day(1))
+    # Dyadic values, so closed forms compare exactly.
+    function mkdata(n)
+        return (ds=collect(Date(2020, 1, 1):Day(1):(Date(2020, 1, 1) + Day(n - 1))),
+                y=[8 + mod(7i, 16) / 4 + i / 8 for i in 1:n])
+    end
+    groups_of(fc, d) = C._series_groups(fc, C.normalize_table(d))
+    cal(fc, d, c; kw...) = C._calibrate(siv(c), fc, groups_of(fc, d); kw...)
+    # One origin's pseudo-state, as the calibration builds it.
+    function pseudo(fc, p, o)
+        yp = p.yraw[1:o]
+        _, z, state = C._transform_table(fc, NamedTuple{(fc.target,)}((yp,)), yp)
+        return C.SeriesState(p.id, p.yraw, p.t[o], p.t[1], o, z, state, 0)
+    end
+
+    @testset "pseudo-states through _forecast_states" begin
+        n, c = 60, 12
+        d = mkdata(n)
+        feats = FeatureSet(Lag(1), RollingMean(3), Calendar(:dayofweek))
+        for strat in (Recursive(), Direct(5)),
+            model in (LinAR(0.5, 1.0), DecisionTreeRegressor(max_depth=3))
+
+            fc = mk(model; feats, strat)
+            depth = C._depth(strat, c)
+            plain = fit(fc, (ds=d.ds[1:(n - c)], y=d.y[1:(n - c)]))
+            usable, _ = C._prepare_all(fc, groups_of(fc, d))
+            p = only(usable)
+
+            pub = only(C._published_states(usable, [0]))
+            full = only(fit(fc, d).series)
+            for f in fieldnames(C.SeriesState)
+                @test getfield(pub, f) == getfield(full, f)
+                @test getfield(pub, f) == getfield(pseudo(fc, p, n), f)
+            end
+
+            os = (n - c):(n - 1)
+            states = [pseudo(fc, p, o) for o in os]
+            hs = [min(n - o, depth) for o in os]
+            all_at_once = C._forecast_states(plain, states, hs,
+                                             C._grids(states, fc.freq, hs), nothing)
+            for k in eachindex(os)
+                one = C._forecast_states(plain, [states[k]], [hs[k]],
+                                         C._grids([states[k]], fc.freq, [hs[k]]), nothing)
+                @test all_at_once[k] == only(one)
+                fk = C.FittedForecaster(fc, plain.models, [states[k]], plain.feature_names)
+                @test all_at_once[k] == forecast(fk, hs[k]).y_hat
+            end
+
+            head, E, st = cal(fc, d, c)
+            @test all(getfield(only(st), f) == getfield(pub, f)
+                      for f in fieldnames(C.SeriesState))
+            @test forecast(head, depth).y_hat == forecast(plain, depth).y_hat
+            @test E[1][1, :] == d.y[(n - c + 1):(n - c + depth)] .-
+                                forecast(plain, depth).y_hat
+            for (k, o) in enumerate(os)
+                @test E[1][k, 1:hs[k]] == d.y[(o + 1):(o + hs[k])] .- all_at_once[k]
+            end
+        end
+    end
+
+    @testset "closed forms" begin
+        n, c = 40, 12
+        d = mkdata(n)
+        y = d.y
+        depth = C._depth(Recursive(), c)
+        head, E = cal(mk(MeanModel()), d, c)
+        @test head isa C.FittedForecaster
+        @test E isa Vector{Matrix{Float64}}
+        m = sum(y[2:(n - c)]) / (n - c - 1)
+        for i in 1:c, j in 1:min(depth, c - i + 1)
+            @test only(E)[i, j] == y[n - c + i - 1 + j] - m
+        end
+
+        _, E = cal(mk(MeanModel(); strat=Direct(3)), d, c)
+        for i in 1:c, j in 1:min(3, c - i + 1)
+            @test only(E)[i, j] == y[n - c + i - 1 + j] - sum(y[(1 + j):(n - c)]) /
+                                                          (n - c - j)
+        end
+
+        _, E = cal(mk(LinAR(0.5, 1.0)), d, c)
+        for i in 1:c
+            f = y[n - c + i - 1]
+            for j in 1:min(depth, c - i + 1)
+                f = 0.5 * f + 1.0
+                @test only(E)[i, j] == y[n - c + i - 1 + j] - f
+            end
+        end
+    end
+
+    @testset "triangle shape and the NaN corner" begin
+        c = 12
+        for strat in (Recursive(), Direct(3), Direct(20))
+            _, E = cal(mk(MeanModel(); strat), mkdata(40), c)
+            depth = C._depth(strat, c)
+            E1 = only(E)
+            @test size(E1) == (c, depth)
+            for i in 1:c, j in 1:depth
+                @test isnan(E1[i, j]) == (j > c - i + 1)
+            end
+            @test all(isfinite, E1[1, :])
+            @test count(isnan, E1) == sum(max(depth - (c - i + 1), 0) for i in 1:c)
+        end
+        @test C._depth(Direct(20), 12) == 4
+        @test C._depth(Direct(3), 12) == 3
+    end
+
+    @testset "Direct head rows and the lower holdout clause" begin
+        pre = "intervals=SplitConformal(holdout=9) leaves 5 of the 14 rows to train " *
+              "the calibration model, 4 after the feature set's 1 history rows, but " *
+              "Direct(5) needs 5. "
+        fc = mk(MeanModel(); strat=Direct(5))
+        _, E = cal(fc, mkdata(15), 9)
+        @test size(only(E)) == (9, 1)
+        @test_throws ArgumentError(pre * "Use Direct(4) or a shorter max_horizon, or " *
+                                   "provide at least 15 rows.") cal(fc, mkdata(14), 9)
+        @test_throws ArgumentError(
+            "intervals=SplitConformal(holdout=25) leaves 5 of the 30 rows to train the " *
+            "calibration model, 4 after the feature set's 1 history rows, but Direct(5) " *
+            "needs 5. Lower holdout to 24 or less, use Direct(4) or a shorter " *
+            "max_horizon, or provide at least 31 rows.") cal(fc, mkdata(30), 25)
+        _, E = cal(fc, mkdata(30), 24)
+        @test size(only(E)) == (24, 5)
+    end
+
+    @testset "too few rows" begin
+        fc = mk(MeanModel(); feats=FeatureSet(Lag(13)))
+        @test_throws ArgumentError(
+            "the data has 100 rows. intervals=SplitConformal(holdout=90) holds out the " *
+            "last 90 rows to measure errors and leaves 10 to train the calibration " *
+            "model, but the feature set needs more than 13 history rows. Provide at " *
+            "least 104 rows or lower holdout to 86 or less.") cal(fc, mkdata(100), 90)
+        @test_throws ArgumentError(
+            "the data has 103 rows. intervals=SplitConformal(holdout=90) holds out the " *
+            "last 90 rows to measure errors and leaves 13 to train the calibration " *
+            "model, but the feature set needs more than 13 history rows. Provide at " *
+            "least 104 rows or lower holdout to 89 or less.") cal(fc, mkdata(103), 90)
+        _, E = cal(fc, mkdata(104), 90)
+        @test size(only(E)) == (90, 82)
+        # A holdout below 9 is invalid, so the clause is dropped.
+        fc6 = mk(MeanModel(); feats=FeatureSet(Lag(6)))
+        @test_throws ArgumentError(
+            "the data has 14 rows. intervals=SplitConformal(holdout=9) holds out the " *
+            "last 9 rows to measure errors and leaves 5 to train the calibration " *
+            "model, but the feature set needs more than 6 history rows. Provide at " *
+            "least 16 rows.") cal(fc6, mkdata(14), 9)
+        @test_throws ArgumentError(
+            "the data has 5 rows. intervals=SplitConformal(holdout=9) holds out the " *
+            "last 9 rows to measure errors and leaves 0 to train the calibration " *
+            "model, but the feature set needs more than 6 history rows. Provide at " *
+            "least 16 rows.") cal(fc6, mkdata(5), 9)
+        @test_throws ArgumentError(
+            "the data has 16 rows. intervals=SplitConformal(holdout=10) holds out the " *
+            "last 10 rows to measure errors and leaves 6 to train the calibration " *
+            "model, but the feature set needs more than 6 history rows. Provide at " *
+            "least 17 rows or lower holdout to 9 or less.") cal(fc6, mkdata(16), 10)
+        # The row check runs before any fit.
+        TestModels.FIT_COUNT[] = 0
+        @test_throws ArgumentError cal(mk(TestModels.CountFit(); feats=FeatureSet(Lag(6))),
+                                       mkdata(14), 9)
+        @test TestModels.FIT_COUNT[] == 0
+    end
+
+    @testset "shortest series, horizon 1 and no history" begin
+        # One training row in the head.
+        n, c = 11, 9
+        d = mkdata(n)
+        head, E = cal(mk(MeanModel()), d, c)
+        @test size(only(E)) == (9, 1)
+        @test head.n_train == 2
+        for i in 1:c
+            @test only(E)[i, 1] == d.y[n - c + i] - d.y[2]
+        end
+        # c = 9 gives depth 1.
+        _, E = cal(mk(MeanModel()), mkdata(60), 9)
+        @test size(only(E)) == (9, 1)
+        # No history: the head uses every row before the cutoff.
+        fc0 = mk(MeanModel(); feats=FeatureSet(Calendar(:dayofweek)))
+        d0 = mkdata(10)
+        _, E = cal(fc0, d0, 9)
+        @test size(only(E)) == (9, 1)
+        @test only(E)[1, 1] == d0.y[2] - d0.y[1]
+        @test_throws ArgumentError("the data has 9 rows. intervals=SplitConformal(" *
+            "holdout=9) holds out the last 9 rows to measure errors and leaves 0 to " *
+            "train the calibration model, but the feature set needs more than 0 history " *
+            "rows. Provide at least 10 rows.") cal(fc0, mkdata(9), 9)
+        # A long series.
+        _, E = cal(mk(MeanModel()), mkdata(300), 60)
+        @test size(only(E)) == (60, 52)
+        @test all(isfinite, only(E)[1, :])
+    end
+
+    @testset "leakage" begin
+        n, c = 40, 12
+        for model in (LinAR(0.5, 1.0), DecisionTreeRegressor(max_depth=3)),
+            strat in (Recursive(), Direct(3))
+
+            fc = mk(model; feats=FeatureSet(Lag(1), Lag(2)), strat)
+            d = mkdata(n)
+            _, E0 = cal(fc, d, c)
+            E0 = only(E0)
+            depth = size(E0, 2)
+            for r in (n - c + 3, n)
+                y2 = copy(d.y)
+                y2[r] += 8.0
+                _, E1 = cal(fc, (ds=d.ds, y=y2), c)
+                E1 = only(E1)
+                for i in 1:c, j in 1:depth
+                    o = n - c + i - 1
+                    isnan(E0[i, j]) && continue
+                    if o < r && o + j != r
+                        @test E1[i, j] == E0[i, j]
+                    elseif o < r
+                        @test E1[i, j] ≈ E0[i, j] + 8.0
+                    end
+                end
+            end
+        end
+        # Rows up to the cutoff train the head.
+        d = mkdata(n)
+        y3 = copy(d.y)
+        y3[5] += 8.0
+        fc = mk(MeanModel())
+        @test only(cal(fc, (ds=d.ds, y=y3), c)[2]) != only(cal(fc, d, c)[2])
+    end
+
+    @testset "data and model are not mutated, results repeat" begin
+        d = mkdata(40)
+        d0 = deepcopy(d)
+        for model in (LinAR(0.5, 1.0), DecisionTreeRegressor(max_depth=3))
+            fc = mk(model)
+            proto = deepcopy(model)
+            tbl = C.normalize_table(d)
+            groups = C._series_groups(fc, tbl)
+            h1, E1 = C._calibrate(siv(12), fc, groups)
+            h2, E2 = C._calibrate(siv(12), fc, groups)
+            @test isequal(E1, E2)
+            @test forecast(h1, 3).y_hat == forecast(h2, 3).y_hat
+            @test d == d0
+            @test tbl == C.normalize_table(d0)
+            @test TestModels.MMI.is_same_except(fc.model, proto)
+            @test h1.models[1].model !== fc.model
+        end
+    end
+
+    @testset "chunk sizes agree" begin
+        for model in (LinAR(0.5, 1.0), DecisionTreeRegressor(max_depth=3)),
+            strat in (Recursive(), Direct(4))
+
+            fc = mk(model; feats=FeatureSet(Lag(1), RollingMean(3)), strat)
+            d = mkdata(50)
+            c = 20
+            ref = cal(fc, d, c)
+            for chunk in (1, 7, c, 1000)
+                h, E = cal(fc, d, c; chunk)
+                @test isequal(E, ref[2])
+                @test forecast(h, 4).y_hat == forecast(ref[1], 4).y_hat
+            end
+        end
+    end
+
+    @testset "one fit, no final fit" begin
+        fc = mk(TestModels.CountFit())
+        TestModels.FIT_COUNT[] = 0
+        cal(fc, mkdata(40), 12)
+        @test TestModels.FIT_COUNT[] == 1
+        TestModels.FIT_COUNT[] = 0
+        cal(mk(TestModels.CountFit(); strat=Direct(3)), mkdata(40), 12)
+        @test TestModels.FIT_COUNT[] == 3
+    end
+
+    @testset "real learners" begin
+        n, c = 80, 20
+        d = mkdata(n)
+        feats = FeatureSet(Lag(1), Lag(2), RollingMean(3), Calendar(:dayofweek))
+        for model in (EvoTreeRegressor(nrounds=5), DecisionTreeRegressor(max_depth=3)),
+            strat in (Recursive(), Direct(5))
+
+            _, E = cal(mk(model; feats, strat), d, c)
+            E = only(E)
+            depth = C._depth(strat, c)
+            @test size(E) == (c, depth)
+            for i in 1:c, j in 1:depth
+                @test isnan(E[i, j]) == (j > c - i + 1)
+                j <= c - i + 1 && @test isfinite(E[i, j])
+            end
+        end
+    end
+
+    @testset "a non-finite forecast is refused" begin
+        n = 60
+        d = mkdata(n)
+        msg(o, j, v) = "the calibration forecast from origin $(d.ds[o]) (row $o) is $v " *
+                       "at step $j. A non-finite forecast cannot give an interval. " *
+                       "Check the model's hyperparameters and the training data; a " *
+                       "smaller holdout calibrates fewer steps."
+        for chunk in (1, 5, 12)
+            @test_throws ArgumentError(msg(n - 12, 1, NaN)) cal(
+                mk(TestModels.NaNModel()), d, 12; chunk)
+        end
+        # Recursive: NaN once the lag passes the limit, at step 7.
+        c = 16
+        dl = (ds=d.ds, y=Float64.(1:n))
+        for chunk in (1, 5, c)
+            @test_throws ArgumentError(msg(n - c, 7, NaN)) cal(
+                mk(TestModels.NaNAbove(Float64(n - c + 5))), dl, c; chunk)
+        end
+        # Direct: the step-7 model has L - 6 training targets.
+        fc = mk(TestModels.NaNAtLength(n - c - 1 - 6); strat=Direct(8))
+        @test_throws ArgumentError(msg(n - c, 7, NaN)) cal(fc, d, c)
+        # c = 13 gives depth 5, so the step-7 model is never read.
+        fc = mk(TestModels.NaNAtLength(n - 13 - 1 - 6); strat=Direct(8))
+        _, E = cal(fc, d, 13)
+        @test size(only(E)) == (13, 5)
+        @test all(isfinite, E[1][1, :])
+    end
+
+    @testset "input errors come first" begin
+        fc = mk(MeanModel())
+        d = mkdata(40)
+        @test_throws "time column :ds is empty" cal(fc, (ds=Date[], y=Float64[]), 12)
+        @test_throws "time column :ds has 1 gap" cal(
+            fc, (ds=d.ds[[1:10; 12:40]], y=d.y[[1:10; 12:40]]), 12)
+        @test_throws "time column :ds not found in the data" cal(fc, (t=d.ds, y=d.y), 12)
+        @test_throws "has element type String" cal(
+            fc, (ds=string.(d.ds), y=d.y), 12)
+        ym = Vector{Union{Missing,Float64}}(d.y)
+        ym[30] = missing
+        @test_throws ArgumentError(
+            "target column :y contains missing values (first at row 30). Impute or " *
+            "drop missing targets before fitting.") cal(fc, (ds=d.ds, y=ym), 12)
+        @test_throws "target column :y not found" cal(fc, (ds=d.ds, z=d.y), 12)
+        @test_throws "has element type String; expected a Real" cal(
+            fc, (ds=d.ds, y=string.(d.y)), 12)
+        # Too short with a missing target: our message comes first.
+        ym = Vector{Union{Missing,Float64}}(d.y[1:12])
+        ym[3] = missing
+        @test_throws ArgumentError(
+            "the data has 12 rows. intervals=SplitConformal(holdout=12) holds out the " *
+            "last 12 rows to measure errors and leaves 0 to train the calibration " *
+            "model, but the feature set needs more than 1 history rows. Provide at " *
+            "least 14 rows or lower holdout to 10 or less.") cal(
+            fc, (ds=d.ds[1:12], y=ym), 12)
+    end
+
+    @testset "errors from inside the calibration are named" begin
+        n, c = 60, 12
+        d = mkdata(n)
+        pre = "intervals=SplitConformal(holdout=12), "
+        fc = mk(TestModels.ThrowIn(:predict, false))
+        @test_throws ArgumentError(
+            pre * "calibrating origins at rows 48 to 54: boom") cal(fc, d, c; chunk=7)
+        @test_throws ArgumentError(
+            pre * "calibrating origins at rows 48 to 59: boom") cal(fc, d, c; chunk=c)
+        @test_throws ArgumentError(
+            pre * "calibrating origins at rows 48 to 48: boom") cal(fc, d, c; chunk=1)
+        @test_throws ArgumentError(
+            pre * "fitting the calibration model on the first 48 rows: boom") cal(
+            mk(TestModels.ThrowIn(:fit, false)), d, c)
+        # Other exceptions pass through unwrapped.
+        @test_throws ErrorException cal(mk(TestModels.ThrowIn(:predict, true)), d, c)
+        @test_throws ErrorException cal(mk(TestModels.ThrowIn(:fit, true)), d, c)
+    end
+
+    @testset "warnings appear once" begin
+        fc = mk(TestModels.Clamped(0))
+        @test_logs (:warn, "k must be ≥ 1; resetting k to 1.") cal(fc, mkdata(40), 12)
+    end
+end

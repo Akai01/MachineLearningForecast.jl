@@ -112,6 +112,63 @@ MMI.predict(::Clamped, fitresult, Xnew) = fill(fitresult, length(Tables.rows(Xne
 MMI.input_scitype(::Type{Clamped}) = MMI.Table(MMI.Continuous)
 MMI.target_scitype(::Type{Clamped}) = AbstractVector{MMI.Continuous}
 
+"Counts its `MMI.fit` calls in `FIT_COUNT`; predicts the training mean."
+mutable struct CountFit <: MMI.Deterministic end
+const FIT_COUNT = Ref(0)
+function MMI.fit(::CountFit, verbosity, X, y)
+    FIT_COUNT[] += 1
+    return (sum(y) / length(y), nothing, NamedTuple())
+end
+MMI.predict(::CountFit, fitresult, Xnew) = fill(fitresult, length(Tables.rows(Xnew)))
+MMI.input_scitype(::Type{CountFit}) = MMI.Table(MMI.Continuous)
+MMI.target_scitype(::Type{CountFit}) = AbstractVector{MMI.Continuous}
+
+"""
+Predicts `y_lag_1 + 1`, but `NaN` once `y_lag_1 > limit`: a recursive forecast
+that diverges at a chosen step.
+"""
+mutable struct NaNAbove <: MMI.Deterministic
+    limit::Float64
+end
+MMI.fit(::NaNAbove, verbosity, X, y) = (nothing, nothing, NamedTuple())
+function MMI.predict(m::NaNAbove, fitresult, Xnew)
+    v = Float64.(collect(Tables.getcolumn(Xnew, :y_lag_1)))
+    return [x > m.limit ? NaN : x + 1.0 for x in v]
+end
+MMI.input_scitype(::Type{NaNAbove}) = MMI.Table(MMI.Continuous)
+MMI.target_scitype(::Type{NaNAbove}) = AbstractVector{MMI.Continuous}
+
+"""
+Mean model that predicts `NaN` when it was trained on exactly `len` targets: a
+`Direct` step model that diverges at a chosen step.
+"""
+mutable struct NaNAtLength <: MMI.Deterministic
+    len::Int
+end
+MMI.fit(::NaNAtLength, verbosity, X, y) = ((sum(y) / length(y), length(y)), nothing,
+                                           NamedTuple())
+MMI.predict(m::NaNAtLength, fitresult, Xnew) =
+    fill(fitresult[2] == m.len ? NaN : fitresult[1], length(Tables.rows(Xnew)))
+MMI.input_scitype(::Type{NaNAtLength}) = MMI.Table(MMI.Continuous)
+MMI.target_scitype(::Type{NaNAtLength}) = AbstractVector{MMI.Continuous}
+
+"Throws in `fit` or in `predict`: an `ArgumentError` (`bad=false`) or an `ErrorException`."
+mutable struct ThrowIn <: MMI.Deterministic
+    where_::Symbol
+    bad::Bool
+end
+_throw(m::ThrowIn) = m.bad ? error("boom") : throw(ArgumentError("boom"))
+function MMI.fit(m::ThrowIn, verbosity, X, y)
+    m.where_ === :fit && _throw(m)
+    return (sum(y) / length(y), nothing, NamedTuple())
+end
+function MMI.predict(m::ThrowIn, fitresult, Xnew)
+    m.where_ === :predict && _throw(m)
+    return fill(fitresult, length(Tables.rows(Xnew)))
+end
+MMI.input_scitype(::Type{ThrowIn}) = MMI.Table(MMI.Continuous)
+MMI.target_scitype(::Type{ThrowIn}) = AbstractVector{MMI.Continuous}
+
 "Declares that it only takes Count inputs, unlike the package's Continuous ones."
 mutable struct CountInput <: MMI.Deterministic end
 MMI.input_scitype(::Type{CountInput}) = MMI.Table(MMI.Count)

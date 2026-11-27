@@ -67,3 +67,128 @@ function _support_message(c::Int, h::Int, depth::Int, levels, who::AbstractStrin
            "central levels up to $top. Pass levels <= $top, $(steps)or fit with " *
            "holdout >= $(need + h - 1)."
 end
+
+# Bounds the history copies that one call holds.
+const _CALIBRATION_STATES = 4096
+
+# Single series only; a panel needs its own messages.
+function _check_rows(iv::SplitConformal, fc::Forecaster{M,S,Nothing},
+                     groups) where {M,S}
+    c, mh = iv.holdout, minhistory(fc)
+    n = nrows(only(groups)[2])
+    n ≥ c + mh + 1 && return nothing
+    low = n - mh - 1
+    lower = low ≥ 9 ? " or lower holdout to $low or less" : ""
+    hist = iszero(dropped_rows(fc.transform)) ? "history " : ""
+    throw(ArgumentError(
+        "the data has $n rows. intervals=$iv holds out the last $c rows to measure " *
+        "errors and leaves $(max(n - c, 0)) to train the calibration model, but " *
+        "$(_history_who(fc)) more than $mh $(hist)rows. Provide at least " *
+        "$(c + mh + 1) rows$lower."))
+end
+
+_check_head(iv, fc, ::Recursive, usable, rs) = nothing
+function _check_head(iv::SplitConformal, fc::Forecaster{M,S,Nothing}, s::Direct,
+                     usable, rs) where {M,S}
+    c, mh, D = iv.holdout, minhistory(fc), s.max_horizon
+    r = only(rs)
+    r - mh ≥ D && return nothing
+    n = length(only(usable).t)
+    low = n - mh - D
+    lower = low ≥ 9 ? "Lower holdout to $low or less, use" : "Use"
+    throw(ArgumentError(
+        "intervals=$iv leaves $r of the $n rows to train the calibration model, " *
+        "$(r - mh) after the feature set's $mh history rows, but $s needs $D. " *
+        "$lower Direct($(r - mh)) or a shorter max_horizon, or provide at least " *
+        "$(c + mh + D) rows."))
+end
+
+_published_states(usable, step0s) = SeriesState[
+    SeriesState(p.id, p.yraw, p.t[end], p.t[1], length(p.t), p.z, p.state, s0)
+    for (p, s0) in zip(usable, step0s)]
+
+function _nonfinite_error(fc, p, o, j, v)
+    who = fc.id === nothing ? "" : "series $(fc.id)=$(repr(p.id)): "
+    return ArgumentError(
+        "$(who)the calibration forecast from origin $(p.t[o]) (row $(p.rows[o])) is $v " *
+        "at step $j. A non-finite forecast cannot give an interval. Check the " *
+        "model's hyperparameters and the training data; a smaller holdout " *
+        "calibrates fewer steps.")
+end
+
+# One _forecast_states call serves the origins `is`.
+function _calibrate_chunk!(E, iv, fc, head, usable, step0s, is, depth)
+    c = iv.holdout
+    states = SeriesState[]
+    hs = Int[]
+    for (k, p) in enumerate(usable), i in is
+        o = length(p.t) - c + i - 1
+        yp = p.yraw[1:o]
+        _, z, state = _transform_table(fc, NamedTuple{(fc.target,)}((yp,)), yp)
+        push!(states, SeriesState(p.id, p.yraw, p.t[o], p.t[1], o, z, state, step0s[k]))
+        push!(hs, min(c - i + 1, depth))
+    end
+    grids = _grids(states, fc.freq, hs)
+    preds = try
+        _forecast_states(head, states, hs, grids, nothing)
+    catch err
+        err isa ArgumentError || rethrow()
+        p, n = first(usable), length(first(usable).t)
+        a, b = (p.rows[n - c + i - 1] for i in (first(is), last(is)))
+        throw(ArgumentError("intervals=$iv, calibrating origins at rows $a to $b: " *
+                            err.msg))
+    end
+    m = 0
+    for (k, p) in enumerate(usable), i in is
+        m += 1
+        o = length(p.t) - c + i - 1
+        for j in 1:hs[m]
+            v = preds[m][j]
+            isfinite(v) || throw(_nonfinite_error(fc, p, o, j, v))
+            E[k][i, j] = p.yraw[o + j] - v
+        end
+    end
+    return nothing
+end
+
+"""
+    _calibrate(iv, fc, groups; chunk) -> (head, triangles, states)
+
+Fit the head model on the rows before the common cutoff and measure its errors at the
+last `iv.holdout` origins of every series. `triangles[k]` is a `holdout x depth` matrix,
+row `i` the origin `i` rows into the holdout and column `j` step `j`; entries without an
+actual stay `NaN`. `states` are the full-history states the head forecasts from.
+`chunk` is the number of origins per `_forecast_states` call.
+"""
+function _calibrate(iv::SplitConformal, fc::Forecaster, groups;
+                    chunk::Integer=max(1, _CALIBRATION_STATES ÷ length(groups)))
+    c, mh = iv.holdout, minhistory(fc)
+    _check_rows(iv, fc, groups)
+    usable, short = _prepare_all(fc, groups)
+    _warn_short(fc, short)
+    cutoff = minimum(p.t[length(p.t) - c + 1] for p in usable)
+    rmap = Dict(p.id => searchsortedfirst(p.t, cutoff) - 1 for p in usable)
+    rs = [rmap[p.id] for p in usable]
+    _check_head(iv, fc, fc.strategy, usable, rs)
+    head_groups = [(id, row_subset(sub, 1:rmap[id]), rows[1:rmap[id]])
+                   for (id, sub, rows) in groups if get(rmap, id, 0) > mh]
+    head_tbl = _vcat_frames([g[2] for g in head_groups])
+    head_base = reduce(vcat, [g[3] for g in head_groups])
+    local head, step0s
+    try
+        origin = _fit_origin(fc, first(_prepare_all(fc, head_groups)))
+        step0s = [_step0(fc, p.tz, origin) for p in usable]
+        head = _fit_point(fc, head_tbl, head_base)
+    catch err
+        err isa ArgumentError || rethrow()
+        throw(ArgumentError("intervals=$iv, fitting the calibration model on the " *
+                            "first $(sum(rs)) rows: " * err.msg))
+    end
+    depth = _depth(fc.strategy, c)
+    E = [fill(NaN, c, depth) for _ in usable]
+    for lo in 1:chunk:c
+        is = lo:min(lo + chunk - 1, c)
+        _calibrate_chunk!(E, iv, fc, head, usable, step0s, is, depth)
+    end
+    return head, E, _published_states(usable, step0s)
+end
