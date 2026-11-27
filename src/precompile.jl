@@ -36,6 +36,15 @@ function _precompile_workload()
         fc = Forecaster(_PrecompileMean(); features=dfeats, freq=Day(1), strategy)
         forecast(fit(fc, daily), 3; future)
     end
+    csp = ConformalSeasonalPool(12; freq=Month(1))
+    cf = fit(csp, single)
+    forecast(cf, 3; levels=(80, 95))
+    forecast_samples(cf, 3)
+    backtest(csp, single; horizon=3, windows=2, levels=(95,),
+             metrics=(crps, Coverage(95), pinball_loss, IntervalWidth(95)))
+    cspp = ConformalSeasonalPool(12; freq=Month(1), id=:unique_id)
+    forecast(fit(cspp, panel), 3; levels=(95,))
+    backtest(cspp, panel; horizon=3, windows=2, levels=(95,), metrics=(crps,))
     return nothing
 end
 

@@ -170,6 +170,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The precompile workload now also runs `ConformalSeasonalPool` interval forecasts
+  (`forecast` with `levels`, `forecast_samples`, and `backtest` with sample
+  metrics, for a single series and a panel). On our machine (Julia 1.12.5), in a
+  fresh session, the first interval `forecast` plus `backtest` take 0.06 s instead
+  of 3.7 s, a first panel interval `forecast` plus `backtest` 0.03 s instead of
+  2.1 s, and a cold plain `SeasonalNaive` fit, forecast and backtest 0.9 s instead
+  of 1.2 s. Loading is unchanged (+0.01 s). Precompiling the package, once per
+  install or update, takes about 7 s longer (48 s instead of 41 s on a loaded
+  machine with two cores).
 - The error for a metric whose `metric_inputs` is not a known kind now names all three,
   `Point()`, `Scaled()` and `Samples()`.
 - `:sample` joins the column names a time or id column may not use (`forecast_samples`
