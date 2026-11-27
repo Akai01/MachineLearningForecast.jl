@@ -536,7 +536,19 @@ function _fit_series(fc::Forecaster, p, origin)
     return SeriesFrame(state, X, y)
 end
 
-function _fit_spec(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl))
+# An interval method may fit more than the point model.
+_fit_spec(fc::Forecaster, tbl::NamedTuple, base=1:nrows(tbl)) =
+    _fit_spec(fc.intervals, fc, tbl, base)
+_fit_spec(iv, fc, tbl, base) = _fit_point(fc, tbl, base)
+_fit_fold(iv, fc, tbl, base) = _fit_point(fc, tbl, base)
+
+# No-ops unless an interval method limits levels or rows.
+_check_support(iv, f, lv, h, who) = nothing
+_check_calibratable(iv, fc, tbl) = nothing
+_check_fold_rows(iv, fc, origins, t_all) = nothing
+_fold_train_rows(iv, fc, groups, cut, train_rows, k, origin) = train_rows
+
+function _fit_point(fc::Forecaster, tbl::NamedTuple, base)
     groups = _series_groups(fc, tbl, base)
     usable, short = _prepare_all(fc, groups)
     _warn_short(fc, short)
@@ -598,6 +610,7 @@ function forecast(f::FittedForecaster, h::Integer; future=nothing, levels=nothin
     levels === nothing && return _forecast(f, hs, future)
     lv = _check_levels(levels)
     _require_intervals(f.spec, "forecast with levels")
+    _check_support(f.spec.intervals, f, lv, Int(h), "forecast horizon")
     out, draws = _forecast_samples(f, hs, future)
     cols = _interval_columns(reduce(vcat, draws), lv)
     return merge(out, _level_table(keys(out), lv, cols))

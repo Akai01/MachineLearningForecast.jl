@@ -254,8 +254,10 @@ function backtest(fc::Forecaster, data; horizon::Integer,
     _check_horizon(fc, horizon)
     named = _named_metrics(metrics)
     lv = _check_levels(levels)
-    _wants_samples(lv, named) &&
+    if _wants_samples(lv, named)
         _require_intervals(fc, "backtest with levels or a sample-based metric")
+        _check_support(fc.intervals, fc, lv, Int(horizon), "backtest horizon")
+    end
     tbl = normalize_table(data)
     return _backtest_spec(fc, tbl, horizon, scheme, named, lv)
 end
@@ -283,6 +285,7 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, scheme, metri
     validate_time_column(t_all, fc.time, fc.freq)
     y_all = target_vector(tbl, fc.target)
     origins = _origins(scheme, nrows(tbl), horizon, fc)
+    _check_fold_rows(fc.intervals, fc, origins, t_all)
     exogcols = exogenous_columns(fc.features)
 
     T = eltype(t_all)
@@ -299,7 +302,8 @@ function _backtest_spec(fc::Forecaster{M,S,Nothing}, tbl, horizon, scheme, metri
     level_cols = [Float64[] for _ in 1:(2 * length(lv))]
     need_S = _wants_samples(lv, metrics)
     for (k, o) in enumerate(origins)
-        fitted = fit(fc, row_subset(tbl, 1:o))
+        sub = row_subset(tbl, 1:o)
+        fitted = need_S ? fit(fc, sub) : _fit_fold(fc.intervals, fc, sub, 1:o)
         nd = isempty(exogcols) ? nothing :
              row_subset(tbl[Tuple([fc.time; exogcols])], (o + 1):(o + horizon))
         fcast, draws = need_S ?

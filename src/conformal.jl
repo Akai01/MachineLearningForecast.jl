@@ -353,6 +353,7 @@ draws.y_hat[draws.sample .== 1]   # the first draw at each step
 function forecast_samples(f::FittedForecaster, h::Integer; future=nothing)
     _check_h(h)
     _require_intervals(f.spec, "forecast_samples")
+    _check_support(f.spec.intervals, f, nothing, Int(h), "forecast_samples horizon")
     out, draws = _forecast_samples(f, fill(Int(h), nseries(f)), future)
     S = reduce(vcat, draws)
     n, B = size(S)

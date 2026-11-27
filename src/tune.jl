@@ -396,6 +396,7 @@ end
 function _evaluate_candidate(fc, cand, tbl, horizon, scheme, metric)
     try
         cfc = reconstruct(fc; cand...)
+        _check_calibratable(cfc.intervals, cfc, tbl)
         res = backtest(cfc, tbl; horizon, _scheme_kwargs(scheme)...,
                        metrics=(score=metric,))
         s = summarize(res)

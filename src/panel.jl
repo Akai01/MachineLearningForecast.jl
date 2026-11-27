@@ -279,8 +279,11 @@ function _backtest_panel(fc::Forecaster, tbl::NamedTuple, horizon, scheme, metri
 
     for (k, cut) in enumerate(cuts)
         train_rows = _rows_before(cut, ids, t_all)
-        fitted = _fit_spec(fc, row_subset(tbl, train_rows), train_rows)
         origin = _fold_origin(cut)
+        train_rows = _fold_train_rows(fc.intervals, fc, groups, cut, train_rows, k, origin)
+        sub = row_subset(tbl, train_rows)
+        fitted = need_S ? _fit_spec(fc, sub, train_rows) :
+                 _fit_fold(fc.intervals, fc, sub, train_rows)
         hs, nd = if isempty(exogcols)
             fill(Int(horizon), nseries(fitted)), nothing
         else
