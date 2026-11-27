@@ -410,7 +410,7 @@ Reindex your data or resample before fitting.
        horizon=28, initial=730)
   ```
 
-  The other 51 exports are collision-free. Note that MachineLearningForecast's `mae`/`rmse`
+  The other 52 exports are collision-free. Note that MachineLearningForecast's `mae`/`rmse`
   are plain functions of two vectors, whereas MLJ's are measure objects; they
   are not interchangeable, which is exactly why the choice must be explicit.
 - **Multiple dispatch over configuration flags**: strategies, features, and

@@ -405,7 +405,9 @@
     end
 
     @testset "the docs state that there is no coverage guarantee" begin
-        for doc in (string(@doc(C.PoolIntervals)), string(@doc(ConformalSeasonalPool)))
+        for doc in (string(@doc(C.PoolIntervals)), string(@doc(ConformalSeasonalPool)),
+                    string(@doc(SplitConformal)))
+            doc = replace(doc, r"\s+" => " ")
             @test occursin("no coverage guarantee", doc)
             @test !occursin(r"\bvalid\b|\bguaranteed\b", doc)
         end

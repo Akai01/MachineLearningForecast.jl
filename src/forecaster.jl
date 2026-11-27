@@ -36,9 +36,12 @@ Immutable forecasting specification.
   fitted per series on the training history only, and forecasts are mapped
   back to the original scale. The default [`NoTransform`](@ref) leaves the
   target as given.
-- `intervals`: `nothing` (the default), or a `PoolIntervals` interval method (public,
-  not exported: `using MachineLearningForecast: PoolIntervals`): Conformal Seasonal
-  Pools around the seasonal naive forecast. It is accepted only with a
+- `intervals`: `nothing` (the default), or an interval method.
+  [`SplitConformal`](@ref)`(holdout=60)` works with any model, features, strategy and
+  transform; the forecast then comes from a model fitted without the last `holdout` rows,
+  so `y_hat` differs from a forecaster without `intervals`. `PoolIntervals` (public, not
+  exported: `using MachineLearningForecast: PoolIntervals`) is Conformal Seasonal Pools
+  around the seasonal naive forecast. It is accepted only with a
   [`SeasonalNaive`](@ref) model of the same period, exactly `FeatureSet(Lag(period))`,
   `Recursive()` and no transform; [`ConformalSeasonalPool`](@ref) builds that setup.
 
@@ -254,7 +257,8 @@ use, and `transform_state` is what [`untransform`](@ref) needs; without a
 transform, `z_history` is `y_history`. `step0` is the context's step index
 (`ctx.step`, see [`FeatureContext`](@ref)) of the first `z_history` value: `0`
 for a single series, and in a panel the steps from the earliest usable series'
-first (transformed) timestamp.
+first (transformed) timestamp. `n_train` is the length of the history. With
+[`SplitConformal`](@ref) the model was fitted on fewer rows, those before the holdout.
 
 Read them off a fitted panel forecaster via `f.series`; for a single-series
 forecaster the same values are reachable directly as `f.y_history`, `f.t_last`,
@@ -590,19 +594,23 @@ last training timestamp. `future` must then carry the id column too and cover
 every series at each of its `h` future timestamps.
 
 With `levels`, percentages in (1, 100) such as `(80, 95)`, and a forecaster with an interval
-method ([`ConformalSeasonalPool`](@ref)), the table gains the columns `lo_<L>` and `hi_<L>`
-after `:y_hat`, in the order the levels are given (`lo_80`, `hi_80`, `lo_95`, `hi_95`; a
-level of 99.5 gives `lo_99_5`): the central `L` % interval of the predictive samples, with
-Hyndman and Fan type 6 sample quantiles (our choice); a level above `100 (samples - 1) /
-(samples + 1)`, about 98 for the default 100 samples, gives the sample minimum and maximum.
-`:y_hat` stays the point forecast, not a sample median. The intervals are empirical and have
-no coverage guarantee. They come from draws seeded by the method's `rng`: each series draws
-from its own copy of it, so every series starts from the same random numbers (with the
-default `Xoshiro` they almost always stay aligned), repeated calls agree on the same Julia
-version (use `StableRNGs.StableRNG` for draws that also reproduce across versions), and a
-series' draws do not depend on which other series are fitted or on their order. Draws of
-different series are therefore dependent: do not combine them by sample number (e.g. to
-sum a panel). See [`forecast_samples`](@ref) for the draws.
+method ([`SplitConformal`](@ref) or [`ConformalSeasonalPool`](@ref)), the table gains
+the columns `lo_<L>` and `hi_<L>` after `:y_hat`, in the order the levels are given
+(`lo_80`, `hi_80`, `lo_95`, `hi_95`; a level of 99.5 gives `lo_99_5`): the central `L` %
+interval of the predictive samples, with Hyndman and Fan type 6 sample quantiles (our
+choice). `:y_hat` stays the point forecast, not a sample median. The intervals are
+empirical and have no coverage guarantee. [`SplitConformal`](@ref) refuses a level that
+its errors cannot support and a horizon that leaves too few errors; its samples are
+error paths and use no rng, and with it `y_hat` comes from the model fitted without the
+last `holdout` rows. For `PoolIntervals`, a level above `100 (samples - 1) /
+(samples + 1)`, about 98 for the default 100 samples, gives the sample minimum and
+maximum, and the intervals come from draws seeded by the method's `rng`: each series
+draws from its own copy of it, so every series starts from the same random numbers (with
+the default `Xoshiro` they almost always stay aligned), repeated calls agree on the same
+Julia version (use `StableRNGs.StableRNG` for draws that also reproduce across versions),
+and a series' draws do not depend on which other series are fitted or on their order.
+Draws of different series are therefore dependent: do not combine them by sample number
+(e.g. to sum a panel). See [`forecast_samples`](@ref) for the draws.
 
 # Example
 ```julia

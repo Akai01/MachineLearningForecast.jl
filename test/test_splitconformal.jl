@@ -1879,3 +1879,19 @@ end
         @test endswith(sprint(show, f.spec), ", intervals=SplitConformal(holdout=12))")
     end
 end
+
+@testset "SplitConformal is exported and documented" begin
+    @test :SplitConformal in names(MachineLearningForecast)
+    doc = replace(string(@doc(SplitConformal)), r"\s+" => " ")
+    @test occursin("The published forecast comes from the head model", doc)
+    @test occursin("differs from a forecaster without `intervals`", doc)
+    @test occursin("no coverage guarantee", doc)
+    @test !occursin(r"\bvalid\b|\bguaranteed\b", doc)
+    for d in (@doc(Forecaster), @doc(forecast), @doc(forecast_samples), @doc(SeriesState),
+              @doc(MachineLearningForecast))
+        @test occursin("SplitConformal", string(d))
+    end
+    fc = Forecaster(TestModels.LinAR(0.5, 1.0); features=FeatureSet(Lag(1)),
+                    freq=Month(1), intervals=SplitConformal(holdout=60))
+    @test occursin("intervals=SplitConformal(holdout=60)", sprint(show, fc))
+end

@@ -137,6 +137,7 @@ MachineLearningForecast.Scaled
 ### Probabilistic forecasts
 
 ```@docs
+SplitConformal
 ConformalSeasonalPool
 forecast_samples
 MachineLearningForecast.PoolIntervals

@@ -59,15 +59,15 @@ _mixture_weight(::AdaptiveWeight, m::Int, npool::Int) =
                   samples=100, rng=Random.Xoshiro(42))
 
 The interval method of Conformal Seasonal Pools (CSP; Manokhin 2026, arXiv:2605.03789),
-the value of the `intervals` field of a [`Forecaster`](@ref). For each series and horizon
-it draws `samples` values from a mixture: with probability `w_h` (`weight`), a past value
-from the same position in the season, recent ones more likely; otherwise the point
-forecast plus a signed seasonal difference `y[t] - y[t - period]` drawn uniformly from the
-last `calibration` share of the series. The defaults are the paper's. `period` is the
-season length in steps of `freq` (1 for none). Build the paired forecaster with
-[`ConformalSeasonalPool`](@ref); a hand-built `Forecaster` accepts this method only with a
-[`SeasonalNaive`](@ref)`(period)` model, exactly `FeatureSet(Lag(period))`, `Recursive()`
-and no transform.
+one of the interval methods of the `intervals` field of a [`Forecaster`](@ref). For each
+series and horizon it draws `samples` values from a mixture: with probability `w_h`
+(`weight`), a past value from the same position in the season, recent ones more likely;
+otherwise the point forecast plus a signed seasonal difference `y[t] - y[t - period]`
+drawn uniformly from the last `calibration` share of the series. The defaults are the
+paper's. `period` is the season length in steps of `freq` (1 for none). Build the paired
+forecaster with [`ConformalSeasonalPool`](@ref); a hand-built `Forecaster` accepts this
+method only with a [`SeasonalNaive`](@ref)`(period)` model, exactly
+`FeatureSet(Lag(period))`, `Recursive()` and no transform.
 
 The seasonal pool weighs the value at time `t` by `exp(-recency * (T - t))`, with `T - t`
 in time steps of `freq` (so the weights fall by `exp(-recency * period)` per season).
@@ -335,15 +335,23 @@ end
     forecast_samples(f::FittedForecaster, h::Integer; future=nothing) -> NamedTuple
 
 The predictive samples behind `forecast(f, h; levels=...)`, as a long columntable: the id
-column (for a panel), the time column, `:sample` (1 to the method's `samples`) and
-`:y_hat`, one row per sample, `h * samples` rows per series. Needs a forecaster with an
-interval method ([`ConformalSeasonalPool`](@ref)). The draws are the ones the intervals
-are read from, and repeated calls give the same ones on the same Julia version. Each
-series draws from its own copy of the method's `rng`, so every series starts from the same
-random numbers: draws of different series are dependent (and with the default `Xoshiro`
-they almost always stay aligned), so do not combine them by sample number (e.g. to sum a
-panel). Horizons are drawn independently, so a sample number does not trace a path across
-steps.
+column (for a panel), the time column, `:sample` and `:y_hat`, one row per sample. Needs a
+forecaster with an interval method ([`SplitConformal`](@ref) or
+[`ConformalSeasonalPool`](@ref)). The samples are the ones the intervals are read from,
+and repeated calls give the same ones on the same Julia version.
+
+With [`SplitConformal`](@ref), `:sample` runs from 1 to `K = holdout - h + 1`, there are
+`h * K` rows per series, and sample `i` is the error path of calibration origin `i` (1 is
+the oldest) added to the point forecast, so a sample number does trace a path across
+steps. No rng is used and the samples are deterministic. In a panel, sample `i` of series
+that end on different dates comes from different dates.
+
+With `PoolIntervals`, `:sample` runs from 1 to the method's `samples`, with `h * samples`
+rows per series. Each series draws from its own copy of the method's `rng`, so every
+series starts from the same random numbers: draws of different series are dependent (and
+with the default `Xoshiro` they almost always stay aligned), so do not combine them by
+sample number (e.g. to sum a panel). Horizons are drawn independently, so a sample number
+does not trace a path across steps.
 
 # Example
 ```julia

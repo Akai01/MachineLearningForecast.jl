@@ -19,8 +19,10 @@ interface: any MLJ `Deterministic` regressor is a valid base model, and a
   `import MachineLearningForecast: fit_transform, untransform, dropped_rows`).
 - Panel (multi-series) forecasting: set `id` on [`Forecaster`](@ref) to fit
   one global model across many series ([`nseries`](@ref), [`SeriesState`](@ref)).
-- Probabilistic forecasts: [`ConformalSeasonalPool`](@ref) builds the training-free
-  forecaster of Conformal Seasonal Pools around [`SeasonalNaive`](@ref);
+- Probabilistic forecasts: `intervals=`[`SplitConformal`](@ref)`(holdout=60)` gives
+  intervals and error paths for any model, from a model fitted without the last
+  `holdout` rows; [`ConformalSeasonalPool`](@ref) builds the training-free forecaster of
+  Conformal Seasonal Pools around [`SeasonalNaive`](@ref);
   `forecast(f, h; levels=(80, 95))` adds interval columns and
   [`forecast_samples`](@ref) returns the draws; [`crps`](@ref), [`Coverage`](@ref) and
   the other scores measure them.
@@ -54,7 +56,7 @@ export Forecaster, FittedForecaster, fit, forecast, forecast_samples, backtest,
        ForecastStrategy, Recursive, Direct,
        mae, rmse, mape, smape, mase, rmsse, Mase, Rmsse,
        crps, fair_crps, pinball_loss, Coverage, IntervalWidth,
-       SeasonalNaive, ConformalSeasonalPool,
+       SeasonalNaive, ConformalSeasonalPool, SplitConformal,
        tune, TuneResult, TuningStrategy, GridSearch, RandomSearch,
        SeriesState, nseries,
        TargetTransform, NoTransform, MeanScale, LastScale,

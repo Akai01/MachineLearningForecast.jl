@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `SplitConformal(holdout=c)` (exported): intervals and samples for any MLJ model. The
+  last `holdout` rows of each series measure the model's own forecast errors, and the
+  forecast comes from the model fitted without them, so `y_hat` differs from a forecaster
+  without `intervals`. `fit` costs the model fits of a plain fit (1 under `Recursive`,
+  `max_horizon` under `Direct`) plus the error triangle. The method has no coverage
+  guarantee: measure it with `Coverage` in a `backtest`.
 - Documentation of probabilistic forecasts: a page "Probabilistic forecasts" (a worked
   example, how Conformal Seasonal Pools work, levels and columns, the draws and the random
   generator, the scores, panels, the settings and what is not promised), a README section,
