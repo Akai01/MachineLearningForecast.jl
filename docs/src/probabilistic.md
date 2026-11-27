@@ -122,8 +122,9 @@ forecast(fitted, 12; levels = 0.95)
 
 `forecast` and `backtest` add `lo_<L>` and `hi_<L>` after `y_hat`, in the order the levels
 are given: `lo_80`, `hi_80`, `lo_95`, `hi_95`. A level with a decimal part uses an
-underscore: `99.5` gives `lo_99_5` and `hi_99_5`. A level that would give the name of an
-existing column (for example a time column called `lo_95`) is an error.
+underscore: `99.5` gives `lo_99_5` and `hi_99_5`. A Float32 level counts as it prints
+(`Float32(99.9)` is 99.9). A level that would give the name of an existing column (for
+example a time column called `lo_95`) is an error.
 
 The interval is the central one: the sample quantiles of the step's `B` draws at
 `(100 - L) / 200` and `(100 + L) / 200`. The quantile is Hyndman & Fan (1996) type 6, which

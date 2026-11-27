@@ -346,6 +346,14 @@ end
         @test metric_name(Coverage(95)) == :coverage_95
         @test metric_name(Coverage(2.5)) == :coverage_2_5
         @test metric_name(IntervalWidth(99.5)) == :interval_width_99_5
+        @test metric_name(Coverage(Float32(99.9))) == :coverage_99_9
+        @test metric_name(IntervalWidth(Float32(99.9))) == :interval_width_99_9
+        @test metric_name(Coverage(95f0)) == :coverage_95 == metric_name(Coverage(95.0))
+        @test Coverage(Float32(99.9)).level === 99.9
+        @test metric_name(Coverage(Float16(99.5))) == :coverage_99_5
+        @test metric_name(Coverage(Float16(99.9))) == :coverage_99_9
+        @test metric_name(Coverage(big"99.9")) == :coverage_99_9
+        @test metric_name(Coverage(199 // 2)) == :coverage_99_5
 
         pct(got) = "an interval level is a percentage in (1, 100), got $got. Pass e.g. " *
                    "95 for a 95% interval, not 0.95."
@@ -355,6 +363,8 @@ end
         @test_throws pct("NaN") Coverage(NaN)
         @test_throws pct("Inf") IntervalWidth(Inf)
         @test_throws pct("-5") Coverage(-5)
+        @test_throws pct("0.95f0") Coverage(0.95f0)
+        @test_throws pct("100.0f0") IntervalWidth(100f0)
         @test_throws pct("true") Coverage(true)
         @test_throws pct("\"95\"") Coverage("95")
 

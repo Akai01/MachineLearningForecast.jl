@@ -413,6 +413,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A Float32 interval level such as `levels=Float32(99.9)` named its columns and
+  metrics `lo_99_9000015258789`, `coverage_99_9000015258789` and so on, because
+  widening to Float64 exposed the binary noise. A non-Float64 floating-point level
+  (Float32, Float16, BigFloat) is now read through its shortest decimal string, so
+  it is named and used as 99.9; for `Float32(99.9)` the level moves by 1.5e-6.
+  Integer, Float64 and Rational levels are unchanged. `forecast`, `backtest`,
+  `Coverage` and `IntervalWidth` agree because they share one check.
 - A time column or an id column named `:fold` crashed `backtest` with
   "duplicate field name in NamedTuple", because `:fold` is a column of the
   results but was missing from the reserved names. `Forecaster` now refuses it

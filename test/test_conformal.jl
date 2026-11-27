@@ -658,6 +658,35 @@
         @test summarize(sc).metric == [:score, :cover]
     end
 
+    @testset "a Float32 level is named and used as it prints" begin
+        spec = csp()
+        data = (ds=monthly, y=yseas)
+        f = fit(spec, data)
+        out = forecast(f, 6; levels=Float32(99.9))
+        @test keys(out) == (:ds, :y_hat, :lo_99_9, :hi_99_9)
+        @test out == forecast(f, 6; levels=99.9)
+        @test forecast(f, 6; levels=(95f0, 80.5f0)) == forecast(f, 6; levels=(95, 80.5))
+        @test keys(forecast(f, 6; levels=95f0)) == (:ds, :y_hat, :lo_95, :hi_95)
+        h5 = forecast(f, 6; levels=Float16(99.5))
+        @test keys(h5) == (:ds, :y_hat, :lo_99_5, :hi_99_5)
+        @test keys(forecast(f, 6; levels=big"99.9")) == (:ds, :y_hat, :lo_99_9, :hi_99_9)
+        @test keys(forecast(f, 6; levels=199 // 2)) == (:ds, :y_hat, :lo_99_5, :hi_99_5)
+        @test C._check_level(Float32(99.9)) === 99.9
+        @test C._check_level(95) === 95.0 && C._check_level(99.9) === 99.9
+        @test C._check_levels((Float32(99.9), 80)) == [99.9, 80.0]
+        @test_throws "levels repeats a level" forecast(f, 3; levels=(95f0, 95))
+        @test_throws "an interval level is a percentage in (1, 100), got 0.95f0. Pass " *
+                     "e.g. 95 for a 95% interval, not 0.95." forecast(f, 3; levels=0.95f0)
+        @test_throws "got 100.0f0." forecast(f, 3; levels=100f0)
+        r = backtest(spec, data; horizon=6, windows=2, levels=Float32(99.9),
+                     metrics=(crps, Coverage(Float32(99.9)), IntervalWidth(Float32(99.9))))
+        @test keys(r.forecasts)[end - 1:end] == (:lo_99_9, :hi_99_9)
+        @test summarize(r).metric == [:crps, :coverage_99_9, :interval_width_99_9]
+        d = backtest(spec, data; horizon=6, windows=2, levels=99.9,
+                     metrics=(crps, Coverage(99.9), IntervalWidth(99.9)))
+        @test r.forecasts == d.forecasts && r.scores == d.scores
+    end
+
     @testset "ConformalSeasonalPool(1) backtest" begin
         s1 = ConformalSeasonalPool(1; freq=Month(1), rng=StableRNG(3))
         data = (ds=monthly, y=yseas)

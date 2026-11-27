@@ -431,8 +431,13 @@ function _check_level(level)
     level isa Real && 1 < level < 100 || throw(ArgumentError(
         "an interval level is a percentage in (1, 100), got $(repr(level)). Pass e.g. " *
         "95 for a 95% interval, not 0.95."))
-    return Float64(level)
+    return _level_float(level)
 end
+
+# Shortest decimal string, so a Float32 99.9 stays 99.9.
+_level_float(L::Real) = Float64(L)
+_level_float(L::AbstractFloat) = parse(Float64, string(L))
+_level_float(L::Float64) = L
 
 _level_label(L::Float64) = isinteger(L) ? string(Int(L)) : replace(string(L), "." => "_")
 
@@ -564,7 +569,8 @@ interval between the sample quantiles at `(100 - level) / 200` and `(100 + level
 Callable as `Coverage(95)(y, S)`; named `:coverage_95` in the `scores` table of a
 [`backtest`](@ref). A calibrated forecast scores close to `level / 100`; higher is not
 better, so it is not a score to minimise. `level` is a percentage in (1, 100), so
-`Coverage(0.95)` is an error.
+`Coverage(0.95)` is an error. A Float32 level counts as it prints:
+`Coverage(Float32(99.9))` is `:coverage_99_9`.
 
 # Example
 ```julia
